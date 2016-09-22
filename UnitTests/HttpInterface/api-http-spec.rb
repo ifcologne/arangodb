@@ -26,7 +26,7 @@ describe ArangoDB do
       doc = ArangoDB.log_post("#{prefix}-post-binary-data", "/_api/document?collection=_routing", :body => body)
       doc.code.should eq(202)
       
-      ArangoDB.post("/_admin/routing/reload", :body => "")
+      ArangoDB.log_post("#{prefix}-post-binary-data", "/_admin/routing/reload", :body => "")
     end
 
     after do
@@ -156,7 +156,7 @@ describe ArangoDB do
 
         # run a HTTP HEAD query on the existing document, with wrong precondition
         cmd = "/_api/document/" + did
-        doc = ArangoDB.log_head("#{prefix}-head-check-documentq", cmd, :header => { :"if-match" => "1" })
+        doc = ArangoDB.log_head("#{prefix}-head-check-document", cmd, :header => { :"if-match" => "1" })
 
         doc.code.should eq(200)
         doc.response.body.should be_nil
@@ -242,7 +242,7 @@ describe ArangoDB do
 
         # only run the following test when using SSL
         if not ArangoDB.base_uri =~ /^https:/
-          uri = URI.parse(ArangoDB.base_uri + "/_db/_system/_admin/aardvark/standalone.html")
+          uri = URI.parse(ArangoDB.base_uri + "/_db/_system/_admin/aardvark/index.html")
           http = Net::HTTP.new(uri.host, uri.port)
 
           request = Net::HTTP::Get.new(uri.request_uri)
@@ -255,7 +255,7 @@ describe ArangoDB do
       end
 
       it "checks handling of an request, without gzip support" do
-        cmd = "/_admin/aardvark/standalone.html"
+        cmd = "/_admin/aardvark/index.html"
         doc = ArangoDB.log_get("admin-interface-get", cmd, :headers => { "Accept-Encoding" => "" }, :format => :plain)
 
         # check response code
@@ -292,16 +292,28 @@ describe ArangoDB do
         doc.headers['access-control-allow-origin'].should eq("null")
         doc.headers['access-control-allow-methods'].should be_nil
         doc.headers['access-control-allow-headers'].should be_nil
-        doc.headers['access-control-allow-credentials'].should eq("true")
+        doc.headers['access-control-allow-credentials'].should eq("false")
         doc.headers['access-control-max-age'].should be_nil
       end
-
+      
       it "checks handling of a CORS GET request" do
         cmd = "/_api/version"
         doc = ArangoDB.log_get("#{prefix}-cors", cmd, { :headers => { "Origin" => "http://127.0.0.1" } } )
 
         doc.code.should eq(200)
         doc.headers['access-control-allow-origin'].should eq("http://127.0.0.1")
+        doc.headers['access-control-allow-methods'].should be_nil
+        doc.headers['access-control-allow-headers'].should be_nil
+        doc.headers['access-control-allow-credentials'].should eq("false")
+        doc.headers['access-control-max-age'].should be_nil
+      end
+      
+      it "checks handling of a CORS GET request from origin that is trusted" do
+        cmd = "/_api/version"
+        doc = ArangoDB.log_get("#{prefix}-cors", cmd, { :headers => { "Origin" => "http://was-erlauben-strunz.it" } } )
+
+        doc.code.should eq(200)
+        doc.headers['access-control-allow-origin'].should eq("http://was-erlauben-strunz.it")
         doc.headers['access-control-allow-methods'].should be_nil
         doc.headers['access-control-allow-headers'].should be_nil
         doc.headers['access-control-allow-credentials'].should eq("true")
@@ -316,7 +328,7 @@ describe ArangoDB do
         doc.headers['access-control-allow-origin'].should eq("http://www.some-url.com/")
         doc.headers['access-control-allow-methods'].should be_nil
         doc.headers['access-control-allow-headers'].should be_nil
-        doc.headers['access-control-allow-credentials'].should eq("true")
+        doc.headers['access-control-allow-credentials'].should eq("false")
         doc.headers['access-control-max-age'].should be_nil
       end
 
@@ -328,7 +340,7 @@ describe ArangoDB do
         doc.headers['access-control-allow-origin'].should eq("http://from.here.we.come/really/really")
         doc.headers['access-control-allow-methods'].should eq(@headers)
         doc.headers['access-control-allow-headers'].should be_nil
-        doc.headers['access-control-allow-credentials'].should eq("true")
+        doc.headers['access-control-allow-credentials'].should eq("false")
         doc.headers['access-control-max-age'].should eq("1800")
         doc.headers['allow'].should eq(@headers)
         doc.headers['content-length'].should eq("0")
@@ -343,7 +355,7 @@ describe ArangoDB do
         doc.headers['access-control-allow-origin'].should eq("HTTPS://this.is.our/site-yes")
         doc.headers['access-control-allow-methods'].should eq(@headers)
         doc.headers['access-control-allow-headers'].should be_nil
-        doc.headers['access-control-allow-credentials'].should eq("true")
+        doc.headers['access-control-allow-credentials'].should eq("false")
         doc.headers['access-control-max-age'].should eq("1800")
         doc.headers['allow'].should eq(@headers)
         doc.headers['content-length'].should eq("0")
@@ -358,45 +370,21 @@ describe ArangoDB do
         doc.headers['access-control-allow-origin'].should eq("https://mysite.org")
         doc.headers['access-control-allow-methods'].should eq(@headers)
         doc.headers['access-control-allow-headers'].should eq("foo,bar,baz")
-        doc.headers['access-control-allow-credentials'].should eq("true")
+        doc.headers['access-control-allow-credentials'].should eq("false")
         doc.headers['access-control-max-age'].should eq("1800")
         doc.headers['allow'].should eq(@headers)
         doc.headers['content-length'].should eq("0")
         doc.response.body.should be_nil_or_empty
       end
 
-      it "checks handling of a CORS GET request, with credentials" do
+      it "checks handling of a CORS OPTIONS preflight request" do
         cmd = "/_api/version"
-        doc = ArangoDB.log_get("#{prefix}-cors", cmd, { :headers => { "Origin" => "http://127.0.0.1", "Access-Control-Allow-Credentials" => "true" } } )
-
-        doc.code.should eq(200)
-        doc.headers['access-control-allow-origin'].should eq("http://127.0.0.1")
-        doc.headers['access-control-allow-methods'].should be_nil
-        doc.headers['access-control-allow-headers'].should be_nil
-        doc.headers['access-control-allow-credentials'].should eq("true")
-        doc.headers['access-control-max-age'].should be_nil
-      end
-
-      it "checks handling of a CORS GET request, with credentials disabled" do
-        cmd = "/_api/version"
-        doc = ArangoDB.log_get("#{prefix}-cors", cmd, { :headers => { "Origin" => "http://127.0.0.1", "Access-Control-Allow-Credentials" => "false" } } )
-
-        doc.code.should eq(200)
-        doc.headers['access-control-allow-origin'].should eq("http://127.0.0.1")
-        doc.headers['access-control-allow-methods'].should be_nil
-        doc.headers['access-control-allow-headers'].should be_nil
-        doc.headers['access-control-allow-credentials'].should eq("false")
-        doc.headers['access-control-max-age'].should be_nil
-      end
-
-      it "checks handling of a CORS OPTIONS preflight request, with credentials" do
-        cmd = "/_api/version"
-        doc = ArangoDB.log_options("#{prefix}-cors", cmd, { :headers => { "ORIGIN" => "https://mysite.org", "Access-Control-Request-Method" => "put", "ACCESS-CONTROL-allow-credentials" => "true" } } )
+        doc = ArangoDB.log_options("#{prefix}-cors", cmd, { :headers => { "ORIGIN" => "https://mysite.org", "Access-Control-Request-Method" => "put" } } )
 
         doc.code.should eq(200)
         doc.headers['access-control-allow-origin'].should eq("https://mysite.org")
         doc.headers['access-control-allow-methods'].should eq(@headers)
-        doc.headers['access-control-allow-credentials'].should eq("true")
+        doc.headers['access-control-allow-credentials'].should eq("false")
         doc.headers['access-control-max-age'].should eq("1800")
         doc.headers['allow'].should eq(@headers)
         doc.headers['content-length'].should eq("0")

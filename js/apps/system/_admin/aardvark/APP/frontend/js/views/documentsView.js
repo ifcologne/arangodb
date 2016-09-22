@@ -1,14 +1,15 @@
-/*jshint browser: true */
-/*jshint unused: false */
-/*global arangoHelper, _, $, window, arangoHelper, templateEngine, Joi, btoa */
+/* jshint browser: true */
+/* jshint unused: false */
+/* global arangoHelper, _, $, window, arangoHelper, templateEngine, Joi, btoa */
+/* global numeral */
 
-(function() {
-  "use strict";
+(function () {
+  'use strict';
   window.DocumentsView = window.PaginationView.extend({
-    filters : { "0" : true },
-    filterId : 0,
-    paginationDiv : "#documentsToolbarF",
-    idPrefix : "documents",
+    filters: { '0': true },
+    filterId: 0,
+    paginationDiv: '#documentsToolbarF',
+    idPrefix: 'documents',
 
     addDocumentSwitch: true,
     activeFilter: false,
@@ -22,18 +23,18 @@
     el: '#content',
     table: '#documentsTableID',
 
-    template: templateEngine.createTemplate("documentsView.ejs"),
+    template: templateEngine.createTemplate('documentsView.ejs'),
 
-    collectionContext : {
+    collectionContext: {
       prev: null,
       next: null
     },
 
-    editButtons: ["#deleteSelected", "#moveSelected"],
+    editButtons: ['#deleteSelected', '#moveSelected'],
 
-    initialize : function () {
-      this.documentStore = this.options.documentStore;
-      this.collectionsStore = this.options.collectionsStore;
+    initialize: function (options) {
+      this.documentStore = options.documentStore;
+      this.collectionsStore = options.collectionsStore;
       this.tableView = new window.TableView({
         el: this.table,
         collection: this.collection
@@ -42,86 +43,96 @@
       this.tableView.setRemoveClick(this.remove.bind(this));
     },
 
-    setCollectionId : function (colid, pageid) {
-      this.collection.setCollection(colid);
-      var type = arangoHelper.collectionApiType(colid);
-      this.pageid = pageid;
-      this.type = type;
-
-      this.checkCollectionState();
-
-      this.collection.getDocuments(this.getDocsCallback.bind(this));
-      this.collectionModel = this.collectionsStore.get(colid);
+    resize: function () {
+      $('#docPureTable').height($('.centralRow').height() - 210);
+      $('#docPureTable .pure-table-body').css('max-height', $('#docPureTable').height() - 47);
     },
 
-    getDocsCallback: function() {
-      //Hide first/last pagination
-      $('#documents_last').css("visibility", "hidden");
-      $('#documents_first').css("visibility", "hidden");
-      this.drawTable();
-      this.renderPaginationElements();
+    setCollectionId: function (colid, page) {
+      this.collection.setCollection(colid);
+      this.collection.setPage(page);
+      this.page = page;
+
+      var callback = function (error, type) {
+        if (error) {
+          arangoHelper.arangoError('Error', 'Could not get collection properties.');
+        } else {
+          this.type = type;
+          this.collection.getDocuments(this.getDocsCallback.bind(this));
+          this.collectionModel = this.collectionsStore.get(colid);
+        }
+      }.bind(this);
+
+      arangoHelper.collectionApiType(colid, null, callback);
+    },
+
+    getDocsCallback: function (error) {
+      // Hide first/last pagination
+      $('#documents_last').css('visibility', 'hidden');
+      $('#documents_first').css('visibility', 'hidden');
+
+      if (error) {
+        window.progressView.hide();
+        arangoHelper.arangoError('Document error', 'Could not fetch requested documents.');
+      } else if (!error || error !== undefined) {
+        window.progressView.hide();
+        this.drawTable();
+        this.renderPaginationElements();
+      }
     },
 
     events: {
-      "click #collectionPrev"      : "prevCollection",
-      "click #collectionNext"      : "nextCollection",
-      "click #filterCollection"    : "filterCollection",
-      "click #markDocuments"       : "editDocuments",
-      "click #indexCollection"     : "indexCollection",
-      "click #importCollection"    : "importCollection",
-      "click #exportCollection"    : "exportCollection",
-      "click #filterSend"          : "sendFilter",
-      "click #addFilterItem"       : "addFilterItem",
-      "click .removeFilterItem"    : "removeFilterItem",
-      "click #deleteSelected"      : "deleteSelectedDocs",
-      "click #moveSelected"        : "moveSelectedDocs",
-      "click #addDocumentButton"   : "addDocumentModal",
-      "click #documents_first"     : "firstDocuments",
-      "click #documents_last"      : "lastDocuments",
-      "click #documents_prev"      : "prevDocuments",
-      "click #documents_next"      : "nextDocuments",
-      "click #confirmDeleteBtn"    : "confirmDelete",
-      "click .key"                 : "nop",
-      "keyup"                      : "returnPressedHandler",
-      "keydown .queryline input"   : "filterValueKeydown",
-      "click #importModal"         : "showImportModal",
-      "click #resetView"           : "resetView",
-      "click #confirmDocImport"    : "startUpload",
-      "click #exportDocuments"     : "startDownload",
-      "change #newIndexType"       : "selectIndexType",
-      "click #createIndex"         : "createIndex",
-      "click .deleteIndex"         : "prepDeleteIndex",
-      "click #confirmDeleteIndexBtn"    : "deleteIndex",
-      "click #documentsToolbar ul"      : "resetIndexForms",
-      "click #indexHeader #addIndex"    : "toggleNewIndexView",
-      "click #indexHeader #cancelIndex" : "toggleNewIndexView",
-      "change #documentSize"            : "setPagesize",
-      "change #docsSort"                : "setSorting"
+      'click #collectionPrev': 'prevCollection',
+      'click #collectionNext': 'nextCollection',
+      'click #filterCollection': 'filterCollection',
+      'click #markDocuments': 'editDocuments',
+      'click #importCollection': 'importCollection',
+      'click #exportCollection': 'exportCollection',
+      'click #filterSend': 'sendFilter',
+      'click #addFilterItem': 'addFilterItem',
+      'click .removeFilterItem': 'removeFilterItem',
+      'click #deleteSelected': 'deleteSelectedDocs',
+      'click #moveSelected': 'moveSelectedDocs',
+      'click #addDocumentButton': 'addDocumentModal',
+      'click #documents_first': 'firstDocuments',
+      'click #documents_last': 'lastDocuments',
+      'click #documents_prev': 'prevDocuments',
+      'click #documents_next': 'nextDocuments',
+      'click #confirmDeleteBtn': 'confirmDelete',
+      'click .key': 'nop',
+      'keyup': 'returnPressedHandler',
+      'keydown .queryline input': 'filterValueKeydown',
+      'click #importModal': 'showImportModal',
+      'click #resetView': 'resetView',
+      'click #confirmDocImport': 'startUpload',
+      'click #exportDocuments': 'startDownload',
+      'change #documentSize': 'setPagesize',
+      'change #docsSort': 'setSorting'
     },
 
-    showSpinner: function() {
+    showSpinner: function () {
       $('#uploadIndicator').show();
     },
 
-    hideSpinner: function() {
+    hideSpinner: function () {
       $('#uploadIndicator').hide();
     },
 
-    showImportModal: function() {
-      $("#docImportModal").modal('show');
+    showImportModal: function () {
+      $('#docImportModal').modal('show');
     },
 
-    hideImportModal: function() {
-      $("#docImportModal").modal('hide');
+    hideImportModal: function () {
+      $('#docImportModal').modal('hide');
     },
 
-    setPagesize: function() {
-      var size = $('#documentSize').find(":selected").val();
+    setPagesize: function () {
+      var size = $('#documentSize').find(':selected').val();
       this.collection.setPagesize(size);
       this.collection.getDocuments(this.getDocsCallback.bind(this));
     },
 
-    setSorting: function() {
+    setSorting: function () {
       var sortAttribute = $('#docsSort').val();
 
       if (sortAttribute === '' || sortAttribute === undefined || sortAttribute === null) {
@@ -131,97 +142,98 @@
       this.collection.setSort(sortAttribute);
     },
 
-    returnPressedHandler: function(event) {
+    returnPressedHandler: function (event) {
       if (event.keyCode === 13 && $(event.target).is($('#docsSort'))) {
         this.collection.getDocuments(this.getDocsCallback.bind(this));
       }
       if (event.keyCode === 13) {
-        if ($("#confirmDeleteBtn").attr("disabled") === false) {
+        if ($('#confirmDeleteBtn').attr('disabled') === false) {
           this.confirmDelete();
         }
       }
     },
-    toggleNewIndexView: function () {
-      $('#indexEditView').toggle("fast");
-      $('#newIndexView').toggle("fast");
-      this.resetIndexForms();
-    },
-    nop: function(event) {
+
+    nop: function (event) {
       event.stopPropagation();
     },
 
     resetView: function () {
-      //clear all input/select - fields
+      var callback = function (error) {
+        if (error) {
+          arangoHelper.arangoError('Document', 'Could not fetch documents count');
+        }
+      };
+
+      // clear all input/select - fields
       $('input').val('');
       $('select').val('==');
       this.removeAllFilterItems();
       $('#documentSize').val(this.collection.getPageSize());
 
-      $('#documents_last').css("visibility", "visible");
-      $('#documents_first').css("visibility", "visible");
+      $('#documents_last').css('visibility', 'visible');
+      $('#documents_first').css('visibility', 'visible');
       this.addDocumentSwitch = true;
       this.collection.resetFilter();
-      this.collection.loadTotal();
+      this.collection.loadTotal(callback);
       this.restoredFilters = [];
 
-      //for resetting json upload
+      // for resetting json upload
       this.allowUpload = false;
       this.files = undefined;
       this.file = undefined;
-      $('#confirmDocImport').attr("disabled", true);
+      $('#confirmDocImport').attr('disabled', true);
 
       this.markFilterToggle();
       this.collection.getDocuments(this.getDocsCallback.bind(this));
     },
 
-    startDownload: function() {
+    startDownload: function () {
       var query = this.collection.buildDownloadDocumentQuery();
 
       if (query !== '' || query !== undefined || query !== null) {
-        window.open(encodeURI("query/result/download/" + btoa(JSON.stringify(query))));
-      }
-      else {
-        arangoHelper.arangoError("Document error", "could not download documents");
+        var url = 'query/result/download/' + btoa(JSON.stringify(query));
+        arangoHelper.download(url);
+      } else {
+        arangoHelper.arangoError('Document error', 'could not download documents');
       }
     },
 
     startUpload: function () {
-      var result;
-      if (this.allowUpload === true) {
-          this.showSpinner();
-        result = this.collection.uploadDocuments(this.file);
-        if (result !== true) {
+      var callback = function (error, msg) {
+        if (error) {
+          arangoHelper.arangoError('Upload', msg);
+          this.hideSpinner();
+        } else {
           this.hideSpinner();
           this.hideImportModal();
           this.resetView();
-          arangoHelper.arangoError(result);
-          return;
         }
-        this.hideSpinner();
-        this.hideImportModal();
-        this.resetView();
-        return;
+      }.bind(this);
+
+      if (this.allowUpload === true) {
+        this.showSpinner();
+        this.collection.uploadDocuments(this.file, callback);
       }
     },
 
     uploadSetup: function () {
       var self = this;
-      $('#importDocuments').change(function(e) {
+      $('#importDocuments').change(function (e) {
         self.files = e.target.files || e.dataTransfer.files;
         self.file = self.files[0];
-        $('#confirmDocImport').attr("disabled", false);
+        $('#confirmDocImport').attr('disabled', false);
 
         self.allowUpload = true;
       });
     },
 
-    buildCollectionLink : function (collection) {
-      return "collection/" + encodeURIComponent(collection.get('name')) + '/documents/1';
+    buildCollectionLink: function (collection) {
+      return 'collection/' + encodeURIComponent(collection.get('name')) + '/documents/1';
     },
     /*
     prevCollection : function () {
       if (this.collectionContext.prev !== null) {
-        $('#collectionPrev').parent().removeClass('disabledPag');
+        $('#collectionPrev').parent().removeClass('disabledPag')
         window.App.navigate(
           this.buildCollectionLink(
             this.collectionContext.prev
@@ -229,16 +241,16 @@
           {
             trigger: true
           }
-        );
+        )
       }
       else {
-        $('#collectionPrev').parent().addClass('disabledPag');
+        $('#collectionPrev').parent().addClass('disabledPag')
       }
     },
 
     nextCollection : function () {
       if (this.collectionContext.next !== null) {
-        $('#collectionNext').parent().removeClass('disabledPag');
+        $('#collectionNext').parent().removeClass('disabledPag')
         window.App.navigate(
           this.buildCollectionLink(
             this.collectionContext.next
@@ -246,26 +258,24 @@
           {
             trigger: true
           }
-        );
+        )
       }
       else {
-        $('#collectionNext').parent().addClass('disabledPag');
+        $('#collectionNext').parent().addClass('disabledPag')
       }
     },*/
 
     markFilterToggle: function () {
       if (this.restoredFilters.length > 0) {
         $('#filterCollection').addClass('activated');
-      }
-      else {
+      } else {
         $('#filterCollection').removeClass('activated');
       }
     },
 
-    //need to make following functions automatically!
+    // need to make following functions automatically!
 
     editDocuments: function () {
-      $('#indexCollection').removeClass('activated');
       $('#importCollection').removeClass('activated');
       $('#exportCollection').removeClass('activated');
       this.markFilterToggle();
@@ -273,13 +283,11 @@
       this.changeEditMode();
       $('#filterHeader').hide();
       $('#importHeader').hide();
-      $('#indexHeader').hide();
       $('#editHeader').slideToggle(200);
       $('#exportHeader').hide();
     },
 
-    filterCollection : function () {
-      $('#indexCollection').removeClass('activated');
+    filterCollection: function () {
       $('#importCollection').removeClass('activated');
       $('#exportCollection').removeClass('activated');
       $('#markDocuments').removeClass('activated');
@@ -287,7 +295,6 @@
       this.markFilterToggle();
       this.activeFilter = true;
       $('#importHeader').hide();
-      $('#indexHeader').hide();
       $('#editHeader').hide();
       $('#exportHeader').hide();
       $('#filterHeader').slideToggle(200);
@@ -302,7 +309,6 @@
     },
 
     exportCollection: function () {
-      $('#indexCollection').removeClass('activated');
       $('#importCollection').removeClass('activated');
       $('#filterHeader').removeClass('activated');
       $('#markDocuments').removeClass('activated');
@@ -311,52 +317,32 @@
       this.markFilterToggle();
       $('#exportHeader').slideToggle(200);
       $('#importHeader').hide();
-      $('#indexHeader').hide();
       $('#filterHeader').hide();
       $('#editHeader').hide();
     },
 
     importCollection: function () {
       this.markFilterToggle();
-      $('#indexCollection').removeClass('activated');
       $('#markDocuments').removeClass('activated');
       this.changeEditMode(false);
       $('#importCollection').toggleClass('activated');
       $('#exportCollection').removeClass('activated');
       $('#importHeader').slideToggle(200);
       $('#filterHeader').hide();
-      $('#indexHeader').hide();
       $('#editHeader').hide();
-      $('#exportHeader').hide();
-    },
-
-    indexCollection: function () {
-      this.markFilterToggle();
-      $('#importCollection').removeClass('activated');
-      $('#exportCollection').removeClass('activated');
-      $('#markDocuments').removeClass('activated');
-      this.changeEditMode(false);
-      $('#indexCollection').toggleClass('activated');
-      $('#newIndexView').hide();
-      $('#indexEditView').show();
-      $('#indexHeader').slideToggle(200);
-      $('#importHeader').hide();
-      $('#editHeader').hide();
-      $('#filterHeader').hide();
       $('#exportHeader').hide();
     },
 
     changeEditMode: function (enable) {
       if (enable === false || this.editMode === true) {
-        $('#documentsTableID tbody tr').css('cursor', 'default');
+        $('#docPureTable .pure-table-body .pure-table-row').css('cursor', 'default');
         $('.deleteButton').fadeIn();
         $('.addButton').fadeIn();
         $('.selected-row').removeClass('selected-row');
         this.editMode = false;
         this.tableView.setRowClick(this.clicked.bind(this));
-      }
-      else {
-        $('#documentsTableID tbody tr').css('cursor', 'copy');
+      } else {
+        $('#docPureTable .pure-table-body .pure-table-row').css('cursor', 'copy');
         $('.deleteButton').fadeOut();
         $('.addButton').fadeOut();
         $('.selectedCount').text(0);
@@ -366,25 +352,24 @@
     },
 
     getFilterContent: function () {
-      var filters = [ ];
-      var i;
+      var filters = [];
+      var i, value;
 
       for (i in this.filters) {
         if (this.filters.hasOwnProperty(i)) {
-          var value = $('#attribute_value' + i).val();
+          value = $('#attribute_value' + i).val();
 
           try {
             value = JSON.parse(value);
-          }
-          catch (err) {
+          } catch (err) {
             value = String(value);
           }
 
-          if ($('#attribute_name' + i).val() !== ''){
+          if ($('#attribute_name' + i).val() !== '') {
             filters.push({
-                attribute : $('#attribute_name'+i).val(),
-                operator : $('#operator'+i).val(),
-                value : value
+              attribute: $('#attribute_name' + i).val(),
+              operator: $('#operator' + i).val(),
+              value: value
             });
           }
         }
@@ -392,7 +377,7 @@
       return filters;
     },
 
-    sendFilter : function () {
+    sendFilter: function () {
       this.restoredFilters = this.getFilterContent();
       var self = this;
       this.collection.resetFilter();
@@ -409,12 +394,13 @@
     },
 
     restoreFilter: function () {
-      var self = this, counter = 0;
+      var self = this;
+      var counter = 0;
 
       this.filterId = 0;
       $('#docsSort').val(this.collection.getSort());
       _.each(this.restoredFilters, function (f) {
-        //change html here and restore filters
+        // change html here and restore filters
         if (counter !== 0) {
           self.addFilterItem();
         }
@@ -425,43 +411,69 @@
         }
         counter++;
 
-        //add those filters also to the collection
+        // add those filters also to the collection
         self.collection.addFilter(f.attribute, f.operator, f.value);
       });
+
+      self.rerender();
     },
 
-    addFilterItem : function () {
+    addFilterItem: function () {
       // adds a line to the filter widget
 
       var num = ++this.filterId;
-      $('#filterHeader').append(' <div class="queryline querylineAdd">'+
-                                '<input id="attribute_name' + num +
-                                '" type="text" placeholder="Attribute name">'+
-                                '<select name="operator" id="operator' +
-                                num + '" class="filterSelect">'+
-                                '    <option value="==">==</option>'+
-                                '    <option value="!=">!=</option>'+
-                                '    <option value="&lt;">&lt;</option>'+
-                                '    <option value="&lt;=">&lt;=</option>'+
-                                '    <option value="&gt;=">&gt;=</option>'+
-                                '    <option value="&gt;">&gt;</option>'+
-                                '</select>'+
-                                '<input id="attribute_value' + num +
-                                '" type="text" placeholder="Attribute value" ' +
-                                'class="filterValue">'+
-                                ' <a class="removeFilterItem" id="removeFilter' + num + '">' +
-                                '<i class="icon icon-minus arangoicon"></i></a></div>');
+      $('#filterHeader').append(' <div class="queryline querylineAdd">' +
+        '<input id="attribute_name' + num +
+        '" type="text" placeholder="Attribute name">' +
+        '<select name="operator" id="operator' +
+        num + '" class="filterSelect">' +
+        '    <option value="==">==</option>' +
+        '    <option value="!=">!=</option>' +
+        '    <option value="&lt;">&lt;</option>' +
+        '    <option value="&lt;=">&lt;=</option>' +
+        '    <option value="&gt;=">&gt;=</option>' +
+        '    <option value="&gt;">&gt;</option>' +
+        '</select>' +
+        '<input id="attribute_value' + num +
+        '" type="text" placeholder="Attribute value" ' +
+        'class="filterValue">' +
+        ' <a class="removeFilterItem" id="removeFilter' + num + '">' +
+        '<i class="fa fa-minus-circle"></i></a></div>');
       this.filters[num] = true;
+
+      this.checkFilterState();
     },
 
-    filterValueKeydown : function (e) {
+    filterValueKeydown: function (e) {
       if (e.keyCode === 13) {
         this.sendFilter();
       }
     },
 
-    removeFilterItem : function (e) {
+    checkFilterState: function () {
+      var length = $('#filterHeader .queryline').length;
 
+      if (length === 1) {
+        $('#filterHeader .removeFilterItem').remove();
+      } else {
+        if ($('#filterHeader .queryline').first().find('.removeFilterItem').length === 0) {
+          var id = $('#filterHeader .queryline').first().children().first().attr('id');
+          var num = id.substr(14, id.length);
+
+          $('#filterHeader .queryline').first().find('.add-filter-item').after(
+            ' <a class="removeFilterItem" id="removeFilter' + num + '">' +
+            '<i class="fa fa-minus-circle"></i></a>');
+        }
+      }
+
+      if ($('#filterHeader .queryline').first().find('.add-filter-item').length === 0) {
+        $('#filterHeader .queryline').first().find('.filterValue').after(
+          '<a id="addFilterItem" class="add-filter-item"><i style="margin-left: 4px;" class="fa fa-plus-circle"></i></a>'
+        );
+      }
+    },
+
+    removeFilterItem: function (e) {
       // removes line from the filter widget
       var button = e.currentTarget;
 
@@ -472,168 +484,187 @@
 
       // remove the line from the DOM
       $(button.parentElement).remove();
+      this.checkFilterState();
     },
 
-    removeAllFilterItems : function () {
+    removeAllFilterItems: function () {
       var childrenLength = $('#filterHeader').children().length;
       var i;
       for (i = 1; i <= childrenLength; i++) {
-        $('#removeFilter'+i).parent().remove();
+        $('#removeFilter' + i).parent().remove();
       }
-      this.filters = { "0" : true };
+      this.filters = { '0': true };
       this.filterId = 0;
     },
 
     addDocumentModal: function () {
-      var collid  = window.location.hash.split("/")[1],
-      buttons = [], tableContent = [],
-      // second parameter is "true" to disable caching of collection type
-      doctype = arangoHelper.collectionApiType(collid, true);
-      if (doctype === 'edge') {
+      var collid = window.location.hash.split('/')[1];
+      var buttons = []; var tableContent = [];
+        // second parameter is "true" to disable caching of collection type
 
-        tableContent.push(
-          window.modalView.createTextEntry(
-            'new-edge-from-attr',
-            '_from',
-            '',
-            "document _id: document handle of the linked vertex (incoming relation)",
-            undefined,
-            false,
-            [
-              {
-                rule: Joi.string().required(),
-                msg: "No _from attribute given."
-              }
-            ]
-          )
-        );
+      var callback = function (error, type) {
+        if (error) {
+          arangoHelper.arangoError('Error', 'Could not fetch collection type');
+        } else {
+          if (type === 'edge') {
+            tableContent.push(
+              window.modalView.createTextEntry(
+                'new-edge-from-attr',
+                '_from',
+                '',
+                'document _id: document handle of the linked vertex (incoming relation)',
+                undefined,
+                false,
+                [
+                  {
+                    rule: Joi.string().required(),
+                    msg: 'No _from attribute given.'
+                  }
+                ]
+              )
+            );
 
-        tableContent.push(
-          window.modalView.createTextEntry(
-            'new-edge-to',
-            '_to',
-            '',
-            "document _id: document handle of the linked vertex (outgoing relation)",
-            undefined,
-            false,
-            [
-              {
-                rule: Joi.string().required(),
-                msg: "No _to attribute given."
-              }
-            ]
-          )
-        );
+            tableContent.push(
+              window.modalView.createTextEntry(
+                'new-edge-to',
+                '_to',
+                '',
+                'document _id: document handle of the linked vertex (outgoing relation)',
+                undefined,
+                false,
+                [
+                  {
+                    rule: Joi.string().required(),
+                    msg: 'No _to attribute given.'
+                  }
+                ]
+              )
+            );
 
-        tableContent.push(
-          window.modalView.createTextEntry(
-            'new-edge-key-attr',
-            '_key',
-            undefined,
-            "the edges unique key(optional attribute, leave empty for autogenerated key",
-            'is optional: leave empty for autogenerated key',
-            false,
-            [
-              {
-                rule: Joi.string().allow('').optional(),
-                msg: ""
-              }
-            ]
-          )
-        );
+            tableContent.push(
+              window.modalView.createTextEntry(
+                'new-edge-key-attr',
+                '_key',
+                undefined,
+                'the edges unique key(optional attribute, leave empty for autogenerated key',
+                'is optional: leave empty for autogenerated key',
+                false,
+                [
+                  {
+                    rule: Joi.string().allow('').optional(),
+                    msg: ''
+                  }
+                ]
+              )
+            );
+            buttons.push(
+              window.modalView.createSuccessButton('Create', this.addEdge.bind(this))
+            );
 
-        buttons.push(
-          window.modalView.createSuccessButton('Create', this.addEdge.bind(this))
-        );
+            window.modalView.show(
+              'modalTable.ejs',
+              'Create edge',
+              buttons,
+              tableContent
+            );
+          } else {
+            tableContent.push(
+              window.modalView.createTextEntry(
+                'new-document-key-attr',
+                '_key',
+                undefined,
+                'the documents unique key(optional attribute, leave empty for autogenerated key',
+                'is optional: leave empty for autogenerated key',
+                false,
+                [
+                  {
+                    rule: Joi.string().allow('').optional(),
+                    msg: ''
+                  }
+                ]
+              )
+            );
 
-        window.modalView.show(
-          'modalTable.ejs',
-          'Create edge',
-          buttons,
-          tableContent
-        );
+            buttons.push(
+              window.modalView.createSuccessButton('Create', this.addDocument.bind(this))
+            );
 
-        return;
-      }
-      else {
-        tableContent.push(
-          window.modalView.createTextEntry(
-            'new-document-key-attr',
-            '_key',
-            undefined,
-            "the documents unique key(optional attribute, leave empty for autogenerated key",
-            'is optional: leave empty for autogenerated key',
-            false,
-            [
-              {
-                rule: Joi.string().allow('').optional(),
-                msg: ""
-              }
-            ]
-          )
-        );
-
-        buttons.push(
-          window.modalView.createSuccessButton('Create', this.addDocument.bind(this))
-        );
-
-        window.modalView.show(
-          'modalTable.ejs',
-          'Create document',
-          buttons,
-          tableContent
-        );
-      }
+            window.modalView.show(
+              'modalTable.ejs',
+              'Create document',
+              buttons,
+              tableContent
+            );
+          }
+        }
+      }.bind(this);
+      arangoHelper.collectionApiType(collid, true, callback);
     },
 
     addEdge: function () {
-      var collid  = window.location.hash.split("/")[1];
+      var collid = window.location.hash.split('/')[1];
       var from = $('.modal-body #new-edge-from-attr').last().val();
       var to = $('.modal-body #new-edge-to').last().val();
       var key = $('.modal-body #new-edge-key-attr').last().val();
+      var url;
 
-      var result;
+      var callback = function (error, data) {
+        if (error) {
+          arangoHelper.arangoError('Error', 'Could not create edge');
+        } else {
+          window.modalView.hide();
+          data = data._id.split('/');
+
+          try {
+            url = 'collection/' + data[0] + '/' + data[1];
+            decodeURI(url);
+          } catch (ex) {
+            url = 'collection/' + data[0] + '/' + encodeURIComponent(data[1]);
+          }
+          window.location.hash = url;
+        }
+      };
+
       if (key !== '' || key !== undefined) {
-        result = this.documentStore.createTypeEdge(collid, from, to, key);
-      }
-      else {
-        result = this.documentStore.createTypeEdge(collid, from, to);
-      }
-
-      if (result !== false) {
-        //$('#edgeCreateModal').modal('hide');
-        window.modalView.hide();
-        window.location.hash = "collection/"+result;
-      }
-      //Error
-      else {
-        arangoHelper.arangoError('Edge error', 'Creation failed.');
+        this.documentStore.createTypeEdge(collid, from, to, key, callback);
+      } else {
+        this.documentStore.createTypeEdge(collid, from, to, null, callback);
       }
     },
 
-    addDocument: function() {
-      var collid = window.location.hash.split("/")[1];
+    addDocument: function () {
+      var collid = window.location.hash.split('/')[1];
       var key = $('.modal-body #new-document-key-attr').last().val();
-      var result;
+      var url;
+
+      var callback = function (error, data) {
+        if (error) {
+          arangoHelper.arangoError('Error', 'Could not create document');
+        } else {
+          window.modalView.hide();
+          data = data.split('/');
+
+          try {
+            url = 'collection/' + data[0] + '/' + data[1];
+            decodeURI(url);
+          } catch (ex) {
+            url = 'collection/' + data[0] + '/' + encodeURIComponent(data[1]);
+          }
+
+          window.location.hash = url;
+        }
+      };
+
       if (key !== '' || key !== undefined) {
-        result = this.documentStore.createTypeDocument(collid, key);
-      }
-      else {
-        result = this.documentStore.createTypeDocument(collid);
-      }
-      //Success
-      if (result !== false) {
-        window.modalView.hide();
-        window.location.hash = "collection/" + result;
-      }
-      else {
-        arangoHelper.arangoError('Document error', 'Creation failed.');
+        this.documentStore.createTypeDocument(collid, key, callback);
+      } else {
+        this.documentStore.createTypeDocument(collid, null, callback);
       }
     },
 
-    moveSelectedDocs: function() {
-      var buttons = [], tableContent = [],
-      toDelete = this.getSelectedDocs();
+    moveSelectedDocs: function () {
+      var buttons = []; var tableContent = [];
+      var toDelete = this.getSelectedDocs();
 
       if (toDelete.length === 0) {
         return;
@@ -650,7 +681,7 @@
           [
             {
               rule: Joi.string().regex(/^[a-zA-Z]/),
-              msg: "Collection name must always start with a letter."
+              msg: 'Collection name must always start with a letter.'
             },
             {
               rule: Joi.string().regex(/^[a-zA-Z0-9\-_]*$/),
@@ -658,7 +689,7 @@
             },
             {
               rule: Joi.string().required(),
-              msg: "No collection name given."
+              msg: 'No collection name given.'
             }
           ]
         )
@@ -676,24 +707,24 @@
       );
     },
 
-    confirmMoveSelectedDocs: function() {
-      var toMove = this.getSelectedDocs(),
-      self = this,
-      toCollection = $('.modal-body').last().find('#move-documents-to').val();
+    confirmMoveSelectedDocs: function () {
+      var toMove = this.getSelectedDocs();
+      var self = this;
+      var toCollection = $('.modal-body').last().find('#move-documents-to').val();
 
-      var callback = function() {
+      var callback = function () {
         this.collection.getDocuments(this.getDocsCallback.bind(this));
         $('#markDocuments').click();
         window.modalView.hide();
       }.bind(this);
 
-      _.each(toMove, function(key) {
+      _.each(toMove, function (key) {
         self.collection.moveDocument(key, self.collection.collectionID, toCollection, callback);
       });
     },
 
-    deleteSelectedDocs: function() {
-      var buttons = [], tableContent = [];
+    deleteSelectedDocs: function () {
+      var buttons = []; var tableContent = [];
       var toDelete = this.getSelectedDocs();
 
       if (toDelete.length === 0) {
@@ -724,47 +755,47 @@
       );
     },
 
-    confirmDeleteSelectedDocs: function() {
+    confirmDeleteSelectedDocs: function () {
       var toDelete = this.getSelectedDocs();
-      var deleted = [], self = this;
+      var deleted = []; var self = this;
 
-      _.each(toDelete, function(key) {
-        var result = false;
+      _.each(toDelete, function (key) {
         if (self.type === 'document') {
-          result = self.documentStore.deleteDocument(
-            self.collection.collectionID, key
-          );
-          if (result) {
-            //on success
-            deleted.push(true);
-            self.collection.setTotalMinusOne();
-          }
-          else {
-            deleted.push(false);
-            arangoHelper.arangoError('Document error', 'Could not delete document.');
-          }
-        }
-        else if (self.type === 'edge') {
-          result = self.documentStore.deleteEdge(self.collection.collectionID, key);
-          if (result === true) {
-            //on success
-            self.collection.setTotalMinusOne();
-            deleted.push(true);
-          }
-          else {
-            deleted.push(false);
-            arangoHelper.arangoError('Edge error', 'Could not delete edge');
-          }
+          var callback = function (error) {
+            if (error) {
+              deleted.push(false);
+              arangoHelper.arangoError('Document error', 'Could not delete document.');
+            } else {
+              deleted.push(true);
+              self.collection.setTotalMinusOne();
+              self.collection.getDocuments(this.getDocsCallback.bind(this));
+              $('#markDocuments').click();
+              window.modalView.hide();
+            }
+          }.bind(self);
+          self.documentStore.deleteDocument(self.collection.collectionID, key, callback);
+        } else if (self.type === 'edge') {
+          var callback2 = function (error) {
+            if (error) {
+              deleted.push(false);
+              arangoHelper.arangoError('Edge error', 'Could not delete edge');
+            } else {
+              self.collection.setTotalMinusOne();
+              deleted.push(true);
+              self.collection.getDocuments(this.getDocsCallback.bind(this));
+              $('#markDocuments').click();
+              window.modalView.hide();
+            }
+          }.bind(self);
+
+          self.documentStore.deleteEdge(self.collection.collectionID, key, callback2);
         }
       });
-      this.collection.getDocuments(this.getDocsCallback.bind(this));
-      $('#markDocuments').click();
-      window.modalView.hide();
     },
 
-    getSelectedDocs: function() {
+    getSelectedDocs: function () {
       var toDelete = [];
-      _.each($('#documentsTableID tbody tr'), function(element) {
+      _.each($('#docPureTable .pure-table-body .pure-table-row'), function (element) {
         if ($(element).hasClass('selected-row')) {
           toDelete.push($($(element).children()[1]).find('.key').text());
         }
@@ -773,63 +804,53 @@
     },
 
     remove: function (a) {
-      this.docid = $(a.currentTarget).closest("tr").attr("id").substr(4);
-      $("#confirmDeleteBtn").attr("disabled", false);
+      this.docid = $(a.currentTarget).parent().parent().prev().find('.key').text();
+      $('#confirmDeleteBtn').attr('disabled', false);
       $('#docDeleteModal').modal('show');
     },
 
     confirmDelete: function () {
-      $("#confirmDeleteBtn").attr("disabled", true);
-      var hash = window.location.hash.split("/");
+      $('#confirmDeleteBtn').attr('disabled', true);
+      var hash = window.location.hash.split('/');
       var check = hash[3];
-      //to_do - find wrong event handler
+      // to_do - find wrong event handler
       if (check !== 'source') {
         this.reallyDelete();
       }
     },
 
     reallyDelete: function () {
-      var self = this;
-      var row = $(self.target).closest("tr").get(0);
-
-      var deleted = false;
-      var result;
       if (this.type === 'document') {
-        result = this.documentStore.deleteDocument(
-          this.collection.collectionID, this.docid
-        );
-        if (result) {
-          //on success
-          this.collection.setTotalMinusOne();
-          deleted = true;
-        }
-        else {
-          arangoHelper.arangoError('Doc error');
-        }
-      }
-      else if (this.type === 'edge') {
-        result = this.documentStore.deleteEdge(this.collection.collectionID, this.docid);
-        if (result === true) {
-          //on success
-          this.collection.setTotalMinusOne();
-          deleted = true;
-        }
-        else {
-          arangoHelper.arangoError('Edge error');
-        }
-      }
+        var callback = function (error) {
+          if (error) {
+            arangoHelper.arangoError('Error', 'Could not delete document');
+          } else {
+            this.collection.setTotalMinusOne();
+            this.collection.getDocuments(this.getDocsCallback.bind(this));
+            $('#docDeleteModal').modal('hide');
+          }
+        }.bind(this);
 
-      if (deleted === true) {
-        this.collection.getDocuments(this.getDocsCallback.bind(this));
-        $('#docDeleteModal').modal('hide');
-      }
+        this.documentStore.deleteDocument(this.collection.collectionID, this.docid, callback);
+      } else if (this.type === 'edge') {
+        var callback2 = function (error) {
+          if (error) {
+            arangoHelper.arangoError('Edge error', 'Could not delete edge');
+          } else {
+            this.collection.setTotalMinusOne();
+            this.collection.getDocuments(this.getDocsCallback.bind(this));
+            $('#docDeleteModal').modal('hide');
+          }
+        }.bind(this);
 
+        this.documentStore.deleteEdge(this.collection.collectionID, this.docid, callback2);
+      }
     },
 
-    editModeClick: function(event) {
+    editModeClick: function (event) {
       var target = $(event.currentTarget);
 
-      if(target.hasClass('selected-row')) {
+      if (target.hasClass('selected-row')) {
         target.removeClass('selected-row');
       } else {
         target.addClass('selected-row');
@@ -838,26 +859,23 @@
       var selected = this.getSelectedDocs();
       $('.selectedCount').text(selected.length);
 
-      _.each(this.editButtons, function(button) {
+      _.each(this.editButtons, function (button) {
         if (selected.length > 0) {
           $(button).prop('disabled', false);
           $(button).removeClass('button-neutral');
           $(button).removeClass('disabled');
-          if (button === "#moveSelected") {
+          if (button === '#moveSelected') {
             $(button).addClass('button-success');
-          }
-          else {
+          } else {
             $(button).addClass('button-danger');
           }
-        }
-        else {
+        } else {
           $(button).prop('disabled', true);
           $(button).addClass('disabled');
           $(button).addClass('button-neutral');
-          if (button === "#moveSelected") {
+          if (button === '#moveSelected') {
             $(button).removeClass('button-success');
-          }
-          else {
+          } else {
             $(button).removeClass('button-danger');
           }
         }
@@ -866,83 +884,102 @@
 
     clicked: function (event) {
       var self = event.currentTarget;
-      window.App.navigate("collection/" + this.collection.collectionID + "/" + $(self).attr("id").substr(4), true);
+
+      var url; var doc = $(self).attr('id').substr(4);
+
+      try {
+        url = 'collection/' + this.collection.collectionID + '/' + doc;
+        decodeURI(doc);
+      } catch (ex) {
+        url = 'collection/' + this.collection.collectionID + '/' + encodeURIComponent(doc);
+      }
+
+      window.location.hash = url;
     },
 
-    drawTable: function() {
-      this.tableView.setElement($(this.table)).render();
-
+    drawTable: function () {
+      this.tableView.setElement($('#docPureTable')).render();
       // we added some icons, so we need to fix their tooltips
-      arangoHelper.fixTooltips(".icon_arangodb, .arangoicon", "top");
+      arangoHelper.fixTooltips('.icon_arangodb, .arangoicon', 'top');
 
-      $(".prettify").snippet("javascript", {
-        style: "nedit",
+      $('.prettify').snippet('javascript', {
+        style: 'nedit',
         menu: false,
         startText: false,
         transparent: true,
         showNum: false
       });
+      this.resize();
     },
 
-    checkCollectionState: function() {
+    checkCollectionState: function () {
       if (this.lastCollectionName === this.collectionName) {
         if (this.activeFilter) {
           this.filterCollection();
           this.restoreFilter();
         }
-      }
-      else {
+      } else {
         if (this.lastCollectionName !== undefined) {
           this.collection.resetFilter();
-          this.collection.setSort('_key');
+          this.collection.setSort('');
           this.restoredFilters = [];
           this.activeFilter = false;
         }
       }
     },
 
-    render: function() {
+    render: function () {
       $(this.el).html(this.template.render({}));
+      if (this.type === 2) {
+        this.type = 'document';
+      } else if (this.type === 3) {
+        this.type = 'edge';
+      }
+
       this.tableView.setElement($(this.table)).drawLoading();
 
       this.collectionContext = this.collectionsStore.getPosition(
         this.collection.collectionID
       );
 
-      this.getIndex();
+      this.collectionName = window.location.hash.split('/')[1];
+      // fill navigation and breadcrumb
       this.breadcrumb();
+      window.arangoHelper.buildCollectionSubNav(this.collectionName, 'Content');
 
       this.checkCollectionState();
 
-      //set last active collection name
+      // set last active collection name
       this.lastCollectionName = this.collectionName;
 
       /*
       if (this.collectionContext.prev === null) {
-        $('#collectionPrev').parent().addClass('disabledPag');
+        $('#collectionPrev').parent().addClass('disabledPag')
       }
       if (this.collectionContext.next === null) {
-        $('#collectionNext').parent().addClass('disabledPag');
+        $('#collectionNext').parent().addClass('disabledPag')
       }
       */
 
       this.uploadSetup();
 
-      $("[data-toggle=tooltip]").tooltip();
+      $('[data-toggle=tooltip]').tooltip();
       $('.upload-info').tooltip();
 
-      arangoHelper.fixTooltips(".icon_arangodb, .arangoicon", "top");
+      arangoHelper.fixTooltips('.icon_arangodb, .arangoicon', 'top');
       this.renderPaginationElements();
       this.selectActivePagesize();
       this.markFilterToggle();
+      this.resize();
       return this;
     },
 
-    rerender : function () {
+    rerender: function () {
       this.collection.getDocuments(this.getDocsCallback.bind(this));
+      this.resize();
     },
 
-    selectActivePagesize: function() {
+    selectActivePagesize: function () {
       $('#documentSize').val(this.collection.getPageSize());
     },
 
@@ -956,198 +993,18 @@
         total = $('#totalDocuments');
       }
       if (this.type === 'document') {
-        total.html(this.collection.getTotal() + " document(s)");
+        total.html(numeral(this.collection.getTotal()).format('0,0') + ' doc(s)');
       }
       if (this.type === 'edge') {
-        total.html(this.collection.getTotal() + " edge(s)");
+        total.html(numeral(this.collection.getTotal()).format('0,0') + ' edge(s)');
       }
     },
 
     breadcrumb: function () {
-      this.collectionName = window.location.hash.split("/")[1];
-      $('#transparentHeader').append(
-        '<div class="breadcrumb">'+
-        '<a class="activeBread" href="#collections">Collections</a>'+
-        '<span class="disabledBread"><i class="fa fa-chevron-right"></i></span>'+
-        '<a class="disabledBread">'+this.collectionName+'</a>'+
-        '</div>'
+      $('#subNavigationBar .breadcrumb').html(
+        'Collection: ' + this.collectionName
       );
-    },
-
-    resetIndexForms: function () {
-      $('#indexHeader input').val('').prop("checked", false);
-      $('#newIndexType').val('Cap').prop('selected',true);
-      this.selectIndexType();
-    },
-    stringToArray: function (fieldString) {
-      var fields = [];
-      fieldString.split(',').forEach(function(field){
-        field = field.replace(/(^\s+|\s+$)/g,'');
-        if (field !== '') {
-          fields.push(field);
-        }
-      });
-      return fields;
-    },
-    createIndex: function () {
-      //e.preventDefault();
-      var self = this;
-      var indexType = $('#newIndexType').val();
-      var result;
-      var postParameter = {};
-      var fields;
-      var unique;
-      var sparse;
-
-      switch (indexType) {
-        case 'Cap':
-          var size = parseInt($('#newCapSize').val(), 10) || 0;
-          var byteSize = parseInt($('#newCapByteSize').val(), 10) || 0;
-          postParameter = {
-            type: 'cap',
-            size: size,
-            byteSize: byteSize
-          };
-          break;
-        case 'Geo':
-          //HANDLE ARRAY building
-          fields = $('#newGeoFields').val();
-          var geoJson = self.checkboxToValue('#newGeoJson');
-          var constraint = self.checkboxToValue('#newGeoConstraint');
-          var ignoreNull = self.checkboxToValue('#newGeoIgnoreNull');
-          postParameter = {
-            type: 'geo',
-            fields: self.stringToArray(fields),
-            geoJson: geoJson,
-            constraint: constraint,
-            ignoreNull: ignoreNull
-          };
-          break;
-        case 'Hash':
-          fields = $('#newHashFields').val();
-          unique = self.checkboxToValue('#newHashUnique');
-          sparse = self.checkboxToValue('#newHashSparse');
-          postParameter = {
-            type: 'hash',
-            fields: self.stringToArray(fields),
-            unique: unique,
-            sparse: sparse
-          };
-          break;
-        case 'Fulltext':
-          fields = ($('#newFulltextFields').val());
-          var minLength =  parseInt($('#newFulltextMinLength').val(), 10) || 0;
-          postParameter = {
-            type: 'fulltext',
-            fields: self.stringToArray(fields),
-            minLength: minLength
-          };
-          break;
-        case 'Skiplist':
-          fields = $('#newSkiplistFields').val();
-          unique = self.checkboxToValue('#newSkiplistUnique');
-          sparse = self.checkboxToValue('#newSkiplistSparse');
-          postParameter = {
-            type: 'skiplist',
-            fields: self.stringToArray(fields),
-            unique: unique,
-            sparse: sparse
-          };
-          break;
-      }
-      result = self.collectionModel.createIndex(postParameter);
-      if (result === true) {
-        $('#collectionEditIndexTable tbody tr').remove();
-        self.getIndex();
-        self.toggleNewIndexView();
-        self.resetIndexForms();
-      }
-      else {
-        if (result.responseText) {
-          var message = JSON.parse(result.responseText);
-          arangoHelper.arangoNotification("Document error", message.errorMessage);
-        }
-        else {
-          arangoHelper.arangoNotification("Document error", "Could not create index.");
-        }
-      }
-    },
-
-    prepDeleteIndex: function (e) {
-      this.lastTarget = e;
-      this.lastId = $(this.lastTarget.currentTarget).
-                    parent().
-                    parent().
-                    first().
-                    children().
-                    first().
-                    text();
-      $("#indexDeleteModal").modal('show');
-    },
-    deleteIndex: function () {
-      var result = this.collectionModel.deleteIndex(this.lastId);
-      if (result === true) {
-        $(this.lastTarget.currentTarget).parent().parent().remove();
-      }
-      else {
-        arangoHelper.arangoError("Could not delete index");
-      }
-      $("#indexDeleteModal").modal('hide');
-    },
-    selectIndexType: function () {
-      $('.newIndexClass').hide();
-      var type = $('#newIndexType').val();
-      $('#newIndexType'+type).show();
-    },
-    checkboxToValue: function (id) {
-      return $(id).prop('checked');
-    },
-    getIndex: function () {
-      this.index = this.collectionModel.getIndex();
-      var cssClass = 'collectionInfoTh modal-text';
-      if (this.index) {
-        var fieldString = '';
-        var actionString = '';
-
-        $.each(this.index.indexes, function(k, v) {
-          if (v.type === 'primary' || v.type === 'edge') {
-            actionString = '<span class="icon_arangodb_locked" ' +
-              'data-original-title="No action"></span>';
-          }
-          else {
-            actionString = '<span class="deleteIndex icon_arangodb_roundminus" ' +
-              'data-original-title="Delete index" title="Delete index"></span>';
-          }
-
-          if (v.fields !== undefined) {
-            fieldString = v.fields.join(", ");
-          }
-
-          //cut index id
-          var position = v.id.indexOf('/');
-          var indexId = v.id.substr(position + 1, v.id.length);
-          var selectivity = (
-            v.hasOwnProperty("selectivityEstimate") ? 
-            (v.selectivityEstimate * 100).toFixed(2) + "%" : 
-            "n/a"
-          );
-          var sparse = (v.hasOwnProperty("sparse") ? v.sparse : "n/a");
-
-          $('#collectionEditIndexTable').append(
-            '<tr>' +
-            '<th class=' + JSON.stringify(cssClass) + '>' + indexId + '</th>' +
-            '<th class=' + JSON.stringify(cssClass) + '>' + v.type + '</th>' +
-            '<th class=' + JSON.stringify(cssClass) + '>' + v.unique + '</th>' +
-            '<th class=' + JSON.stringify(cssClass) + '>' + sparse + '</th>' +
-            '<th class=' + JSON.stringify(cssClass) + '>' + selectivity + '</th>' +
-            '<th class=' + JSON.stringify(cssClass) + '>' + fieldString + '</th>' +
-            '<th class=' + JSON.stringify(cssClass) + '>' + actionString + '</th>' +
-            '</tr>'
-          );
-        });
-
-        arangoHelper.fixTooltips("deleteIndex", "left");
-      }
     }
+
   });
 }());

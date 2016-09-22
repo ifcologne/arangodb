@@ -34,20 +34,54 @@
 
 }
 
+.select2-drop-active {
+  border: 2px solid $c-info;
+  border-top: 0;
+  margin-top: -2px;
+  width: 452px !important;
+  z-index: 9999999;
+}
+
+.select2-results,
+.select2-no-results {
+  font-weight: 100;
+}
+
+.modal-tabbar {
+  border-bottom: 1px solid $c-darker-grey;
+}
 
 .modal-body {
+  @extend %font-family;
   color: $c-btn-inverse;
-  font-family: 'Open Sans', sans-serif !important;
   font-size: 14px;
   font-weight: 300;
   max-height: 410px;
 
+  input {
+    height: 20px;
+    width: 436px;
+  }
+
+  select {
+    height: 33px;
+    margin-top: 0;
+    width: 452px;
+  }
+
+  .select2-container-multi.select2-container-active {
+    .select2-choices {
+      border: 2px solid $c-info;
+    }
+  }
+
   .select2-choices {
     background-image: none !important;
-    border: 1px solid $c-dark-grey;
+    border: 2px solid $c-content-border;
     border-radius: 3px;
     -webkit-box-shadow: none;
     box-shadow: none;
+    width: 448px;
 
     input {
       @extend %inputs;
@@ -112,6 +146,56 @@
 
   input[type='file'] {
     line-height: 17px;
+  }
+
+  tr {
+
+    &.spacer {
+      height: 20px;
+    }
+
+    &.first {
+      background-color: $c-lightgreen-2-bg;
+
+      th:first-child {
+        border-top-left-radius: 3px;
+      }
+
+      th:last-child {
+        border-top-right-radius: 3px;
+      }
+    }
+
+    &.middle {
+      background-color: $c-lightgreen-2-bg;
+      padding-left: 10px;
+      padding-right: 10px;
+    }
+
+    &.last {
+      background-color: $c-lightgreen-2-bg;
+
+      th:first-child {
+        border-bottom-left-radius: 3px;
+      }
+
+      th:last-child {
+        border-bottom-right-radius: 3px;
+      }
+    }
+
+    &.first,
+    &.middle,
+    &.last {
+      th:first-child {
+        padding-left: 10px;
+      }
+
+      th:last-child {
+        padding-right: 10px;
+      }
+    }
+
   }
 
   th {
@@ -207,14 +291,6 @@
     }
   }
 
-  input {
-    width: 384px;
-  }
-
-  select {
-    width: 398px;
-  }
-
   .collectionTh {
     height: 55px;
   }
@@ -228,6 +304,10 @@
       padding-top: 10px;
     }
 
+    .tab-pane-modal {
+      border-top: none !important;
+    }
+
     #appstore {
       max-height: 290px;
     }
@@ -235,12 +315,14 @@
   }
 
   .errorMessage {
-    background-color: $c-white;
-    color: $c-negative;
+    background: $c-negative;
+    border-radius: 4px;
+    color: $c-white;
     font-size: 9pt;
-    font-weight: 400;
-    margin-bottom: 5px;
+    font-weight: 100;
     margin-top: -9px;
+    padding-left: 5px;
+    padding-right: 5px;
     position: absolute;
   }
 
@@ -250,6 +332,10 @@
     width: 20px;
   }
 
+  pre {
+    margin-right: 20px;
+    margin-top: 20px;
+  }
 }
 
 .modal-text {
@@ -263,10 +349,22 @@
   opacity: .4;
 }
 
+.fade {
+  opacity: 0;
+  -moz-transition: opacity .03s linear;
+  -ms-transition: opacity .03s linear;
+  -o-transition: opacity .03s linear;
+  -webkit-transition: opacity .03s linear;
+  transition: opacity .03s linear;
+}
+
 .modal {
   border: 0 !important;
   border-radius: 3px !important;
   box-shadow: 0;
+  margin-left: -325px !important;
+  width: 650px;
+  z-index: 9999999;
 
   .fade.in {
     top: 12.1% !important;
@@ -313,6 +411,11 @@
 .modal-footer {
   border-top: 0 !important;
   padding-right: 17px;
+
+  .button-close {
+    margin-left: 20px;
+    margin-right: 10px;
+  }
 }
 
 .modal-header {
@@ -328,11 +431,6 @@
   padding-bottom: 9px;
 }
 
-.modal table tr,
-.thBorderBottom {
-  border-bottom: 1px solid $c-modal-table-border-bottom !important;
-}
-
 .modal-delete-confirmation {
   display: none;
 
@@ -342,6 +440,18 @@
 
     .modal-confirm-delete {
       margin-right: -18px;
+    }
+  }
+
+  fieldset {
+
+    input {
+      float: left;
+    }
+
+    label {
+      float: left;
+      margin-left: 10px;
     }
   }
 }
@@ -365,7 +475,7 @@
   .figures1,
   .figures2 {
     margin-bottom: 20px;
-    width: 255px;
+    width: 300px;
   }
 
   .figures2 {
@@ -380,8 +490,23 @@
 }
 
 .foxx-store-row {
+  border-bottom: 10px solid $c-white;
+  border-top: 10px solid $c-white;
+
   .foxx-name {
-    font-weight: 700;
+    background: $c-bluegrey-dark;
+    border-radius: 4px;
+    color: $c-white;
+    font-weight: 300;
+    margin-bottom: 8px;
+    padding-bottom: 1px;
+    padding-left: 5px;
+    width: 100%;
+  }
+
+  .foxx-store-install {
+    padding-right: 5px;
+    padding-top: 25px;
   }
 
   .foxx-author {
@@ -392,6 +517,7 @@
 
   .foxx-version {
     font-weight: 400;
+    margin-top: 25px;
   }
 }
 

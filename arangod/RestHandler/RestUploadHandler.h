@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief upload request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,76 +19,33 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_REST_HANDLER_REST_UPLOAD_HANDLER_H
-#define ARANGODB_REST_HANDLER_REST_UPLOAD_HANDLER_H 1
+#ifndef ARANGOD_REST_HANDLER_REST_UPLOAD_HANDLER_H
+#define ARANGOD_REST_HANDLER_REST_UPLOAD_HANDLER_H 1
 
 #include "Basics/Common.h"
-
+#include "GeneralServer/GeneralServer.h"
 #include "RestHandler/RestVocbaseBaseHandler.h"
-#include "HttpServer/HttpServer.h"
 
-namespace triagens {
-  namespace arango {
+namespace arangodb {
 
-    class RestUploadHandler : public RestVocbaseBaseHandler {
+class RestUploadHandler : public RestVocbaseBaseHandler {
+ public:
+  RestUploadHandler(GeneralRequest*, GeneralResponse*);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 RestUploadHandler
-// -----------------------------------------------------------------------------
+  ~RestUploadHandler();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ public:
+  RestHandler::status execute();
 
-      public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief parses a multi-part request body and determines the boundaries of
+  /// its first element
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-        explicit RestUploadHandler (rest::HttpRequest*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-        ~RestUploadHandler ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               HttpHandler methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        HttpHandler::status_t execute ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief parses a multi-part request body and determines the boundaries of
-/// its first element
-////////////////////////////////////////////////////////////////////////////////
-
-        bool parseMultiPart (char const*&,
-                             size_t&);
-
-     };
-  }
+  bool parseMultiPart(char const*&, size_t&);
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

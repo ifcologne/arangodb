@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief AQL range type
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,29 +19,17 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Range.h"
 
-using namespace triagens::aql;
+using namespace arangodb::aql;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief Range constructor
-////////////////////////////////////////////////////////////////////////////////
-      
-Range::Range (int64_t low, 
-              int64_t high) 
-  : _low(low), 
-    _high(high) {
-}
+Range::Range(int64_t low, int64_t high) : _low(low), _high(high) {}
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief get number of elements in Range
-////////////////////////////////////////////////////////////////////////////////
-
-size_t Range::size () const {
+size_t Range::size() const {
   if (_low <= _high) {
     // e.g. 1..1, 1..10 etc.
     return static_cast<size_t>(_high - _low + 1);
@@ -54,11 +38,8 @@ size_t Range::size () const {
   return static_cast<size_t>(_low - _high + 1);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief get element at position
-////////////////////////////////////////////////////////////////////////////////
-      
-int64_t Range::at (size_t position) const {
+int64_t Range::at(size_t position) const {
   if (_low <= _high) {
     // e.g. 1..1, 1..10 etc.
     return _low + static_cast<int64_t>(position);
@@ -68,11 +49,11 @@ int64_t Range::at (size_t position) const {
   return _low - static_cast<int64_t>(position);
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+bool Range::isIn(int64_t value) const {
+  if (_low <= _high) {
+    // e.g. 1..1, 1..10 etc.
+    return value >= _low && value <= _high;
+  }
+  // e.g. 10..1
+  return value <= _low && value >= _high;
+}

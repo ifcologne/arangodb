@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief cursor
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,96 +19,70 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Utils/Cursor.h"
-#include "Basics/JsonHelper.h"
+#include "Cursor.h"
+#include "Basics/VPackStringBufferAdapter.h"
+#include "Basics/VelocyPackDumper.h"
+#include "Basics/VelocyPackHelper.h"
 #include "Utils/CollectionExport.h"
-#include "VocBase/document-collection.h"
-#include "VocBase/shaped-json.h"
+#include "Utils/CollectionNameResolver.h"
+#include "Utils/StandaloneTransactionContext.h"
+#include "Utils/TransactionContext.h"
 #include "VocBase/vocbase.h"
-#include "VocBase/VocShaper.h"
 
-using namespace triagens::arango;
+#include <velocypack/Builder.h>
+#include <velocypack/Dumper.h>
+#include <velocypack/Iterator.h>
+#include <velocypack/Options.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      class Cursor
-// -----------------------------------------------------------------------------
+using namespace arangodb;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
+Cursor::Cursor(CursorId id, size_t batchSize,
+               std::shared_ptr<VPackBuilder> extra, double ttl, bool hasCount)
+    : _id(id),
+      _batchSize(batchSize),
+      _position(0),
+      _extra(extra),
+      _ttl(ttl),
+      _expires(TRI_microtime() + _ttl),
+      _hasCount(hasCount),
+      _isDeleted(false),
+      _isUsed(false) {}
 
-Cursor::Cursor (CursorId id,
-                size_t batchSize,
-                TRI_json_t* extra,
-                double ttl, 
-                bool hasCount) 
-  : _id(id),
-    _batchSize(batchSize),
-    _position(0),
-    _extra(extra),
-    _ttl(ttl),
-    _expires(TRI_microtime() + _ttl),
-    _hasCount(hasCount),
-    _isDeleted(false),
-    _isUsed(false) {
+Cursor::~Cursor() {}
 
-}
-        
-Cursor::~Cursor () {
-  if (_extra != nullptr) {
-    TRI_FreeJson(TRI_UNKNOWN_MEM_ZONE, _extra);
+VPackSlice Cursor::extra() const {
+  if (_extra == nullptr) {
+    VPackSlice empty;
+    return empty;
   }
+  return _extra->slice();
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  class JsonCursor
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-JsonCursor::JsonCursor (TRI_vocbase_t* vocbase,
-                        CursorId id,
-                        TRI_json_t* json,
-                        size_t batchSize,
-                        TRI_json_t* extra,
-                        double ttl, 
-                        bool hasCount,
-                        bool cached) 
-  : Cursor(id, batchSize, extra, ttl, hasCount),
-    _vocbase(vocbase),
-    _json(json),
-    _size(TRI_LengthArrayJson(_json)),
-    _cached(cached) {
-
-  TRI_UseVocBase(vocbase);
+VelocyPackCursor::VelocyPackCursor(TRI_vocbase_t* vocbase, CursorId id,
+                                   aql::QueryResult&& result, size_t batchSize,
+                                   std::shared_ptr<VPackBuilder> extra,
+                                   double ttl, bool hasCount)
+    : Cursor(id, batchSize, extra, ttl, hasCount),
+      _vocbaseGuard(vocbase),
+      _result(std::move(result)),
+      _iterator(_result.result->slice()),
+      _cached(_result.cached) {
+  TRI_ASSERT(_result.result->slice().isArray());
 }
-        
-JsonCursor::~JsonCursor () {
-  freeJson(); 
-
-  TRI_ReleaseVocBase(_vocbase);
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief check whether the cursor contains more data
 ////////////////////////////////////////////////////////////////////////////////
 
-bool JsonCursor::hasNext () {
-  if (_position < _size) {
+bool VelocyPackCursor::hasNext() {
+  if (_iterator.valid()) {
     return true;
   }
 
-  freeJson(); 
+  _isDeleted = true;
   return false;
 }
 
@@ -120,147 +90,94 @@ bool JsonCursor::hasNext () {
 /// @brief return the next element
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_json_t* JsonCursor::next () {
-  TRI_ASSERT_EXPENSIVE(_json != nullptr);
-  TRI_ASSERT_EXPENSIVE(_position < _size);
-
-  return static_cast<TRI_json_t*>(TRI_AtVector(&_json->_value._objects, _position++));
+VPackSlice VelocyPackCursor::next() {
+  TRI_ASSERT(_result.result != nullptr);
+  TRI_ASSERT(_iterator.valid());
+  VPackSlice slice = _iterator.value();
+  _iterator.next();
+  return slice;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief return the cursor size
 ////////////////////////////////////////////////////////////////////////////////
 
-size_t JsonCursor::count () const {
-  return _size;
-}
+size_t VelocyPackCursor::count() const { return _iterator.size(); }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief dump the cursor contents into a string buffer
-////////////////////////////////////////////////////////////////////////////////
-        
-void JsonCursor::dump (triagens::basics::StringBuffer& buffer) {
-  buffer.appendText("\"result\":[");
-
-  size_t const n = batchSize();
-
-  // reserve 48 bytes per result document by default, but only
-  // if the specified batch size does not get out of hand
-  // otherwise specifying a very high batch size would make the allocation fail
-  // in every case, even if there were much less documents in the collection
-  if (n <= 50000) {
-    int res = buffer.reserve(n * 48);
-
-    if (res != TRI_ERROR_NO_ERROR) {
-      THROW_ARANGO_EXCEPTION(res);
+void VelocyPackCursor::dump(VPackBuilder& builder) {
+  try {
+    size_t const n = batchSize();
+    size_t num = n;
+    if (num == 0) {
+      num = 1;
+    } else if (num >= 10000) {
+      num = 10000;
     }
-  }
+    // reserve an arbitrary number of bytes for the result to save
+    // some reallocs
+    // (not accurate, but the actual size is unknown anyway)
+    builder.buffer()->reserve(num * 32);
 
-  for (size_t i = 0; i < n; ++i) {
-    if (! hasNext()) {
-      break;
-    }
+    VPackOptions const* oldOptions = builder.options;
 
-    if (i > 0) {
-      buffer.appendChar(',');
+    builder.options = _result.context->getVPackOptions();
+
+    builder.add("result", VPackValue(VPackValueType::Array));
+    for (size_t i = 0; i < n; ++i) {
+      if (!hasNext()) {
+        break;
+      }
+      builder.add(next());
     }
-    
-    auto row = next();
-    if (row == nullptr) {
-      THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+    builder.close();
+
+    // builder.add("hasMore", VPackValue(hasNext() ? "true" : "false"));
+    // //shoudl not be string
+    builder.add("hasMore", VPackValue(hasNext()));
+
+    if (hasNext()) {
+      builder.add("id", VPackValue(std::to_string(id())));
     }
 
-    int res = TRI_StringifyJson(buffer.stringBuffer(), row);
-
-    if (res != TRI_ERROR_NO_ERROR) {
-      THROW_ARANGO_EXCEPTION(res);
+    if (hasCount()) {
+      builder.add("count", VPackValue(static_cast<uint64_t>(count())));
     }
-  }
 
-  buffer.appendText("],\"hasMore\":");
-  buffer.appendText(hasNext() ? "true" : "false");
+    if (extra().isObject()) {
+      builder.add("extra", extra());
+    }
 
-  if (hasNext()) {
-    // only return cursor id if there are more documents
-    buffer.appendText(",\"id\":\"");
-    buffer.appendInteger(id());
-    buffer.appendText("\"");
-  }
+    builder.add("cached", VPackValue(_cached));
 
-  if (hasCount()) {
-    buffer.appendText(",\"count\":");
-    buffer.appendInteger(static_cast<uint64_t>(count()));
-  }
-
-  TRI_json_t const* extraJson = extra();
-
-  if (TRI_IsObjectJson(extraJson)) {
-    buffer.appendText(",\"extra\":");
-    TRI_StringifyJson(buffer.stringBuffer(), extraJson);
-  }
-
-  buffer.appendText(",\"cached\":");
-  buffer.appendText(_cached ? "true" : "false");
-    
-  if (! hasNext()) {
-    // mark the cursor as deleted
-    this->deleted();
+    if (!hasNext()) {
+      // mark the cursor as deleted
+      this->deleted();
+    }
+    builder.options = oldOptions;
+  } catch (arangodb::basics::Exception const& ex) {
+    THROW_ARANGO_EXCEPTION_MESSAGE(ex.code(), ex.what());
+  } catch (std::exception const& ex) {
+    THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_INTERNAL, ex.what());
+  } catch (...) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private functions
-// -----------------------------------------------------------------------------
+ExportCursor::ExportCursor(TRI_vocbase_t* vocbase, CursorId id,
+                           arangodb::CollectionExport* ex, size_t batchSize,
+                           double ttl, bool hasCount)
+    : Cursor(id, batchSize, nullptr, ttl, hasCount),
+      _vocbaseGuard(vocbase),
+      _ex(ex),
+      _size(ex->_documents->size()) {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief free the internals
-////////////////////////////////////////////////////////////////////////////////
-
-void JsonCursor::freeJson () {
-  if (_json != nullptr) {
-    TRI_FreeJson(TRI_UNKNOWN_MEM_ZONE, _json);
-    _json = nullptr;
-  }
-
-  _isDeleted = true;
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                class ExportCursor
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-ExportCursor::ExportCursor (TRI_vocbase_t* vocbase,
-                            CursorId id,
-                            triagens::arango::CollectionExport* ex,
-                            size_t batchSize,
-                            double ttl, 
-                            bool hasCount)
-  : Cursor(id, batchSize, nullptr, ttl, hasCount),
-    _vocbase(vocbase),
-    _ex(ex),
-    _size(ex->_documents->size()) {
-
-  TRI_UseVocBase(vocbase);
-}
-        
-ExportCursor::~ExportCursor () {
-  delete _ex;
-  TRI_ReleaseVocBase(_vocbase);
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+ExportCursor::~ExportCursor() { delete _ex; }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief check whether the cursor contains more data
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ExportCursor::hasNext () {
+bool ExportCursor::hasNext() {
   if (_ex == nullptr) {
     return false;
   }
@@ -272,162 +189,117 @@ bool ExportCursor::hasNext () {
 /// @brief return the next element (not implemented)
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_json_t* ExportCursor::next () {
+VPackSlice ExportCursor::next() {
   // should not be called directly
-  return nullptr;
+  VPackSlice slice;
+  return slice;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief return the cursor size
 ////////////////////////////////////////////////////////////////////////////////
 
-size_t ExportCursor::count () const {
-  return _size;
+size_t ExportCursor::count() const { return _size; }
+
+static bool IncludeAttribute(
+    CollectionExport::Restrictions::Type const restrictionType,
+    std::unordered_set<std::string> const& fields, std::string const& key) {
+  if (restrictionType == CollectionExport::Restrictions::RESTRICTION_INCLUDE ||
+      restrictionType == CollectionExport::Restrictions::RESTRICTION_EXCLUDE) {
+    bool const keyContainedInRestrictions = (fields.find(key) != fields.end());
+    if ((restrictionType ==
+             CollectionExport::Restrictions::RESTRICTION_INCLUDE &&
+         !keyContainedInRestrictions) ||
+        (restrictionType ==
+             CollectionExport::Restrictions::RESTRICTION_EXCLUDE &&
+         keyContainedInRestrictions)) {
+      // exclude the field
+      return false;
+    }
+    // include the field
+    return true;
+  } else {
+    // no restrictions
+    TRI_ASSERT(restrictionType ==
+               CollectionExport::Restrictions::RESTRICTION_NONE);
+    return true;
+  }
+  return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief dump the cursor contents into a string buffer
-////////////////////////////////////////////////////////////////////////////////
-        
-void ExportCursor::dump (triagens::basics::StringBuffer& buffer) {
-  TRI_ASSERT(_ex != nullptr);
+void ExportCursor::dump(VPackBuilder& builder) {
+  auto transactionContext =
+      std::make_shared<StandaloneTransactionContext>(_vocbaseGuard.vocbase());
 
-  auto shaper = _ex->_document->getShaper();
+  VPackOptions const* oldOptions = builder.options;
+
+  builder.options = transactionContext->getVPackOptions();
+
+  TRI_ASSERT(_ex != nullptr);
   auto const restrictionType = _ex->_restrictions.type;
 
-  buffer.appendText("\"result\":[");
+  try {
+    builder.add("result", VPackValue(VPackValueType::Array));
+    size_t const n = batchSize();
 
-  size_t const n = batchSize();
-
-  for (size_t i = 0; i < n; ++i) {
-    if (! hasNext()) {
-      break;
-    }
-
-    if (i > 0) {
-      buffer.appendChar(',');
-    }
-    
-    auto marker = static_cast<TRI_df_marker_t const*>(_ex->_documents->at(_position++));
-
-    TRI_shaped_json_t shaped;
-    TRI_EXTRACT_SHAPED_JSON_MARKER(shaped, marker);
-    triagens::basics::Json json(shaper->memoryZone(), TRI_JsonShapedJson(shaper, &shaped));
-
-    // append the internal attributes
-
-    // _id, _key, _rev
-    char const* key = TRI_EXTRACT_MARKER_KEY(marker);
-    std::string id(_ex->_resolver.getCollectionName(_ex->_document->_info._cid));
-    id.push_back('/');
-    id.append(key);
-
-    json(TRI_VOC_ATTRIBUTE_ID, triagens::basics::Json(id));
-    json(TRI_VOC_ATTRIBUTE_REV, triagens::basics::Json(std::to_string(TRI_EXTRACT_MARKER_RID(marker))));
-    json(TRI_VOC_ATTRIBUTE_KEY, triagens::basics::Json(key));
-
-    if (TRI_IS_EDGE_MARKER(marker)) {
-      // _from
-      std::string from(_ex->_resolver.getCollectionNameCluster(TRI_EXTRACT_MARKER_FROM_CID(marker)));
-      from.push_back('/');
-      from.append(TRI_EXTRACT_MARKER_FROM_KEY(marker));
-      json(TRI_VOC_ATTRIBUTE_FROM, triagens::basics::Json(from));
-        
-      // _to
-      std::string to(_ex->_resolver.getCollectionNameCluster(TRI_EXTRACT_MARKER_TO_CID(marker)));
-      to.push_back('/');
-      to.append(TRI_EXTRACT_MARKER_TO_KEY(marker));
-      json(TRI_VOC_ATTRIBUTE_TO, triagens::basics::Json(to));
-    }
-
-    if (restrictionType == CollectionExport::Restrictions::RESTRICTION_INCLUDE ||
-        restrictionType == CollectionExport::Restrictions::RESTRICTION_EXCLUDE) {
-      // only include the specified fields
-      // for this we'll modify the JSON that we already have, in place
-      // we'll scan through the JSON attributs from left to right and
-      // keep all those that we want to keep. we'll overwrite existing
-      // other values in the JSON 
-      TRI_json_t* obj = json.json();
-      TRI_ASSERT(TRI_IsObjectJson(obj));
-
-      size_t const n = TRI_LengthVector(&obj->_value._objects);
-
-      size_t j = 0;
-      for (size_t i = 0; i < n; i += 2) {
-        auto key = static_cast<TRI_json_t const*>(TRI_AtVector(&obj->_value._objects, i));
-
-        if (! TRI_IsStringJson(key)) {
-          continue;
-        }
-
-        bool const keyContainedInRestrictions = (_ex->_restrictions.fields.find(key->_value._string.data) != _ex->_restrictions.fields.end());
-
-        if ((restrictionType == CollectionExport::Restrictions::RESTRICTION_INCLUDE && keyContainedInRestrictions) ||
-            (restrictionType == CollectionExport::Restrictions::RESTRICTION_EXCLUDE && ! keyContainedInRestrictions)) {
-          // include the field
-          if (i != j) {
-            // steal the key and the value
-            void* src = TRI_AddressVector(&obj->_value._objects, i);
-            void* dst = TRI_AddressVector(&obj->_value._objects, j);
-            memcpy(dst, src, 2 * sizeof(TRI_json_t));
-          }
-          j += 2;
-        }
-        else {
-          // do not include the field
-          // key
-          auto src = static_cast<TRI_json_t*>(TRI_AddressVector(&obj->_value._objects, i));
-          TRI_DestroyJson(TRI_UNKNOWN_MEM_ZONE, src);
-          // value
-          TRI_DestroyJson(TRI_UNKNOWN_MEM_ZONE, src + 1);
-        }
+    for (size_t i = 0; i < n; ++i) {
+      if (!hasNext()) {
+        break;
       }
 
-      // finally adjust the length of the patched JSON so the NULL fields at
-      // the end will not be dumped
-      TRI_SetLengthVector(&obj->_value._objects, j); 
+      VPackSlice const slice(
+          reinterpret_cast<char const*>(_ex->_documents->at(_position++)));
+      builder.openObject();
+      // Copy over shaped values
+      for (auto const& entry : VPackObjectIterator(slice)) {
+        std::string key(entry.key.copyString());
+
+        if (!IncludeAttribute(restrictionType, _ex->_restrictions.fields,
+                              key)) {
+          // Ignore everything that should be excluded or not included
+          continue;
+        }
+        // If we get here we need this entry in the final result
+        if (entry.value.isCustom()) {
+          builder.add(key,
+                      VPackValue(builder.options->customTypeHandler->toString(
+                          entry.value, builder.options, slice)));
+        } else {
+          builder.add(key, entry.value);
+        }
+      }
+      builder.close();
     }
-    else {
-      // no restrictions
-      TRI_ASSERT(restrictionType == CollectionExport::Restrictions::RESTRICTION_NONE);
+    builder.close();  // close Array
+
+    // builder.add("hasMore", VPackValue(hasNext() ? "true" : "false"));
+    // //should not be string
+    builder.add("hasMore", VPackValue(hasNext()));
+
+    if (hasNext()) {
+      builder.add("id", VPackValue(std::to_string(id())));
     }
-        
-    int res = TRI_StringifyJson(buffer.stringBuffer(), json.json());
 
-    if (res != TRI_ERROR_NO_ERROR) {
-      THROW_ARANGO_EXCEPTION(res);
+    if (hasCount()) {
+      builder.add("count", VPackValue(static_cast<uint64_t>(count())));
     }
+
+    if (extra().isObject()) {
+      builder.add("extra", extra());
+    }
+
+    if (!hasNext()) {
+      // mark the cursor as deleted
+      delete _ex;
+      _ex = nullptr;
+      this->deleted();
+    }
+  } catch (arangodb::basics::Exception const& ex) {
+    THROW_ARANGO_EXCEPTION_MESSAGE(ex.code(), ex.what());
+  } catch (std::exception const& ex) {
+    THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_INTERNAL, ex.what());
+  } catch (...) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
   }
-
-  buffer.appendText("],\"hasMore\":");
-  buffer.appendText(hasNext() ? "true" : "false");
-
-  if (hasNext()) {
-    // only return cursor id if there are more documents
-    buffer.appendText(",\"id\":\"");
-    buffer.appendInteger(id());
-    buffer.appendText("\"");
-  }
-
-  if (hasCount()) {
-    buffer.appendText(",\"count\":");
-    buffer.appendInteger(static_cast<uint64_t>(count()));
-  }
-
-  if (! hasNext()) {
-    delete _ex;
-    _ex = nullptr;
-
-    // mark the cursor as deleted
-    this->deleted();
-  }
+  builder.options = oldOptions;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

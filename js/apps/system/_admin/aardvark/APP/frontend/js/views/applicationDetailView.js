@@ -1,86 +1,145 @@
-/*jshint browser: true */
-/*global Backbone, $, window, arangoHelper, templateEngine, Joi, _*/
-(function() {
+/* jshint browser: true */
+/* global Backbone, $, window, ace, arangoHelper, templateEngine, Joi, _*/
+(function () {
   'use strict';
 
   window.ApplicationDetailView = Backbone.View.extend({
     el: '#content',
+
+    divs: ['#readme', '#swagger', '#app-info', '#sideinformation', '#information', '#settings'],
+    navs: ['#service-info', '#service-api', '#service-readme', '#service-settings'],
 
     template: templateEngine.createTemplate('applicationDetailView.ejs'),
 
     events: {
       'click .open': 'openApp',
       'click .delete': 'deleteApp',
-      'click #app-config': 'showConfigDialog',
       'click #app-deps': 'showDepsDialog',
       'click #app-switch-mode': 'toggleDevelopment',
       'click #app-scripts [data-script]': 'runScript',
       'click #app-tests': 'runTests',
       'click #app-replace': 'replaceApp',
       'click #download-app': 'downloadApp',
-      'click #app-show-swagger': 'showSwagger',
-      'click #app-show-readme': 'showReadme',
+      'click .subMenuEntries li': 'changeSubview',
+      'click #jsonLink': 'toggleSwagger',
       'mouseenter #app-scripts': 'showDropdown',
       'mouseleave #app-scripts': 'hideDropdown'
     },
 
-    downloadApp: function() {
+    resize: function (auto) {
+      if (auto) {
+        $('.innerContent').css('height', 'auto');
+      } else {
+        $('.innerContent').height($('.centralRow').height() - 150);
+        $('#swagger iframe').height($('.centralRow').height() - 150);
+        $('#swagger #swaggerJsonContent').height($('.centralRow').height() - 150);
+      }
+    },
+
+    toggleSwagger: function () {
+      var callbackFunction = function (json) {
+        $('#jsonLink').html('JSON');
+        this.jsonEditor.setValue(JSON.stringify(json, null, '\t'), 1);
+        $('#swaggerJsonContent').show();
+        $('#swagger iframe').hide();
+      }.bind(this);
+
+      if ($('#jsonLink').html() === 'Swagger') {
+        var url = arangoHelper.databaseUrl('/_admin/aardvark/foxxes/docs/swagger.json?mount=' + encodeURIComponent(this.model.get('mount')));
+        arangoHelper.download(url, callbackFunction);
+      } else {
+        $('#swaggerJsonContent').hide();
+        $('#swagger iframe').show();
+        $('#jsonLink').html('Swagger');
+      }
+    },
+
+    changeSubview: function (e) {
+      _.each(this.navs, function (nav) {
+        $(nav).removeClass('active');
+      });
+
+      $(e.currentTarget).addClass('active');
+
+      _.each(this.divs, function (div) {
+        $('.headerButtonBar').hide();
+        $(div).hide();
+      });
+
+      if (e.currentTarget.id === 'service-readme') {
+        this.resize(true);
+        $('#readme').show();
+      } else if (e.currentTarget.id === 'service-api') {
+        this.resize();
+        $('#swagger').show();
+      } else if (e.currentTarget.id === 'service-info') {
+        this.resize(true);
+        this.render();
+        $('#information').show();
+        $('#sideinformation').show();
+      } else if (e.currentTarget.id === 'service-settings') {
+        this.resize(true);
+        this.showConfigDialog();
+        $('.headerButtonBar').show();
+        $('#settings').show();
+      }
+    },
+
+    downloadApp: function () {
       if (!this.model.isSystem()) {
         this.model.download();
       }
     },
 
-    replaceApp: function() {
+    replaceApp: function () {
       var mount = this.model.get('mount');
-      window.foxxInstallView.upgrade(mount, function() {
+      window.foxxInstallView.upgrade(mount, function () {
         window.App.applicationDetail(encodeURIComponent(mount));
       });
-      $('.createModalDialog .arangoHeader').html("Replace Service");
+      $('.createModalDialog .arangoHeader').html('Replace Service');
       $('#infoTab').click();
     },
 
-    updateConfig: function() {
+    updateConfig: function () {
       this.model.getConfiguration(function () {
         $('#app-warning')[this.model.needsAttention() ? 'show' : 'hide']();
         $('#app-warning-config')[this.model.needsConfiguration() ? 'show' : 'hide']();
 
         if (this.model.needsConfiguration()) {
           $('#app-config').addClass('error');
-        }
-        else {
+        } else {
           $('#app-config').removeClass('error');
         }
       }.bind(this));
     },
 
-    updateDeps: function() {
+    updateDeps: function () {
       this.model.getDependencies(function () {
         $('#app-warning')[this.model.needsAttention() ? 'show' : 'hide']();
         $('#app-warning-deps')[this.model.hasUnconfiguredDependencies() ? 'show' : 'hide']();
         if (this.model.hasUnconfiguredDependencies()) {
           $('#app-deps').addClass('error');
-        }
-        else {
+        } else {
           $('#app-deps').removeClass('error');
         }
       }.bind(this));
     },
 
-    toggleDevelopment: function() {
-      this.model.toggleDevelopment(!this.model.isDevelopment(), function() {
+    toggleDevelopment: function () {
+      this.model.toggleDevelopment(!this.model.isDevelopment(), function () {
         if (this.model.isDevelopment()) {
-          $('#app-switch-mode').val('Set Production');
+          $('.app-switch-mode').text('Set Production');
           $('#app-development-indicator').css('display', 'inline');
           $('#app-development-path').css('display', 'inline');
         } else {
-          $('#app-switch-mode').val('Set Development');
+          $('.app-switch-mode').text('Set Development');
           $('#app-development-indicator').css('display', 'none');
           $('#app-development-path').css('display', 'none');
         }
       }.bind(this));
     },
 
-    runScript: function(event) {
+    runScript: function (event) {
       event.preventDefault();
       var script = $(event.currentTarget).attr('data-script');
       var tableContent = [
@@ -97,7 +156,7 @@
         )
       ];
       var buttons = [
-        window.modalView.createSuccessButton('Run script', function() {
+        window.modalView.createSuccessButton('Run script', function () {
           var opts = $('#app_script_arguments').val();
           opts = opts && JSON.parse(opts);
           window.modalView.hide();
@@ -105,15 +164,15 @@
             var info;
             if (err) {
               info = (
-                '<p>The script failed with an error'
-                + (err.statusCode ? (' (HTTP ' + err.statusCode + ')') : '')
-                + ':</p>'
-                + '<pre>' + err.message + '</pre>'
+                '<p>The script failed with an error' +
+                (err.statusCode ? (' (HTTP ' + err.statusCode + ')') : '') +
+                ':</p>' +
+                '<pre>' + err.message + '</pre>'
               );
             } else if (result) {
               info = (
-                '<p>Script results:</p>'
-                + '<pre>' + JSON.stringify(result, null, 2) + '</pre>'
+                '<p>Script results:</p>' +
+                '<pre>' + JSON.stringify(result, null, 2) + '</pre>'
               );
             } else {
               info = '<p>The script ran successfully.</p>';
@@ -137,26 +196,26 @@
       );
     },
 
-    showSwagger: function(event) {
+    showSwagger: function (event) {
       event.preventDefault();
       this.render('swagger');
     },
 
-    showReadme: function(event) {
+    showReadme: function (event) {
       event.preventDefault();
       this.render('readme');
     },
 
-    runTests: function(event) {
+    runTests: function (event) {
       event.preventDefault();
       var warning = (
-        '<p><strong>WARNING:</strong> Running tests may result in destructive side-effects including data loss.'
-        + ' Please make sure not to run tests on a production database.</p>'
+      '<p><strong>WARNING:</strong> Running tests may result in destructive side-effects including data loss.' +
+        ' Please make sure not to run tests on a production database.</p>'
       );
       if (this.model.isDevelopment()) {
         warning += (
-          '<p><strong>WARNING:</strong> This app is running in <strong>development mode</strong>.'
-          + ' If any of the tests access the app\'s HTTP API they may become non-deterministic.</p>'
+          '<p><strong>WARNING:</strong> This app is running in <strong>development mode</strong>.' +
+          ' If any of the tests access the app\'s HTTP API they may become non-deterministic.</p>'
         );
       }
       var buttons = [
@@ -184,47 +243,116 @@
       );
     },
 
-    render: function(mode) {
+    render: function (mode) {
+      this.resize();
+      this.model.fetchThumbnail(function () {
+        var callback = function (error, db) {
+          var self = this;
+          if (error) {
+            arangoHelper.arangoError('DB', 'Could not get current database');
+          } else {
+            $(this.el).html(this.template.render({
+              app: this.model,
+              baseUrl: arangoHelper.databaseUrl('', db),
+              mode: mode
+            }));
 
-      var self = this;
+            // init ace
+            self.jsonEditor = ace.edit('swaggerJsonEditor');
+            self.jsonEditor.setReadOnly(true);
+            self.jsonEditor.getSession().setMode('ace/mode/json');
 
-      $(this.el).html(this.template.render({
-        app: this.model,
-        db: arangoHelper.currentDatabase(),
-        mode: mode
-      }));
+            $.ajax({
+              url: this.appUrl(db),
+              headers: {
+                accept: 'text/html,*/*;q=0.9'
+              }
+            }).success(function () {
+              $('.open', this.el).prop('disabled', false);
+            }.bind(this));
 
-      $.get(this.appUrl()).success(function () {
-        $(".open", this.el).prop('disabled', false);
-      }.bind(this));
+            this.updateConfig();
+            this.updateDeps();
 
-      this.updateConfig();
-      this.updateDeps();
-
-      if (mode === 'swagger') {
-        $.get( "./foxxes/docs/swagger.json?mount=" + encodeURIComponent(this.model.get('mount')), function(data) {
-          if (Object.keys(data.paths).length < 1) {
-            self.render('readme');
-            $('#app-show-swagger').attr('disabled', 'true');
+            if (mode === 'swagger') {
+              $.get('./foxxes/docs/swagger.json?mount=' + encodeURIComponent(this.model.get('mount')), function (data) {
+                if (Object.keys(data.paths).length < 1) {
+                  self.render('readme');
+                  $('#app-show-swagger').attr('disabled', 'true');
+                }
+              });
+            }
           }
-        });
-      }
 
+          this.breadcrumb();
+        }.bind(this);
+
+        arangoHelper.currentDatabase(callback);
+
+        if (_.isEmpty(this.model.get('config'))) {
+          $('#service-settings').attr('disabled', true);
+        }
+      }.bind(this));
       return $(this.el);
     },
 
-    openApp: function() {
-      window.open(this.appUrl(), this.model.get('title')).focus();
+    breadcrumb: function () {
+      var string = 'Service: ' + this.model.get('name') + '<i class="fa fa-ellipsis-v" aria-hidden="true"></i>';
+
+      var contributors = '<p class="mount"><span>Contributors:</span>';
+      if (this.model.get('contributors') && this.model.get('contributors').length > 0) {
+        _.each(this.model.get('contributors'), function (contributor) {
+          contributors += '<a href="mailto:' + contributor.email + '">' + contributor.name + '</a>';
+        });
+      } else {
+        contributors += 'No contributors';
+      }
+      contributors += '</p>';
+      $('.information').append(
+        contributors
+      );
+
+      // information box info tab
+      if (this.model.get('author')) {
+        $('.information').append(
+          '<p class="mount"><span>Author:</span>' + this.model.get('author') + '</p>'
+        );
+      }
+      if (this.model.get('mount')) {
+        $('.information').append(
+          '<p class="mount"><span>Mount:</span>' + this.model.get('mount') + '</p>'
+        );
+      }
+      if (this.model.get('development')) {
+        if (this.model.get('path')) {
+          $('.information').append(
+            '<p class="path"><span>Path:</span>' + this.model.get('path') + '</p>'
+          );
+        }
+      }
+      $('#subNavigationBar .breadcrumb').html(string);
     },
 
-    deleteApp: function() {
+    openApp: function () {
+      var callback = function (error, db) {
+        if (error) {
+          arangoHelper.arangoError('DB', 'Could not get current database');
+        } else {
+          window.open(this.appUrl(db), this.model.get('title')).focus();
+        }
+      }.bind(this);
+
+      arangoHelper.currentDatabase(callback);
+    },
+
+    deleteApp: function () {
       var buttons = [
-        window.modalView.createDeleteButton('Delete', function() {
+        window.modalView.createDeleteButton('Delete', function () {
           var opts = {teardown: $('#app_delete_run_teardown').is(':checked')};
           this.model.destroy(opts, function (err, result) {
             if (!err && result.error === false) {
               window.modalView.hide();
-              window.App.navigate('applications', {trigger: true});
+              window.App.navigate('services', {trigger: true});
             }
           });
         }.bind(this))
@@ -234,7 +362,7 @@
           'app_delete_run_teardown',
           'Run teardown?',
           true,
-          'Should this app\'s teardown script be executed before removing the app?',
+          "Should this app's teardown script be executed before removing the app?",
           true
         )
       ];
@@ -249,15 +377,13 @@
       );
     },
 
-    appUrl: function () {
-      return window.location.origin + '/_db/'
-      + encodeURIComponent(arangoHelper.currentDatabase())
-      + this.model.get('mount');
+    appUrl: function (currentDB) {
+      return arangoHelper.databaseUrl(this.model.get('mount'), currentDB);
     },
 
-    applyConfig: function() {
+    applyConfig: function () {
       var cfg = {};
-      _.each(this.model.get('config'), function(opt, key) {
+      _.each(this.model.get('config'), function (opt, key) {
         var $el = $('#app_config_' + key);
         var val = $el.val();
         if (opt.type === 'boolean' || opt.type === 'bool') {
@@ -282,17 +408,18 @@
           return;
         }
       });
-      this.model.setConfiguration(cfg, function() {
-        window.modalView.hide();
+      this.model.setConfiguration(cfg, function () {
         this.updateConfig();
+        arangoHelper.arangoNotification(this.model.get('name'), 'Settings applied.');
       }.bind(this));
     },
 
-    showConfigDialog: function() {
+    showConfigDialog: function () {
       if (_.isEmpty(this.model.get('config'))) {
+        $('#settings .buttons').html($('#hidden_buttons').html());
         return;
       }
-      var tableContent = _.map(this.model.get('config'), function(obj, name) {
+      var tableContent = _.map(this.model.get('config'), function (obj, name) {
         var defaultValue = obj.default === undefined ? '' : String(obj.default);
         var currentValue = obj.current === undefined ? '' : String(obj.current);
         var methodName = 'createTextEntry';
@@ -349,32 +476,34 @@
           checks
         );
       });
+
       var buttons = [
         window.modalView.createSuccessButton('Apply', this.applyConfig.bind(this))
       ];
-      window.modalView.show(
-        'modalTable.ejs', 'Configuration', buttons, tableContent
-      );
 
+      window.modalView.show(
+        'modalTable.ejs', 'Configuration', buttons, tableContent, null, null, null, null, null, 'settings'
+      );
+      $('.modal-footer').prepend($('#hidden_buttons').html());
     },
 
-    applyDeps: function() {
+    applyDeps: function () {
       var deps = {};
-      _.each(this.model.get('deps'), function(title, name) {
+      _.each(this.model.get('deps'), function (title, name) {
         var $el = $('#app_deps_' + name);
         deps[name] = window.arangoHelper.escapeHtml($el.val());
       });
-      this.model.setDependencies(deps, function() {
+      this.model.setDependencies(deps, function () {
         window.modalView.hide();
         this.updateDeps();
       }.bind(this));
     },
 
-    showDepsDialog: function() {
+    showDepsDialog: function () {
       if (_.isEmpty(this.model.get('deps'))) {
         return;
       }
-      var tableContent = _.map(this.model.get('deps'), function(obj, name) {
+      var tableContent = _.map(this.model.get('deps'), function (obj, name) {
         var currentValue = obj.current === undefined ? '' : String(obj.current);
         var defaultValue = '';
         var description = obj.definition.name;
@@ -407,7 +536,6 @@
       window.modalView.show(
         'modalTable.ejs', 'Dependencies', buttons, tableContent
       );
-
     },
 
     showDropdown: function () {

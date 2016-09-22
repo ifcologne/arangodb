@@ -30,8 +30,8 @@
    This special exception was added by the Free Software Foundation in
    version 2.2 of Bison.  */
 
-#ifndef YY_AQL_ARANGOD_AQL_GRAMMAR_HPP_INCLUDED
-# define YY_AQL_ARANGOD_AQL_GRAMMAR_HPP_INCLUDED
+#ifndef YY_AQL_AQL_GRAMMAR_HPP_INCLUDED
+# define YY_AQL_AQL_GRAMMAR_HPP_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 0
@@ -58,53 +58,64 @@ extern int Aqldebug;
     T_IN = 267,
     T_WITH = 268,
     T_INTO = 269,
-    T_DISTINCT = 270,
-    T_REMOVE = 271,
-    T_INSERT = 272,
-    T_UPDATE = 273,
-    T_REPLACE = 274,
-    T_UPSERT = 275,
-    T_NULL = 276,
-    T_TRUE = 277,
-    T_FALSE = 278,
-    T_STRING = 279,
-    T_QUOTED_STRING = 280,
-    T_INTEGER = 281,
-    T_DOUBLE = 282,
-    T_PARAMETER = 283,
-    T_ASSIGN = 284,
-    T_NOT = 285,
-    T_AND = 286,
-    T_OR = 287,
-    T_EQ = 288,
-    T_NE = 289,
-    T_LT = 290,
-    T_GT = 291,
-    T_LE = 292,
-    T_GE = 293,
-    T_PLUS = 294,
-    T_MINUS = 295,
-    T_TIMES = 296,
-    T_DIV = 297,
-    T_MOD = 298,
-    T_QUESTION = 299,
-    T_COLON = 300,
-    T_SCOPE = 301,
-    T_RANGE = 302,
-    T_COMMA = 303,
-    T_OPEN = 304,
-    T_CLOSE = 305,
-    T_OBJECT_OPEN = 306,
-    T_OBJECT_CLOSE = 307,
-    T_ARRAY_OPEN = 308,
-    T_ARRAY_CLOSE = 309,
-    T_NIN = 310,
-    UMINUS = 311,
-    UPLUS = 312,
-    FUNCCALL = 313,
-    REFERENCE = 314,
-    INDEXED = 315,
-    EXPANSION = 316
+    T_AGGREGATE = 270,
+    T_GRAPH = 271,
+    T_SHORTEST_PATH = 272,
+    T_DISTINCT = 273,
+    T_REMOVE = 274,
+    T_INSERT = 275,
+    T_UPDATE = 276,
+    T_REPLACE = 277,
+    T_UPSERT = 278,
+    T_NULL = 279,
+    T_TRUE = 280,
+    T_FALSE = 281,
+    T_STRING = 282,
+    T_QUOTED_STRING = 283,
+    T_INTEGER = 284,
+    T_DOUBLE = 285,
+    T_PARAMETER = 286,
+    T_ASSIGN = 287,
+    T_NOT = 288,
+    T_AND = 289,
+    T_OR = 290,
+    T_NIN = 291,
+    T_REGEX_MATCH = 292,
+    T_REGEX_NON_MATCH = 293,
+    T_EQ = 294,
+    T_NE = 295,
+    T_LT = 296,
+    T_GT = 297,
+    T_LE = 298,
+    T_GE = 299,
+    T_LIKE = 300,
+    T_PLUS = 301,
+    T_MINUS = 302,
+    T_TIMES = 303,
+    T_DIV = 304,
+    T_MOD = 305,
+    T_QUESTION = 306,
+    T_COLON = 307,
+    T_SCOPE = 308,
+    T_RANGE = 309,
+    T_COMMA = 310,
+    T_OPEN = 311,
+    T_CLOSE = 312,
+    T_OBJECT_OPEN = 313,
+    T_OBJECT_CLOSE = 314,
+    T_ARRAY_OPEN = 315,
+    T_ARRAY_CLOSE = 316,
+    T_OUTBOUND = 317,
+    T_INBOUND = 318,
+    T_ANY = 319,
+    T_ALL = 320,
+    T_NONE = 321,
+    UMINUS = 322,
+    UPLUS = 323,
+    FUNCCALL = 324,
+    REFERENCE = 325,
+    INDEXED = 326,
+    EXPANSION = 327
   };
 #endif
 
@@ -113,9 +124,9 @@ extern int Aqldebug;
 
 union YYSTYPE
 {
-#line 17 "arangod/Aql/grammar.y" /* yacc.c:1915  */
+#line 19 "Aql/grammar.y" /* yacc.c:1909  */
 
-  triagens::aql::AstNode*  node;
+  arangodb::aql::AstNode*  node;
   struct {
     char*                  value;
     size_t                 length;
@@ -123,7 +134,7 @@ union YYSTYPE
   bool                     boolval;
   int64_t                  intval;
 
-#line 127 "arangod/Aql/grammar.hpp" /* yacc.c:1915  */
+#line 138 "Aql/grammar.hpp" /* yacc.c:1909  */
 };
 
 typedef union YYSTYPE YYSTYPE;
@@ -147,6 +158,6 @@ struct YYLTYPE
 
 
 
-int Aqlparse (triagens::aql::Parser* parser);
+int Aqlparse (arangodb::aql::Parser* parser);
 
-#endif /* !YY_AQL_ARANGOD_AQL_GRAMMAR_HPP_INCLUDED  */
+#endif /* !YY_AQL_AQL_GRAMMAR_HPP_INCLUDED  */

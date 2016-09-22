@@ -25,13 +25,16 @@
 /// @author Copyright 2015, ArangoDB GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "Basics/Common.h"
+
+#define BOOST_TEST_INCLUDED
 #include <boost/test/unit_test.hpp>
 
 #include "Basics/AttributeNameParser.h"
 #include "Basics/Exceptions.h"
 
-using namespace triagens;
-using namespace triagens::basics;
+using namespace arangodb;
+using namespace arangodb::basics;
 
 // -----------------------------------------------------------------------------
 // --SECTION--                                                 setup / tear-down
@@ -83,9 +86,11 @@ BOOST_AUTO_TEST_CASE (test_subAttribute) {
 
   TRI_ParseAttributeString(input, result);
   
-  BOOST_CHECK_EQUAL(result.size(), static_cast<size_t>(1));
-  BOOST_CHECK_EQUAL(result[0].name, "foo.bar");
+  BOOST_CHECK_EQUAL(result.size(), static_cast<size_t>(2));
+  BOOST_CHECK_EQUAL(result[0].name, "foo");
   BOOST_CHECK_EQUAL(result[0].shouldExpand, false);
+  BOOST_CHECK_EQUAL(result[1].name, "bar");
+  BOOST_CHECK_EQUAL(result[1].shouldExpand, false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -98,9 +103,13 @@ BOOST_AUTO_TEST_CASE (test_subsubAttribute) {
 
   TRI_ParseAttributeString(input, result);
   
-  BOOST_CHECK_EQUAL(result.size(), static_cast<size_t>(1));
-  BOOST_CHECK_EQUAL(result[0].name, "foo.bar.baz");
+  BOOST_CHECK_EQUAL(result.size(), static_cast<size_t>(3));
+  BOOST_CHECK_EQUAL(result[0].name, "foo");
   BOOST_CHECK_EQUAL(result[0].shouldExpand, false);
+  BOOST_CHECK_EQUAL(result[1].name, "bar");
+  BOOST_CHECK_EQUAL(result[1].shouldExpand, false);
+  BOOST_CHECK_EQUAL(result[2].name, "baz");
+  BOOST_CHECK_EQUAL(result[2].shouldExpand, false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -128,9 +137,11 @@ BOOST_AUTO_TEST_CASE (test_expandSubAttribute) {
 
   TRI_ParseAttributeString(input, result);
   
-  BOOST_CHECK_EQUAL(result.size(), static_cast<size_t>(1));
-  BOOST_CHECK_EQUAL(result[0].name, "foo.bar");
-  BOOST_CHECK_EQUAL(result[0].shouldExpand, true);
+  BOOST_CHECK_EQUAL(result.size(), static_cast<size_t>(2));
+  BOOST_CHECK_EQUAL(result[0].name, "foo");
+  BOOST_CHECK_EQUAL(result[0].shouldExpand, false);
+  BOOST_CHECK_EQUAL(result[1].name, "bar");
+  BOOST_CHECK_EQUAL(result[1].shouldExpand, true);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -162,7 +173,7 @@ BOOST_AUTO_TEST_CASE (test_invalidAttributeAfterExpand) {
     TRI_ParseAttributeString(input, result);
     BOOST_FAIL("Expected the function to throw");
   } catch (Exception& e) {
-    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_PARSER_FAILED);
+    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_ATTRIBUTE_PARSER_FAILED);
   }
 }
 
@@ -178,7 +189,7 @@ BOOST_AUTO_TEST_CASE (test_nonClosingBracket) {
     TRI_ParseAttributeString(input, result);
     BOOST_FAIL("Expected the function to throw");
   } catch (Exception& e) {
-    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_PARSER_FAILED);
+    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_ATTRIBUTE_PARSER_FAILED);
   }
 }
 
@@ -194,7 +205,39 @@ BOOST_AUTO_TEST_CASE (test_nonClosingBracket2) {
     TRI_ParseAttributeString(input, result);
     BOOST_FAIL("Expected the function to throw");
   } catch (Exception& e) {
-    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_PARSER_FAILED);
+    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_ATTRIBUTE_PARSER_FAILED);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief test_nonAsterisk
+////////////////////////////////////////////////////////////////////////////////
+
+BOOST_AUTO_TEST_CASE (test_nonAsterisk) {
+  std::string input = "foo[0]";
+  std::vector<AttributeName> result;
+
+  try {
+    TRI_ParseAttributeString(input, result);
+    BOOST_FAIL("Expected the function to throw");
+  } catch (Exception& e) {
+    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_ATTRIBUTE_PARSER_FAILED);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief test_nonAsterisk
+////////////////////////////////////////////////////////////////////////////////
+
+BOOST_AUTO_TEST_CASE (test_nonAsterisk2) {
+  std::string input = "foo[0].value";
+  std::vector<AttributeName> result;
+
+  try {
+    TRI_ParseAttributeString(input, result);
+    BOOST_FAIL("Expected the function to throw");
+  } catch (Exception& e) {
+    BOOST_CHECK_EQUAL(e.code(), TRI_ERROR_ARANGO_ATTRIBUTE_PARSER_FAILED);
   }
 }
 

@@ -1,4 +1,4 @@
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
 /// @brief geo index
 ///
 /// @file
@@ -38,12 +38,15 @@
 /* regression testing program for GeoIndex module     */
 /*  R.A.P. 2.1  8.1.2012                              */
 
-#include <boost/test/unit_test.hpp>
+#include "Basics/Common.h"
+
+#define BOOST_TEST_MODULE "C Unit Tests for Cambridge"
+#include <boost/test/included/unit_test.hpp>
 
 #include "GeoIndex/GeoIndex.h"
 #include "Basics/StringUtils.h"
 
-using namespace triagens::basics;
+using namespace arangodb::basics;
 
 // -----------------------------------------------------------------------------
 // --SECTION--                                                 private variables
@@ -70,7 +73,8 @@ int np4[4]={2838,5116,5180,9869};
 int hs4[4]={33972992,9770664,11661062,28398735};
 int hs5[4]={79685116,67516870,19274248,35037618};
 
-static GeoIndex * gi;
+static GeoIdx * gi;
+static GeoCursor * gcr;
 static GeoCoordinate gcp;
 static GeoCoordinate gcp1, gcp2, gcp3, gcp4;
 static GeoCoordinates * list1;
@@ -83,7 +87,7 @@ static void* nullp = 0;
 // --SECTION--                                                 private functions
 // -----------------------------------------------------------------------------
 
-static void MyFree (GeoIndex * gi) {
+static void MyFree (GeoIdx * gi) {
     int x;
     x=GeoIndex_INDEXVALID(gi);
 
@@ -122,6 +126,17 @@ int GCMASS (GeoCoordinates * gc, int ct, int hash) {
         j=j*7;
         j=j%123456791;
     }
+if(hash!=j)
+{
+    for(i=0;i<(int) gc->length;i++)
+    {
+        printf("long %14.9f",gc->coordinates[i].longitude);
+        printf(" lat %14.9f",gc->coordinates[i].latitude);
+        printf(" dat %4d",(int)((char *)gc->coordinates[i].data-ix));
+        printf(" dist %12.1f \n",gc->distances[i]);
+    }
+    printf("Correct hash is %d\n",j);
+}
     GeoIndex_CoordinatesFree(gc);
 
     return hash == j ? 1 : 0;
@@ -160,7 +175,7 @@ double tolerance (double a, double b, double c) {
 
 #define gccheck(e, gc, ct, bytes)                       \
   BOOST_TEST_CHECKPOINT(StringUtils::itoa((e)));        \
-  BOOST_CHECK_EQUAL((long) (ct),(long) (gc)->length);                \
+  BOOST_CHECK_EQUAL((long) (ct),(long) (gc)->length);   \
   BOOST_CHECK_EQUAL(GCCHECK((gc), (ct), (bytes)), 1)
 
 #ifdef DEBUG
@@ -173,8 +188,7 @@ double tolerance (double a, double b, double c) {
 
 #define gcmass(e, gc, ct, hash)                         \
   BOOST_TEST_CHECKPOINT(StringUtils::itoa((e)));        \
-  BOOST_CHECK_EQUAL((long) (ct), (long) (gc)->length);                \
-  BOOST_TEST_CHECKPOINT(StringUtils::itoa((e + 1)));    \
+  BOOST_CHECK_EQUAL((long) (ct), (long) (gc)->length);  \
   BOOST_CHECK_EQUAL(GCMASS((gc), (ct), (hash)), 1)
 
 void coonum(GeoCoordinate * gc, int num)
@@ -264,6 +278,52 @@ BOOST_FIXTURE_TEST_SUITE(GeoIndexTest, GeoIndexSetup)
 /*   3 is Auckland  -36.916667 +174.783333         */
 /*   4 is Jo'burg   -26.166667  +28.033333         */
 
+/***********************************/
+/* 1000-1100 first tests on cursor  */
+BOOST_AUTO_TEST_CASE (tst_geo1000) {
+  gi=GeoIndex_new();
+  la=41.23456789;
+  lo=39.87654321;
+  for(j=1;j<50;j++)
+  {
+      gcp.latitude = la;
+      gcp.longitude= lo;
+      gcp.data     = &ix[j];
+      r = GeoIndex_insert(gi,&gcp);
+      icheck(1000,0,r);
+      la+=19.5396157761;
+      if(la>90.0) la-=180.0;
+      lo+=17.2329155421;
+      if(lo>180) lo-=360.0;
+  }
+  gcp.latitude = 0.0;
+  gcp.longitude= 25.5;
+  gcr = GeoIndex_NewCursor(gi,&gcp);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1001,list1,5, 87399654);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1002,list1,5, 97583446);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1003,list1,5, 30565728);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1004,list1,5, 77530526);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1005,list1,5, 38005425);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1006,list1,5, 106050772);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1007,list1,5, 51101201);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1008,list1,5, 83277910);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1009,list1,5, 53245966);
+  list1 = GeoIndex_ReadCursor(gcr,5);
+  gcmass(1010,list1,4, 86589238);
+  GeoIndex_CursorFree(gcr);
+
+  MyFree(gi);
+}
+/***************************************/
 BOOST_AUTO_TEST_CASE (tst_geo1) {
   gcp1.latitude  =   51.5;
   gcp1.longitude =   -0.166666;
@@ -293,6 +353,34 @@ BOOST_AUTO_TEST_CASE (tst_geo1) {
 /* first some easily recognizable GeoStrings       */
 /* mainly for debugging rather than regression     */
 
+BOOST_AUTO_TEST_CASE (tst_geo15) {
+gi=GeoIndex_new();
+GeoIndex_hint(gi,10);  /* set it to "robust" mode */
+for(i=0;i<50;i++)
+{
+    gcp.latitude  = 90.0;
+    gcp.longitude = 180.0;
+    gcp.data = ix + i;
+    r = GeoIndex_insert(gi,&gcp);
+    icheck(10,0,r);
+}
+gcp.latitude = 0.0;
+gcp.longitude= 25.5;
+gcr = GeoIndex_NewCursor(gi,&gcp);
+list1 = GeoIndex_ReadCursor(gcr,1);
+icheck(11,1,list1->length);
+GeoIndex_CoordinatesFree(list1);
+GeoIndex_CursorFree(gcr);
+gcp.latitude  = 89.9;
+gcp.longitude = -180.0;
+gcp.data = ix + 64;
+GeoIndex_insert(gi,&gcp);
+list1 = GeoIndex_NearestCountPoints(gi,&gcp,1);
+gccheck(13,list1,  1,"AAAAAAAAAAAAAAAABAAAAAAAA"); 
+gicheck(14,gi);
+/*GeoIndex_INDEXDUMP(gi,stdout);*/
+MyFree(gi);
+}
 BOOST_AUTO_TEST_CASE (tst_geo10) {
 gi=GeoIndex_new();
 GeoIndex_hint(gi,10);  /* set it to "robust" mode */
@@ -312,6 +400,7 @@ gcp.latitude  = 89.9;
 gcp.longitude = -180.0;
 gcp.data = ix + 64;
 GeoIndex_insert(gi,&gcp);
+GeoIndex_CoordinatesFree(list1);
 list1 = GeoIndex_NearestCountPoints(gi,&gcp,1);
 gccheck(13,list1,  1,"AAAAAAAAAAAAAAAABAAAAAAAA"); 
 gicheck(14,gi);
@@ -459,37 +548,37 @@ MyFree(gi);
 /*   in some chaotic ways                          */
 
 BOOST_AUTO_TEST_CASE (tst_geo70) {
-gi=GeoIndex_new();
+  gi=GeoIndex_new();
 
-gcp.latitude  = 0.0;
-gcp.longitude = 40.0;
-gcp.data = &ix[4];
-i = GeoIndex_insert(gi,&gcp);
-icheck(70,0,i);
+  gcp.latitude  = 0.0;
+  gcp.longitude = 40.0;
+  gcp.data = &ix[4];
+  i = GeoIndex_insert(gi,&gcp);
+  icheck(70,0,i);
 
-gcp.data = &ix[5];
-i = GeoIndex_remove(gi,&gcp);
-icheck(71,-1,i);
+  gcp.data = &ix[5];
+  i = GeoIndex_remove(gi,&gcp);
+  icheck(71,-1,i);
 
-gcp.longitude = 40.000001;
-gcp.data = &ix[4];
-i = GeoIndex_remove(gi,&gcp);
-icheck(72,-1,i);
+  gcp.longitude = 40.000001;
+  gcp.data = &ix[4];
+  i = GeoIndex_remove(gi,&gcp);
+  icheck(72,-1,i);
 
-gcp.latitude  = 0.0000000001;
-gcp.longitude = 40.0;
-i = GeoIndex_remove(gi,&gcp);
-icheck(73,-1,i);
+  gcp.latitude  = 0.0000000001;
+  gcp.longitude = 40.0;
+  i = GeoIndex_remove(gi,&gcp);
+  icheck(73,-1,i);
 
-gcp.latitude  = 0.0;
-i = GeoIndex_remove(gi,&gcp);
-icheck(74,0,i);
+  gcp.latitude  = 0.0;
+  i = GeoIndex_remove(gi,&gcp);
+  icheck(74,0,i);
 
-i = GeoIndex_remove(gi,&gcp);
-icheck(75,-1,i);
+  i = GeoIndex_remove(gi,&gcp);
+  icheck(75,-1,i);
 
-for(j=1;j<=8;j++)
-{
+  for(j=1;j<=8;j++)
+  {
     gcp.latitude  = 0.0;
     lo=j;
     lo=lo*10;
@@ -497,73 +586,76 @@ for(j=1;j<=8;j++)
     gcp.data = &ix[j];
     i = GeoIndex_insert(gi,&gcp);
     icheck(76,0,i);
-}
+  }
 
-gcp.latitude = 0.0;
-gcp.longitude= 25.5;
-list1 = GeoIndex_NearestCountPoints(gi,&gcp,1);
-icheck(77,1,list1->length);
-dcheck(78,0.0,list1->coordinates[0].latitude,0.0);
-dcheck(79,30.0,list1->coordinates[0].longitude,0.0);
-pcheck(80,&ix[3],(char *)list1->coordinates[0].data);
-gcp.longitude= 24.5;
-list1 = GeoIndex_NearestCountPoints(gi,&gcp,1);
-icheck(81,1,list1->length);
-dcheck(82,0.0,list1->coordinates[0].latitude,0.0);
-dcheck(83,20.0,list1->coordinates[0].longitude,0.0);
-pcheck(84,&ix[2],(char *)list1->coordinates[0].data);
+  gcp.latitude = 0.0;
+  gcp.longitude= 25.5;
+  list1 = GeoIndex_NearestCountPoints(gi,&gcp,1);
+  icheck(77,1,list1->length);
+  dcheck(78,0.0,list1->coordinates[0].latitude,0.0);
+  dcheck(79,30.0,list1->coordinates[0].longitude,0.0);
+  pcheck(80,&ix[3],(char *)list1->coordinates[0].data);
+  gcp.longitude= 24.5;
+  GeoIndex_CoordinatesFree(list1);
+  list1 = GeoIndex_NearestCountPoints(gi,&gcp,1);
+  icheck(81,1,list1->length);
+  dcheck(82,0.0,list1->coordinates[0].latitude,0.0);
+  dcheck(83,20.0,list1->coordinates[0].longitude,0.0);
+  pcheck(84,&ix[2],(char *)list1->coordinates[0].data);
+  GeoIndex_CoordinatesFree(list1);
 
-gcp.latitude  = 1.0;
-gcp.longitude = 40.0;
-gcp.data = &ix[14];
-i = GeoIndex_insert(gi,&gcp);
-icheck(85,0,i);
+  gcp.latitude  = 1.0;
+  gcp.longitude = 40.0;
+  gcp.data = &ix[14];
+  i = GeoIndex_insert(gi,&gcp);
+  icheck(85,0,i);
 
-gcp.longitude = 8000.0;
-i = GeoIndex_insert(gi,&gcp);
-icheck(86,-3,i);
+  gcp.longitude = 8000.0;
+  i = GeoIndex_insert(gi,&gcp);
+  icheck(86,-3,i);
 
-gcp.latitude  = 800.0;
-gcp.longitude = 80.0;
-i = GeoIndex_insert(gi,&gcp);
-icheck(86,-3,i);
+  gcp.latitude  = 800.0;
+  gcp.longitude = 80.0;
+  i = GeoIndex_insert(gi,&gcp);
+  icheck(86,-3,i);
 
-gcp.latitude  = 800.0;
-gcp.longitude = 80.0;
-i = GeoIndex_remove(gi,&gcp);
-icheck(87,-1,i);
+  gcp.latitude  = 800.0;
+  gcp.longitude = 80.0;
+  i = GeoIndex_remove(gi,&gcp);
+  icheck(87,-3,i);
 
-gcp.latitude  = 1.0;
-gcp.longitude = 40.0;
-gcp.data = &ix[14];
-i = GeoIndex_remove(gi,&gcp);
-icheck(88,0,i);
+  gcp.latitude  = 1.0;
+  gcp.longitude = 40.0;
+  gcp.data = &ix[14];
+  i = GeoIndex_remove(gi,&gcp);
+  icheck(88,0,i);
 
-for(j=1;j<10;j++)
-{
+  for(j=1;j<10;j++)
+  {
     gcp.latitude  = 0.0;
     gcp.longitude = 40.0;
     gcp.data = &ix[20+j];
     i = GeoIndex_insert(gi,&gcp);
     icheck(89,0,i);
-}
+  }
 
-for(j=1;j<10;j++)
-{
+  for(j=1;j<10;j++)
+  {
     gcp.latitude  = 0.0;
     gcp.longitude = 40.0;
     gcp.data = &ix[20+j];
     i = GeoIndex_remove(gi,&gcp);
     icheck(90,0,i);
-}
+  }
 
-gcp.latitude = 0.0;
-gcp.longitude= 35.5;
+  gcp.latitude = 0.0;
+  gcp.longitude= 35.5;
   list1 = GeoIndex_NearestCountPoints(gi,&gcp,1);
   icheck(91,1,list1->length);
   dcheck(92,0.0,list1->coordinates[0].latitude,0.0);
   dcheck(93,40.0,list1->coordinates[0].longitude,0.0);
   pcheck(94,&ix[4],(char *)list1->coordinates[0].data);
+  GeoIndex_CoordinatesFree(list1);
 
   list1 = GeoIndex_NearestCountPoints(gi,&gcp,10);
   gccheck(95,list1,  8,"OPBAAAAAAAAAAAAAAAAAAAAAA"); 
@@ -808,6 +900,7 @@ BOOST_AUTO_TEST_CASE (tst_geo200) {
           }
       }
   }
+  GeoIndex_CoordinatesFree(list1);
 
   list1 = GeoIndex_PointsWithinRadius(gi,&gcp1,13000.0);
   if(list1->length==5)
@@ -1259,6 +1352,7 @@ BOOST_AUTO_TEST_CASE (tst_geo900) {
 
   MyFree(gi);
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief generate tests

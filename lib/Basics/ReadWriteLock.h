@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Read-Write Lock
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,156 +20,67 @@
 ///
 /// @author Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_BASICS_READ_WRITE_LOCK_H
 #define ARANGODB_BASICS_READ_WRITE_LOCK_H 1
 
 #include "Basics/Common.h"
-
 #include "Basics/locks.h"
 
-#undef TRI_READ_WRITE_LOCK_COUNTER
+namespace arangodb {
+namespace basics {
 
-namespace triagens {
-  namespace basics {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               class ReadWriteLock
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief read-write lock
-////////////////////////////////////////////////////////////////////////////////
+class ReadWriteLock {
+  ReadWriteLock(ReadWriteLock const&) = delete;
+  ReadWriteLock& operator=(ReadWriteLock const&) = delete;
 
-    class ReadWriteLock {
-        ReadWriteLock (ReadWriteLock const&);
-        ReadWriteLock& operator= (ReadWriteLock const&);
+ public:
+  /// @brief constructs a read-write lock
+  ReadWriteLock();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+  /// @brief deletes read-write lock
+  ~ReadWriteLock();
 
-      public:
+ public:
+  /// @brief locks for reading
+  void readLock();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructs a read-write lock
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief tries to lock for reading
+  bool tryReadLock();
 
-        ReadWriteLock ();
+  /// @brief tries to lock for reading, sleeping if the lock cannot be
+  /// acquired instantly, sleepTime is in microseconds
+  bool tryReadLock(uint64_t sleepTime);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief deletes read-write lock
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief locks for writing
+  void writeLock();
 
-        ~ReadWriteLock ();
+  /// @brief tries to lock for writing
+  bool tryWriteLock();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+  /// @brief tries to lock for writing, sleeping if the lock cannot be
+  /// acquired instantly, sleepTime is in microseconds
+  bool tryWriteLock(uint64_t sleepTime);
 
-      public:
+  /// @brief releases the read-lock or write-lock
+  void unlock();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief check for read locked
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief releases the read-lock
+  void unlockRead();
+  
+  /// @brief releases the write-lock
+  void unlockWrite();
 
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-        bool isReadLocked () const;
-#endif
+ private:
+  /// @brief read-write lock variable
+  TRI_read_write_lock_t _rwlock;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief locks for reading
-////////////////////////////////////////////////////////////////////////////////
-
-        void readLock ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief tries to lock for reading
-////////////////////////////////////////////////////////////////////////////////
-
-        bool tryReadLock ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief check for write locked
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-        bool isWriteLocked () const;
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief locks for writing
-////////////////////////////////////////////////////////////////////////////////
-
-        void writeLock ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief tries to lock for writing
-////////////////////////////////////////////////////////////////////////////////
-
-        bool tryWriteLock ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief releases the read-lock or write-lock
-////////////////////////////////////////////////////////////////////////////////
-
-        void unlock ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read-write lock variable
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_read_write_lock_t _rwlock;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief write lock marker
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _writeLocked;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief mutex for read-write counter
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-        TRI_mutex_t _mutex;
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read counter
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-        int32_t _readLockedCounter;
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief write counter
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-        int32_t _writeLockedCounter;
-#endif
-    };
-  }
+  /// @brief write lock marker
+  bool _writeLocked;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

@@ -2,34 +2,41 @@
 set -e
 
 echo
-echo '$0: loading precompiled libraries'
+echo "$0: setup make-system"
 
-wget -q -O - "https://www.arangodb.com/support-files/travisCI/precompiled-libraries-4.3.61.tar.gz" | tar xzf -
-
-echo
-echo '$0: setup make-system'
-
-make setup || exit 1
+test -d build || mkdir build
 
 echo
 echo "$0: configuring ArangoDB"
-./configure --enable-relative
+
+export LDFLAGS="-lrt"
+
+echo "CC: $CC"
+echo "CXX: $CXX"
+
+(cd build && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_MAINTAINER_MODE=On -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX)
 
 echo
 echo "$0: compiling ArangoDB"
 
-make -j1 || exit 1
-
-echo
-echo "$0: linting ArangoDB JS"
-
-ulimit -c unlimited -S # enable core files
-make jslint || exit 1
+(cd build && make -j2)
 
 echo
 echo "$0: testing ArangoDB"
 
-./scripts/unittest all --skipRanges true --skipTimeCritical true --skipSsl true || exit 1
+ulimit -c unlimited -S # enable core files
+./scripts/unittest all \
+  --skipRanges true \
+  --skipTimeCritical true \
+  --skipNondeterministic true \
+  --skipSsl true \
+  --skipBoost true \
+  --skipGeo true
+
+success=`cat out/UNITTEST_RESULT_EXECUTIVE_SUMMARY.json`
+if test "$success" == "false"; then
+  exit 1
+fi
 
 echo
 echo "$0: done"

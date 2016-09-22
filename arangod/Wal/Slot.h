@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Write-ahead log slot
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,232 +19,113 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_WAL_SLOT_H
-#define ARANGODB_WAL_SLOT_H 1
+#ifndef ARANGOD_WAL_SLOT_H
+#define ARANGOD_WAL_SLOT_H 1
 
 #include "Basics/Common.h"
-#include "VocBase/Legends.h"
 #include "Wal/Logfile.h"
 
-struct TRI_df_marker_s;
+namespace arangodb {
+namespace wal {
 
-namespace triagens {
-  namespace wal {
+class Marker;
+class Slots;
 
-    class Slots;
+class Slot {
+  friend class Slots;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                        class Slot
-// -----------------------------------------------------------------------------
+ public:
+  /// @brief tick typedef
+  typedef TRI_voc_tick_t TickType;
 
-    class Slot {
+  /// @brief slot status typedef
+  enum class StatusType : uint32_t {
+    UNUSED = 0,
+    USED = 1,
+    RETURNED = 2,
+    RETURNED_WFS = 3
+  };
 
-      friend class Slots;
+  /// @brief create a slot
+ private:
+  Slot();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                          typedefs
-// -----------------------------------------------------------------------------
+ public:
+  /// @brief return the tick assigned to the slot
+  inline Slot::TickType tick() const { return _tick; }
 
-      public:
+  /// @brief return the logfile id assigned to the slot
+  inline Logfile::IdType logfileId() const { return _logfileId; }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief tick typedef
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief return the raw memory pointer assigned to the slot
+  inline void* mem() const { return _mem; }
 
-        typedef TRI_voc_tick_t TickType;
+  /// @brief return the memory size assigned to the slot
+  inline uint32_t size() const { return _size; }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief slot status typedef
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief return the slot status as a string
+  std::string statusText() const;
 
-        enum class StatusType : uint32_t {
-          UNUSED        = 0,
-          USED          = 1,
-          RETURNED      = 2,
-          RETURNED_WFS  = 3
-        };
+  /// @brief calculate the CRC and length values for the slot and
+  /// store them in the marker
+  void finalize(Marker const*);
+  
+  /// @brief calculate the CRC value for the source region (this will modify
+  /// the source region) and copy the calculated marker data into the slot
+  void fill(void*, size_t);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ private:
+  /// @brief whether or not the slot is unused
+  inline bool isUnused() const { return _status == StatusType::UNUSED; }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create a slot
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not the slot is used
+  inline bool isUsed() const { return _status == StatusType::USED; }
 
-      private:
+  /// @brief whether or not the slot is returned
+  inline bool isReturned() const {
+    return (_status == StatusType::RETURNED ||
+            _status == StatusType::RETURNED_WFS);
+  }
 
-        Slot ();
+  /// @brief whether or not a sync was requested for the slot
+  inline bool waitForSync() const {
+    return (_status == StatusType::RETURNED_WFS);
+  }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+  /// @brief mark as slot as unused
+  void setUnused();
 
-      public:
+  /// @brief mark as slot as used
+  void setUsed(void*, uint32_t, Logfile::IdType, Slot::TickType);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the tick assigned to the slot
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief mark as slot as returned
+  void setReturned(bool waitForSync);
 
-        inline Slot::TickType tick () const {
-          return _tick;
-        }
+ private:
+  /// @brief slot tick
+  Slot::TickType _tick;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the logfile id assigned to the slot
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief slot logfile id
+  Logfile::IdType _logfileId;
 
-        inline Logfile::IdType logfileId () const {
-          return _logfileId;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the raw memory pointer assigned to the slot
-////////////////////////////////////////////////////////////////////////////////
-
-        inline void* mem () const {
-          return _mem;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the memory size assigned to the slot
-////////////////////////////////////////////////////////////////////////////////
-
-        inline uint32_t size () const {
-          return _size;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the slot status as a string
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string statusText () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief calculate the CRC value for the source region (this will modify
-/// the source region) and copy the calculated marker data into the slot
-////////////////////////////////////////////////////////////////////////////////
-
-        void fill (void*,
-                   size_t);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the slot is unused
-////////////////////////////////////////////////////////////////////////////////
-
-        inline bool isUnused () const {
-          return _status == StatusType::UNUSED;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the slot is used
-////////////////////////////////////////////////////////////////////////////////
-
-        inline bool isUsed () const {
-          return _status == StatusType::USED;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the slot is returned
-////////////////////////////////////////////////////////////////////////////////
-
-        inline bool isReturned () const {
-          return (_status == StatusType::RETURNED ||
-                  _status == StatusType::RETURNED_WFS);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not a sync was requested for the slot
-////////////////////////////////////////////////////////////////////////////////
-
-        inline bool waitForSync () const {
-          return (_status == StatusType::RETURNED_WFS);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief mark as slot as unused
-////////////////////////////////////////////////////////////////////////////////
-
-        void setUnused ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief mark as slot as used
-////////////////////////////////////////////////////////////////////////////////
-
-        void setUsed (void*,
-                      uint32_t,
-                      Logfile::IdType,
-                      Slot::TickType);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief mark as slot as returned
-////////////////////////////////////////////////////////////////////////////////
-
-        void setReturned (bool);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief slot tick
-////////////////////////////////////////////////////////////////////////////////
-
-        Slot::TickType _tick;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief slot logfile id
-////////////////////////////////////////////////////////////////////////////////
-
-        Logfile::IdType _logfileId;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief slot raw memory pointer
-////////////////////////////////////////////////////////////////////////////////
-
-        void* _mem;
+  /// @brief slot raw memory pointer
+  void* _mem;
 
 #ifdef TRI_PADDING_32
-        char _padding[4];
+  char _padding[4];
 #endif
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief slot raw memory size
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief slot raw memory size
+  uint32_t _size;
 
-        uint32_t _size;
+  /// @brief slot status
+  StatusType _status; 
+};
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief slot status
-////////////////////////////////////////////////////////////////////////////////
-
-        StatusType _status;
-
-    };
-
-    static_assert(sizeof(Slot) == 32, "invalid slot size");
-  }
+static_assert(sizeof(Slot) == 32, "invalid slot size");
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

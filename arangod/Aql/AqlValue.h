@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief fundamental types for the optimisation and execution of AQL
-///
-/// @file arangod/Aql/AqlValue.h
-///
 /// DISCLAIMER
 ///
-/// Copyright 2010-2014 triagens GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,469 +16,678 @@
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
 ///
-/// Copyright holder is triAGENS GmbH, Cologne, Germany
+/// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
+/// @author Jan Steemann
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_AQL_VALUE_H
-#define ARANGODB_AQL_AQL_VALUE_H 1
+#ifndef ARANGOD_AQL_AQL_VALUE_H
+#define ARANGOD_AQL_AQL_VALUE_H 1
 
 #include "Basics/Common.h"
 #include "Aql/Range.h"
 #include "Aql/types.h"
-#include "Basics/JsonHelper.h"
-#include "Basics/StringBuffer.h"
-#include "Utils/V8TransactionContext.h"
-#include "Utils/AqlTransaction.h"
-#include "VocBase/document-collection.h"
+#include "Basics/ConditionalDeleter.h"
+#include "Basics/VelocyPackHelper.h"
 
-namespace triagens {
-  namespace aql {
+#include <velocypack/Buffer.h>
+#include <velocypack/Builder.h>
+#include <velocypack/Slice.h>
 
-    class AqlItemBlock;
+#include <v8.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   struct AqlValue
-// -----------------------------------------------------------------------------
+// some functionality borrowed from 3rdParty/velocypack/include/velocypack
+// this is a copy of that functionality, because the functions in velocypack
+// are not accessible from here
+namespace {
+  static inline uint64_t toUInt64(int64_t v) noexcept {
+    // If v is negative, we need to add 2^63 to make it positive,
+    // before we can cast it to an uint64_t:
+    uint64_t shift2 = 1ULL << 63;
+    int64_t shift = static_cast<int64_t>(shift2 - 1);
+    return v >= 0 ? static_cast<uint64_t>(v)
+                  : static_cast<uint64_t>((v + shift) + 1) + shift2;
+    // Note that g++ and clang++ with -O3 compile this away to
+    // nothing. Further note that a plain cast from int64_t to
+    // uint64_t is not guaranteed to work for negative values!
+  }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief a struct to hold a value, registers hole AqlValue* during the 
-/// execution
-////////////////////////////////////////////////////////////////////////////////
+  // returns number of bytes required to store the value in 2s-complement
+  static inline uint8_t intLength(int64_t value) {
+    if (value >= -0x80 && value <= 0x7f) {
+      // shortcut for the common case
+      return 1;
+    }
+    uint64_t x = value >= 0 ? static_cast<uint64_t>(value)
+                            : static_cast<uint64_t>(-(value + 1));
+    uint8_t xSize = 0;
+    do {
+      xSize++;
+      x >>= 8;
+    } while (x >= 0x80);
+    return xSize + 1;
+  }
+}
 
-    struct AqlValue {
+struct TRI_doc_mptr_t;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                          typedefs
-// -----------------------------------------------------------------------------
+namespace arangodb {
+class Transaction;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief AqlValueType, indicates what sort of value we have
-////////////////////////////////////////////////////////////////////////////////
+namespace aql {
+class AqlItemBlock;
 
-      enum AqlValueType {
-        EMPTY,     // contains no data
-        JSON,      // Json*
-        SHAPED,    // TRI_df_marker_t*
-        DOCVEC,    // a vector of blocks of results coming from a subquery
-        RANGE      // a pointer to a range remembering lower and upper bound
-      };
+// no-op struct used only in an internal API to signal we want
+// to construct from a master pointer!
+struct AqlValueFromMasterPointer {};
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
+struct AqlValue final {
+ friend struct std::hash<arangodb::aql::AqlValue>;
+ friend struct std::equal_to<arangodb::aql::AqlValue>;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructors for the various value types, note that they all take
-/// ownership of the corresponding pointers
-////////////////////////////////////////////////////////////////////////////////
+ public:
 
-      AqlValue () 
-        : _json(nullptr), 
-          _type(EMPTY) {
+  /// @brief AqlValueType, indicates what sort of value we have
+  enum AqlValueType : uint8_t { 
+    VPACK_SLICE_POINTER, // contains a pointer to a vpack document, memory is not managed!
+    VPACK_INLINE, // contains vpack data, inline
+    VPACK_MANAGED, // contains vpack, via pointer to a managed buffer
+    DOCVEC, // a vector of blocks of results coming from a subquery, managed
+    RANGE // a pointer to a range remembering lower and upper bound, managed
+  };
+
+  /// @brief Holds the actual data for this AqlValue
+  /// The last byte of this union (_data.internal[15]) will be used to identify 
+  /// the type of the contained data:
+  ///
+  /// VPACK_SLICE_POINTER: data may be referenced via a pointer to a VPack slice
+  /// existing somewhere in memory. The AqlValue is not responsible for managing
+  /// this memory.
+  /// VPACK_INLINE: VPack values with a size less than 16 bytes can be stored 
+  /// directly inside the data.internal structure. All data is stored inline, 
+  /// so there is no need for memory management.
+  /// VPACK_MANAGED: all values of a larger size will be stored in 
+  /// _data.external via a managed VPackBuffer object. The Buffer is managed
+  /// by the AqlValue.
+  /// DOCVEC: a managed vector of AqlItemBlocks, for storing subquery results.
+  /// The vector and ItemBlocks are managed by the AqlValue
+  /// RANGE: a managed range object. The memory is managed by the AqlValue
+ private:
+  union {
+    uint8_t internal[16];
+    uint8_t const* pointer;
+    arangodb::velocypack::Buffer<uint8_t>* buffer;
+    std::vector<AqlItemBlock*>* docvec;
+    Range const* range;
+  } _data;
+
+ public:
+  // construct an empty AqlValue
+  // note: this is the default constructor and should be as cheap as possible
+  AqlValue() noexcept {
+    // construct a slice of type None
+    _data.internal[0] = '\x00';
+    setType(AqlValueType::VPACK_INLINE);
+  }
+  
+  // construct from mptr, not copying!
+  AqlValue(uint8_t const* pointer, AqlValueFromMasterPointer const&) {
+    setPointer<true>(pointer);
+    TRI_ASSERT(!VPackSlice(_data.pointer).isExternal());
+  }
+  
+  // construct from pointer, not copying!
+  explicit AqlValue(uint8_t const* pointer) {
+    // we must get rid of Externals first here, because all
+    // methods that use VPACK_SLICE_POINTER expect its contents
+    // to be non-Externals
+    if (*pointer == '\x1d') {
+      // an external
+      setPointer<false>(VPackSlice(pointer).resolveExternals().begin());
+    } else {
+      setPointer<false>(pointer);
+    }
+    TRI_ASSERT(!VPackSlice(_data.pointer).isExternal());
+  }
+  
+  // construct from docvec, taking over its ownership
+  explicit AqlValue(std::vector<AqlItemBlock*>* docvec) {
+    TRI_ASSERT(docvec != nullptr);
+    _data.docvec = docvec;
+    setType(AqlValueType::DOCVEC);
+  }
+
+  // construct boolean value type
+  explicit AqlValue(bool value) {
+    VPackSlice slice(value ? arangodb::basics::VelocyPackHelper::TrueValue() : arangodb::basics::VelocyPackHelper::FalseValue());
+    memcpy(_data.internal, slice.begin(), static_cast<size_t>(slice.byteSize()));
+    setType(AqlValueType::VPACK_INLINE);
+  }
+
+  // construct from a double value
+  explicit AqlValue(double value) {
+    if (std::isnan(value) || !std::isfinite(value) || value == HUGE_VAL || value == -HUGE_VAL) {
+      // null
+      _data.internal[0] = 0x18;
+    } else {
+      // a "real" double
+      _data.internal[0] = 0x1b;
+      uint64_t dv;
+      memcpy(&dv, &value, sizeof(double));
+      VPackValueLength vSize = sizeof(double);
+      int i = 1;
+      for (uint64_t x = dv; vSize > 0; vSize--) {
+        _data.internal[i] = x & 0xff;
+        x >>= 8;
+        ++i;
       }
-
-      explicit AqlValue (triagens::basics::Json* json)
-        : _json(json), 
-          _type(JSON) {
+    }
+    setType(AqlValueType::VPACK_INLINE);
+  }
+  
+  // construct from an int64 value
+  explicit AqlValue(int64_t value) {
+    if (value >= 0 && value <= 9) {
+      // a smallint
+      _data.internal[0] = static_cast<uint8_t>(0x30U + value);
+    } else if (value < 0 && value >= -6) {
+      // a negative smallint
+      _data.internal[0] = static_cast<uint8_t>(0x40U + value);
+    } else {
+      uint8_t vSize = intLength(value);
+      uint64_t x;
+      if (vSize == 8) {
+        x = toUInt64(value);
+      } else {
+        int64_t shift = 1LL << (vSize * 8 - 1);  // will never overflow!
+        x = value >= 0 ? static_cast<uint64_t>(value)
+                       : static_cast<uint64_t>(value + shift) + shift;
       }
-      
-      explicit AqlValue (TRI_df_marker_t const* marker)
-        : _marker(marker), 
-          _type(SHAPED) {
+      _data.internal[0] = 0x1fU + vSize;
+      int i = 1;
+      while (vSize-- > 0) {
+        _data.internal[i] = x & 0xffU;
+        ++i;
+        x >>= 8;
       }
-      
-      explicit AqlValue (std::vector<AqlItemBlock*>* vector)
-        : _vector(vector), 
-          _type(DOCVEC) {
+    }
+    setType(AqlValueType::VPACK_INLINE);
+  }
+  
+  // construct from a uint64 value
+  explicit AqlValue(uint64_t value) {
+    if (value <= 9) {
+      // a smallint
+      _data.internal[0] = static_cast<uint8_t>(0x30U + value);
+    } else {
+      int i = 1;
+      uint8_t vSize = 0;
+      do {
+        vSize++;
+        _data.internal[i] = static_cast<uint8_t>(value & 0xffU);
+        ++i;
+        value >>= 8;
+      } while (value != 0);
+      _data.internal[0] = 0x27U + vSize;
+    }
+    setType(AqlValueType::VPACK_INLINE);
+  }
+  
+  // construct from char* and length, copying the string
+  AqlValue(char const* value, size_t length) {
+    TRI_ASSERT(value != nullptr);
+    if (length == 0) {
+      // empty string
+      _data.internal[0] = 0x40;
+      setType(AqlValueType::VPACK_INLINE);
+      return;
+    }
+    if (length < sizeof(_data.internal) - 1) {
+      // short string... can store it inline
+      _data.internal[0] = static_cast<uint8_t>(0x40 + length);
+      memcpy(_data.internal + 1, value, length);
+      setType(AqlValueType::VPACK_INLINE);
+    } else if (length <= 126) {
+      // short string... cannot store inline, but we don't need to
+      // create a full-featured Builder object here
+      _data.buffer = new arangodb::velocypack::Buffer<uint8_t>(length + 1);
+      _data.buffer->push_back(static_cast<char>(0x40 + length));
+      _data.buffer->append(value, length);
+      setType(AqlValueType::VPACK_MANAGED);
+    } else {
+      // long string
+      // create a big enough Buffer object
+      auto buffer = std::make_unique<VPackBuffer<uint8_t>>(8 + length);
+      // add string to Builder
+      VPackBuilder builder(*buffer.get());
+      builder.add(VPackValuePair(value, length, VPackValueType::String));
+      // steal Buffer. now we have ownership
+      _data.buffer = buffer.release();
+      setType(AqlValueType::VPACK_MANAGED);
+    }
+  }
+  
+  // construct from std::string
+  explicit AqlValue(std::string const& value) : AqlValue(value.c_str(), value.size()) {}
+  
+  // construct from Buffer, potentially taking over its ownership
+  // (by adjusting the boolean passed)
+  AqlValue(arangodb::velocypack::Buffer<uint8_t>* buffer, bool& shouldDelete) {
+    TRI_ASSERT(buffer != nullptr);
+    TRI_ASSERT(shouldDelete); // here, the Buffer is still owned by the caller
+
+    // intentionally do not resolve externals here
+    // if (slice.isExternal()) {
+    //   // recursively resolve externals
+    //   slice = slice.resolveExternals();
+    // }
+    if (buffer->length() < sizeof(_data.internal)) {
+      // Use inline value
+      memcpy(_data.internal, buffer->data(), static_cast<size_t>(buffer->length()));
+      setType(AqlValueType::VPACK_INLINE);
+    } else {
+      // Use managed buffer, simply reuse the pointer and adjust the original
+      // Buffer's deleter
+      _data.buffer = buffer;
+      setType(AqlValueType::VPACK_MANAGED);
+      shouldDelete = false; // adjust deletion control variable
+    }
+  }
+  
+  // construct from Buffer, taking over its ownership
+  explicit AqlValue(arangodb::velocypack::Buffer<uint8_t>* buffer) {
+    TRI_ASSERT(buffer != nullptr);
+    _data.buffer = buffer;
+    setType(AqlValueType::VPACK_MANAGED);
+  }
+  
+  // construct from Builder, copying contents
+  explicit AqlValue(arangodb::velocypack::Builder const& builder) {
+    TRI_ASSERT(builder.isClosed());
+    initFromSlice(builder.slice());
+  }
+  
+  // construct from Builder, copying contents
+  explicit AqlValue(arangodb::velocypack::Builder const* builder) {
+    TRI_ASSERT(builder->isClosed());
+    initFromSlice(builder->slice());
+  }
+  
+  // construct from Slice, copying contents
+  explicit AqlValue(arangodb::velocypack::Slice const& slice) {
+    initFromSlice(slice);
+  }
+  
+  // construct range type
+  AqlValue(int64_t low, int64_t high) {
+    _data.range = new Range(low, high);
+    setType(AqlValueType::RANGE);
+  }
+ 
+  /// @brief AqlValues can be copied and moved as required
+  /// memory management is not performed via AqlValue destructor but via 
+  /// explicit calls to destroy()
+  AqlValue(AqlValue const&) noexcept = default; 
+  AqlValue& operator=(AqlValue const&) noexcept = default; 
+  AqlValue(AqlValue&&) noexcept = default; 
+  AqlValue& operator=(AqlValue&&) noexcept = default; 
+
+  ~AqlValue() = default;
+  
+  /// @brief whether or not the value must be destroyed
+  inline bool requiresDestruction() const noexcept {
+    auto t = type();
+    return (t != VPACK_SLICE_POINTER && t != VPACK_INLINE);
+  }
+
+  /// @brief whether or not the value is empty / none
+  inline bool isEmpty() const noexcept { 
+    return (_data.internal[0] == '\x00' && _data.internal[sizeof(_data.internal) - 1] == VPACK_INLINE);
+  }
+  
+  /// @brief whether or not the value is a pointer
+  inline bool isPointer() const noexcept {
+    return type() == VPACK_SLICE_POINTER;
+  }
+
+  /// @brief whether or not the value is a master pointer
+  inline bool isMasterPointer() const noexcept {
+    return isPointer() && (_data.internal[sizeof(_data.internal) - 2] == 1);
+  }
+  
+  /// @brief whether or not the value is a range
+  inline bool isRange() const noexcept {
+    return type() == RANGE;
+  }
+  
+  /// @brief whether or not the value is a docvec
+  inline bool isDocvec() const noexcept {
+    return type() == DOCVEC;
+  }
+
+  /// @brief hashes the value
+  uint64_t hash(arangodb::Transaction*, uint64_t seed = 0xdeadbeef) const;
+
+  /// @brief whether or not the value contains a none value
+  bool isNone() const;
+  
+  /// @brief whether or not the value contains a null value
+  bool isNull(bool emptyIsNull) const;
+
+  /// @brief whether or not the value contains a boolean value
+  bool isBoolean() const;
+
+  /// @brief whether or not the value is a number
+  bool isNumber() const;
+  
+  /// @brief whether or not the value is a string
+  bool isString() const;
+  
+  /// @brief whether or not the value is an object
+  bool isObject() const;
+  
+  /// @brief whether or not the value is an array (note: this treats ranges
+  /// as arrays, too!)
+  bool isArray() const;
+  
+  /// @brief get the (array) length (note: this treats ranges as arrays, too!)
+  size_t length() const;
+  
+  /// @brief get the (array) element at position 
+  AqlValue at(arangodb::Transaction* trx, int64_t position, bool& mustDestroy, bool copy) const;
+  
+  /// @brief get the _key attribute from an object/document
+  AqlValue getKeyAttribute(arangodb::Transaction* trx,
+                           bool& mustDestroy, bool copy) const;
+  /// @brief get the _id attribute from an object/document
+  AqlValue getIdAttribute(arangodb::Transaction* trx,
+                          bool& mustDestroy, bool copy) const;
+  /// @brief get the _from attribute from an object/document
+  AqlValue getFromAttribute(arangodb::Transaction* trx,
+                            bool& mustDestroy, bool copy) const;
+  /// @brief get the _to attribute from an object/document
+  AqlValue getToAttribute(arangodb::Transaction* trx,
+                          bool& mustDestroy, bool copy) const;
+  
+  /// @brief get the (object) element by name(s)
+  AqlValue get(arangodb::Transaction* trx,
+               std::string const& name, bool& mustDestroy, bool copy) const;
+  AqlValue get(arangodb::Transaction* trx,
+               std::vector<std::string> const& names, bool& mustDestroy,
+               bool copy) const;
+  bool hasKey(arangodb::Transaction* trx, std::string const& name) const;
+
+  /// @brief get the numeric value of an AqlValue
+  double toDouble(arangodb::Transaction* trx) const;
+  double toDouble(arangodb::Transaction* trx, bool& failed) const;
+  int64_t toInt64(arangodb::Transaction* trx) const;
+  
+  /// @brief whether or not an AqlValue evaluates to true/false
+  bool toBoolean() const;
+  
+  /// @brief return the range value
+  Range const* range() const {
+    TRI_ASSERT(isRange());
+    return _data.range;
+  }
+  
+  /// @brief return the total size of the docvecs
+  size_t docvecSize() const;
+  
+  /// @brief return the item block at position
+  AqlItemBlock* docvecAt(size_t position) const {
+    TRI_ASSERT(isDocvec());
+    return _data.docvec->at(position);
+  }
+  
+  /// @brief construct a V8 value as input for the expression execution in V8
+  /// only construct those attributes that are needed in the expression
+  v8::Handle<v8::Value> toV8Partial(v8::Isolate* isolate,
+                                    arangodb::Transaction*,
+                                    std::unordered_set<std::string> const&) const;
+  
+  /// @brief construct a V8 value as input for the expression execution in V8
+  v8::Handle<v8::Value> toV8(v8::Isolate* isolate, arangodb::Transaction*) const;
+
+  /// @brief materializes a value into the builder
+  void toVelocyPack(arangodb::Transaction*,
+                    arangodb::velocypack::Builder& builder,
+                    bool resolveExternals) const;
+
+  /// @brief materialize a value into a new one. this expands docvecs and 
+  /// ranges
+  AqlValue materialize(arangodb::Transaction*, bool& hasCopied,
+                       bool resolveExternals) const;
+
+  /// @brief return the slice for the value
+  /// this will throw if the value type is not VPACK_SLICE_POINTER, VPACK_INLINE or
+  /// VPACK_MANAGED
+  arangodb::velocypack::Slice slice() const;
+  
+  /// @brief clone a value
+  AqlValue clone() const;
+  
+  /// @brief invalidates/resets a value to None, not freeing any memory
+  void erase() noexcept {
+    _data.internal[0] = '\x00';
+    setType(AqlValueType::VPACK_INLINE);
+  }
+  
+  /// @brief destroy, explicit destruction, only when needed
+  void destroy();
+
+  /// @brief create an AqlValue from a vector of AqlItemBlock*s
+  static AqlValue CreateFromBlocks(arangodb::Transaction*,
+                                    std::vector<AqlItemBlock*> const&,
+                                    std::vector<std::string> const&);
+
+  /// @brief create an AqlValue from a vector of AqlItemBlock*s
+  static AqlValue CreateFromBlocks(arangodb::Transaction*,
+                                    std::vector<AqlItemBlock*> const&,
+                                    arangodb::aql::RegisterId);
+  
+  /// @brief compare function for two values
+  static int Compare(arangodb::Transaction*, 
+                     AqlValue const& left, AqlValue const& right, bool useUtf8);
+
+ private:
+  
+  /// @brief Returns the type of this value. If true it uses an external pointer
+  /// if false it uses the internal data structure
+  inline AqlValueType type() const noexcept {
+    return static_cast<AqlValueType>(_data.internal[sizeof(_data.internal) - 1]);
+  }
+  
+  /// @brief initializes value from a slice
+  void initFromSlice(arangodb::velocypack::Slice const& slice) {
+    // intentionally do not resolve externals here
+    // if (slice.isExternal()) {
+    //   // recursively resolve externals
+    //   slice = slice.resolveExternals();
+    // }
+    arangodb::velocypack::ValueLength length = slice.byteSize();
+    if (length < sizeof(_data.internal)) {
+      // Use inline value
+      memcpy(_data.internal, slice.begin(), static_cast<size_t>(length));
+      setType(AqlValueType::VPACK_INLINE);
+    } else {
+      // Use managed buffer
+      _data.buffer = new arangodb::velocypack::Buffer<uint8_t>(length);
+      _data.buffer->append(reinterpret_cast<char const*>(slice.begin()), length);
+      setType(AqlValueType::VPACK_MANAGED);
+    }
+  }
+  
+  /// @brief sets the value type
+  inline void setType(AqlValueType type) noexcept {
+    _data.internal[sizeof(_data.internal) - 1] = type;
+  }
+
+  template<bool isMasterPointer>
+  inline void setPointer(uint8_t const* pointer) {
+    _data.pointer = pointer;
+    // we use the byte at (size - 2) to distinguish between data pointing to database
+    // documents (size[-2] == 1) and other data(size[-2] == 0)
+    _data.internal[sizeof(_data.internal) - 2] = isMasterPointer ? 1 : 0;
+    _data.internal[sizeof(_data.internal) - 1] = AqlValueType::VPACK_SLICE_POINTER;
+  }
+};
+  
+class AqlValueGuard {
+ public:
+  AqlValueGuard() = delete;
+  AqlValueGuard(AqlValueGuard const&) = delete;
+  AqlValueGuard& operator=(AqlValueGuard const&) = delete;
+
+  AqlValueGuard(AqlValue& value, bool destroy) : value(value), destroy(destroy) {}
+  ~AqlValueGuard() { 
+    if (destroy) { 
+      value.destroy();
+    } 
+  }
+  void steal() { destroy = false; }
+ private:
+  AqlValue& value;
+  bool destroy;
+};
+
+struct AqlValueMaterializer {
+  explicit AqlValueMaterializer(arangodb::Transaction* trx) 
+      : trx(trx), materialized(), hasCopied(false) {}
+
+  AqlValueMaterializer(AqlValueMaterializer const& other) 
+      : trx(other.trx), materialized(other.materialized), hasCopied(other.hasCopied) {
+    if (other.hasCopied) {
+      // copy other's slice
+      materialized = other.materialized.clone();
+    }
+  }
+  
+  AqlValueMaterializer& operator=(AqlValueMaterializer const& other) {
+    if (this != &other) {
+      TRI_ASSERT(trx == other.trx); // must be from same transaction
+      if (hasCopied) {
+        // destroy our own slice
+        materialized.destroy();
+        hasCopied = false;
       }
-
-      AqlValue (int64_t low, int64_t high) 
-        : _range(nullptr),
-          _type(RANGE) {
-        _range = new Range(low, high);
+      // copy other's slice
+      materialized = other.materialized.clone();
+      hasCopied = other.hasCopied;
+    }
+    return *this;
+  }
+  
+  AqlValueMaterializer(AqlValueMaterializer&& other) noexcept 
+      : trx(other.trx), materialized(other.materialized), hasCopied(other.hasCopied) {
+    // reset other
+    other.hasCopied = false;
+    // cppcheck-suppress *
+    other.materialized = AqlValue();
+  }
+  
+  AqlValueMaterializer& operator=(AqlValueMaterializer&& other) noexcept {
+    if (this != &other) {
+      TRI_ASSERT(trx == other.trx); // must be from same transaction
+      if (hasCopied) {
+        // destroy our own slice
+        materialized.destroy();
       }
+      // reset other
+      materialized = other.materialized;
+      hasCopied = other.hasCopied;
+      other.materialized = AqlValue();
+    }
+    return *this;
+  }
+
+  ~AqlValueMaterializer() { 
+    if (hasCopied) { 
+      materialized.destroy(); 
+    } 
+  }
+
+  arangodb::velocypack::Slice slice(AqlValue const& value,
+                                    bool resolveExternals) {
+    materialized = value.materialize(trx, hasCopied, resolveExternals);
+    return materialized.slice();
+  }
+
+  arangodb::Transaction* trx;
+  AqlValue materialized;
+  bool hasCopied;
+};
+
+static_assert(sizeof(AqlValue) == 16, "invalid AqlValue size");
+
+}  // closes namespace arangodb::aql
+}  // closes namespace arangodb
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor, doing nothing automatically!
-////////////////////////////////////////////////////////////////////////////////
-
-      ~AqlValue () {
-      }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-      
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the value type
-////////////////////////////////////////////////////////////////////////////////
-
-      inline AqlValueType type () const throw() {
-        return _type;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief a quick method to decide whether the destroy value needs to be 
-/// called for a value
-////////////////////////////////////////////////////////////////////////////////
-
-      inline bool requiresDestruction () const throw() {
-        return (_type != EMPTY && _type != SHAPED);
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief a quick method to decide whether a value is empty
-////////////////////////////////////////////////////////////////////////////////
-
-      inline bool isEmpty () const throw() {
-        return _type == EMPTY;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue is a shape
-////////////////////////////////////////////////////////////////////////////////
-
-      inline bool isShaped () const throw() {
-        return _type == SHAPED;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue is a JSON
-////////////////////////////////////////////////////////////////////////////////
-
-      inline bool isJson () const throw() {
-        return _type == JSON;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue is a RANGE
-////////////////////////////////////////////////////////////////////////////////
-
-      inline bool isRange () const throw() {
-        return _type == RANGE;
-      }
-      
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the shape marker
-////////////////////////////////////////////////////////////////////////////////
-        
-      TRI_df_marker_t const* getMarker () const {
-        TRI_ASSERT_EXPENSIVE(isShaped());
-        return _marker;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the range
-////////////////////////////////////////////////////////////////////////////////
-
-      inline Range const* getRange () const {
-        TRI_ASSERT(isRange());
-        return _range;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief a quick method to decide whether a value is true
-////////////////////////////////////////////////////////////////////////////////
-
-      bool isTrue () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief erase, this does not free the stuff in the AqlValue, it only
-/// erases the pointers and makes the AqlValue structure EMPTY, this
-/// is used when the AqlValue is stolen and stored in another object
-////////////////////////////////////////////////////////////////////////////////
-
-      inline void erase () throw() {
-        _type = EMPTY;
-        _json = nullptr;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy, explicit destruction, only when needed
-////////////////////////////////////////////////////////////////////////////////
-
-      void destroy ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the name of an AqlValue type
-////////////////////////////////////////////////////////////////////////////////
-      
-      std::string getTypeString () const; 
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief clone for recursive copying
-////////////////////////////////////////////////////////////////////////////////
-
-      AqlValue clone () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief shallow clone 
-////////////////////////////////////////////////////////////////////////////////
-
-      AqlValue shallowClone () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue contains a string value
-////////////////////////////////////////////////////////////////////////////////
-
-      bool isString () const;
-      
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue contains a numeric value
-////////////////////////////////////////////////////////////////////////////////
-
-      bool isNumber () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue contains a boolean value
-////////////////////////////////////////////////////////////////////////////////
-
-      bool isBoolean () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue contains an array value
-////////////////////////////////////////////////////////////////////////////////
-
-      bool isArray () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue contains an object value
-////////////////////////////////////////////////////////////////////////////////
-
-      bool isObject () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the AqlValue contains a null value
-////////////////////////////////////////////////////////////////////////////////
-
-      bool isNull (bool emptyIsNull) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the array member at position i
-////////////////////////////////////////////////////////////////////////////////
-
-      triagens::basics::Json at (triagens::arango::AqlTransaction*, 
-                                 size_t i) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the length of an AqlValue containing an array
-////////////////////////////////////////////////////////////////////////////////
-
-      size_t arraySize () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the numeric value of an AqlValue
-////////////////////////////////////////////////////////////////////////////////
-
-      int64_t toInt64 () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the numeric value of an AqlValue
-////////////////////////////////////////////////////////////////////////////////
-
-      double toNumber () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get a string representation of the AqlValue
-/// this will fail if the value is not a string
-////////////////////////////////////////////////////////////////////////////////
-
-      std::string toString () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get a string representation of the AqlValue
-/// this will fail if the value is not a string
-////////////////////////////////////////////////////////////////////////////////
-
-      char const* toChar () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief construct a V8 value as input for the expression execution in V8
-////////////////////////////////////////////////////////////////////////////////
-
-      v8::Handle<v8::Value> toV8 (v8::Isolate* isolate,
-                                  triagens::arango::AqlTransaction*, 
-                                  TRI_document_collection_t const*) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief construct a V8 value as input for the expression execution in V8
-/// only construct those attributes that are needed in the expression
-////////////////////////////////////////////////////////////////////////////////
-
-      v8::Handle<v8::Value> toV8Partial (v8::Isolate* isolate,
-                                         triagens::arango::AqlTransaction*, 
-                                         std::unordered_set<std::string> const&,
-                                         TRI_document_collection_t const*) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief toJson method
-////////////////////////////////////////////////////////////////////////////////
-      
-      triagens::basics::Json toJson (triagens::arango::AqlTransaction*,
-                                     TRI_document_collection_t const*,
-                                     bool) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creates a hash value for the AqlValue
-////////////////////////////////////////////////////////////////////////////////
-      
-      uint64_t hash (triagens::arango::AqlTransaction*,
-                     TRI_document_collection_t const*) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extract an attribute value from the AqlValue 
-/// this will return null if the value is not an object
-////////////////////////////////////////////////////////////////////////////////
-
-      triagens::basics::Json extractObjectMember (triagens::arango::AqlTransaction*,
-                                                  TRI_document_collection_t const*,
-                                                  char const*,
-                                                  bool,
-                                                  triagens::basics::StringBuffer&) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extract a value from an array AqlValue 
-/// this will return null if the value is not an array
-/// depending on the last parameter, the return value will either contain a
-/// copy of the original value in the array or a reference to it (which must
-/// not be freed)
-////////////////////////////////////////////////////////////////////////////////
-
-      triagens::basics::Json extractArrayMember (triagens::arango::AqlTransaction*,
-                                                 TRI_document_collection_t const*,
-                                                 int64_t,
-                                                 bool) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create an AqlValue from a vector of AqlItemBlock*s
-////////////////////////////////////////////////////////////////////////////////
-
-      static AqlValue CreateFromBlocks (triagens::arango::AqlTransaction*,
-                                        std::vector<AqlItemBlock*> const&,
-                                        std::vector<std::string> const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create an AqlValue from a vector of AqlItemBlock*s
-////////////////////////////////////////////////////////////////////////////////
-
-      static AqlValue CreateFromBlocks (triagens::arango::AqlTransaction*,
-                                        std::vector<AqlItemBlock*> const&,
-                                        triagens::aql::RegisterId);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3-way comparison for AqlValue objects
-////////////////////////////////////////////////////////////////////////////////
-    
-      static int Compare (triagens::arango::AqlTransaction*,
-                          AqlValue const&,  
-                          TRI_document_collection_t const*,
-                          AqlValue const&, 
-                          TRI_document_collection_t const*,
-                          bool compareUtf8);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public variables
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the actual data
-////////////////////////////////////////////////////////////////////////////////
-
-      union {
-        triagens::basics::Json*     _json;
-        TRI_df_marker_t const*      _marker;
-        std::vector<AqlItemBlock*>* _vector;
-        Range const*                _range;
-      };
-      
-////////////////////////////////////////////////////////////////////////////////
-/// @brief _type, the type of value
-////////////////////////////////////////////////////////////////////////////////
-
-      AqlValueType _type;
-
-    };
-
-  } //closes namespace triagens::aql
-}   //closes namespace triagens
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                hash function helpers for AqlValue
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief hash function for AqlValue objects
-////////////////////////////////////////////////////////////////////////////////
-
 namespace std {
 
-  template<> struct hash<triagens::aql::AqlValue> {
-    size_t operator () (triagens::aql::AqlValue const& x) const {
-      std::hash<uint32_t> intHash;
-      std::hash<void const*> ptrHash;
-      size_t res = intHash(static_cast<uint32_t>(x._type));
-      switch (x._type) {
-        case triagens::aql::AqlValue::JSON: {
-          return res ^ ptrHash(x._json);
-        }
-        case triagens::aql::AqlValue::SHAPED: {
-          return res ^ ptrHash(x._marker);
-        }
-        case triagens::aql::AqlValue::DOCVEC: {
-          return res ^ ptrHash(x._vector);
-        }
-        case triagens::aql::AqlValue::RANGE: {
-          return res ^ ptrHash(x._range);
-        }
-        case triagens::aql::AqlValue::EMPTY: {
-          return res;
-        }
+template <>
+struct hash<arangodb::aql::AqlValue> {
+  size_t operator()(arangodb::aql::AqlValue const& x) const {
+    std::hash<uint8_t> intHash;
+    std::hash<void const*> ptrHash;
+    arangodb::aql::AqlValue::AqlValueType type = x.type();
+    size_t res = intHash(type);
+    switch (type) {
+      case arangodb::aql::AqlValue::VPACK_SLICE_POINTER: { 
+        return res ^ ptrHash(x._data.pointer);
       }
-
-      TRI_ASSERT(false);
-      return 0;
-    }
-  };
-
-  template<> struct equal_to<triagens::aql::AqlValue> {
-    bool operator () (triagens::aql::AqlValue const& a,
-                      triagens::aql::AqlValue const& b) const {
-      if (a._type != b._type) {
-        return false;
+      case arangodb::aql::AqlValue::VPACK_INLINE: {
+        return res ^ static_cast<size_t>(arangodb::velocypack::Slice(&x._data.internal[0]).hash());
       }
-      switch (a._type) {
-        case triagens::aql::AqlValue::JSON: {
-          return a._json == b._json;
-        }
-        case triagens::aql::AqlValue::SHAPED: {
-          return a._marker == b._marker;
-        }
-        case triagens::aql::AqlValue::DOCVEC: {
-          return a._vector == b._vector;
-        }
-        case triagens::aql::AqlValue::RANGE: {
-          return a._range == b._range;
-        }
-        // case triagens::aql::AqlValue::EMPTY intentionally not handled here!
-        // (should fall through and fail!)
-
-        default: {
-          TRI_ASSERT(false);
-          return true;
-        }
+      case arangodb::aql::AqlValue::VPACK_MANAGED: {
+        return res ^ ptrHash(x._data.buffer);
+      }
+      case arangodb::aql::AqlValue::DOCVEC: {
+        return res ^ ptrHash(x._data.docvec);
+      }
+      case arangodb::aql::AqlValue::RANGE: {
+        return res ^ ptrHash(x._data.range);
       }
     }
-  };
 
-} //closes namespace std
+    TRI_ASSERT(false);
+    return 0;
+  }
+};
+
+template <>
+struct equal_to<arangodb::aql::AqlValue> {
+  bool operator()(arangodb::aql::AqlValue const& a,
+                  arangodb::aql::AqlValue const& b) const {
+    arangodb::aql::AqlValue::AqlValueType type = a.type();
+    if (type != b.type()) {
+      return false;
+    }
+    switch (type) {
+      case arangodb::aql::AqlValue::VPACK_SLICE_POINTER: {
+        return a._data.pointer == b._data.pointer;
+      }
+      case arangodb::aql::AqlValue::VPACK_INLINE: {
+        return arangodb::velocypack::Slice(&a._data.internal[0]).equals(arangodb::velocypack::Slice(&b._data.internal[0]));
+      }
+      case arangodb::aql::AqlValue::VPACK_MANAGED: {
+        return a._data.buffer == b._data.buffer;
+      }
+      case arangodb::aql::AqlValue::DOCVEC: {
+        return a._data.docvec == b._data.docvec;
+      }
+      case arangodb::aql::AqlValue::RANGE: {
+        return a._data.range == b._data.range;
+      }
+    }
+    
+    TRI_ASSERT(false);
+    return false;
+  }
+};
+
+}  // closes namespace std
 
 #endif
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "^\\(/// @brief\\|/// {@inheritDoc}\\|/// @addtogroup\\|// --SECTION--\\|/// @\\}\\)"
-// End:
-

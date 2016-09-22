@@ -1,13 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief abstract base class for tasks
-///
-/// @file
-/// Tasks are handled by the scheduler. The scheduler calls the task callback
-/// as soon as a specific event occurs.
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,80 +20,59 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2008-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_SCHEDULER_TASK_MANAGER_H
-#define ARANGODB_SCHEDULER_TASK_MANAGER_H 1
+#ifndef ARANGOD_SCHEDULER_TASK_MANAGER_H
+#define ARANGOD_SCHEDULER_TASK_MANAGER_H 1
 
 #include "Basics/Common.h"
 
 #include "Scheduler/events.h"
 
-namespace triagens {
-  namespace rest {
-    class Task;
-    class Scheduler;
+namespace arangodb {
+namespace rest {
+class Task;
+class Scheduler;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @ingroup Scheduler
 /// @brief abstract base class for tasks
 ////////////////////////////////////////////////////////////////////////////////
 
-    class TaskManager {
-      private:
-        TaskManager (TaskManager const&);
-        TaskManager& operator= (TaskManager const&);
+class TaskManager {
+ private:
+  TaskManager(TaskManager const&);
+  TaskManager& operator=(TaskManager const&);
 
-      public:
+ public:
+  TaskManager() {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  virtual ~TaskManager() {}
 
-        TaskManager () {
-        }
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief deletes a task
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
+  void deleteTask(Task* task);
 
-        virtual ~TaskManager () {
-        }
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief called to setup the callback information
+  ///
+  /// Called to setup all the necessary information within the event loop. In
+  /// case
+  /// of a multi-threaded scheduler the event loop identifier is supplied.
+  //////////////////////////////////////////////////////////////////////////////
 
-      public:
+  bool setupTask(Task*, Scheduler*, EventLoop loop);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief deletes a task
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief called to clear the callback information
+  //////////////////////////////////////////////////////////////////////////////
 
-        void deleteTask (Task* task);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief called to setup the callback information
-///
-/// Called to setup all the necessary information within the event loop. In case
-/// of a multi-threaded scheduler the event loop identifier is supplied.
-////////////////////////////////////////////////////////////////////////////////
-
-        bool setupTask (Task*, Scheduler*, EventLoop loop);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief called to clear the callback information
-////////////////////////////////////////////////////////////////////////////////
-
-        void cleanupTask (Task*);
-    };
-  }
+  void cleanupTask(Task*);
+};
+}
 }
 
 #endif
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

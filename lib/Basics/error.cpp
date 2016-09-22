@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief error handling
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,19 +19,9 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Basics/Common.h"
-
-#include "Basics/tri-strings.h"
-#include "Basics/vector.h"
-#include "Basics/associative.h"
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                     private types
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief error number and system error
@@ -44,12 +30,7 @@
 typedef struct tri_error_s {
   int _number;
   int _sys;
-}
-tri_error_t;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
+} tri_error_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief already initialized
@@ -73,11 +54,7 @@ static pthread_key_t ErrorKey;
 /// @brief the error messages
 ////////////////////////////////////////////////////////////////////////////////
 
-static TRI_associative_pointer_t ErrorMessages;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private functions
-// -----------------------------------------------------------------------------
+static std::unordered_map<int, std::string> ErrorMessages;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief cleanup
@@ -86,63 +63,23 @@ static TRI_associative_pointer_t ErrorMessages;
 #ifndef TRI_GCC_THREAD_LOCAL_STORAGE
 #ifdef TRI_HAVE_POSIX_THREADS
 
-static void CleanupError (void* ptr) {
-  TRI_Free(TRI_CORE_MEM_ZONE, ptr);
-}
+static void CleanupError(void* ptr) { TRI_Free(TRI_CORE_MEM_ZONE, ptr); }
 
 #endif
 #endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Hash function used to hash error codes (no real hash, uses the error
-/// code only)
-////////////////////////////////////////////////////////////////////////////////
-
-static uint64_t HashErrorCode (TRI_associative_pointer_t* array,
-                               void const* key) {
-  return (uint64_t) *((int*) key);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Hash function used to hash errors messages (not used)
-////////////////////////////////////////////////////////////////////////////////
-
-static uint64_t HashError (TRI_associative_pointer_t* array,
-                           void const* element) {
-
-  TRI_error_t* entry = (TRI_error_t*) element;
-  return (uint64_t) entry->_code;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Comparison function used to determine error equality
-////////////////////////////////////////////////////////////////////////////////
-
-static bool EqualError (TRI_associative_pointer_t* array,
-                        void const* key,
-                        void const* element) {
-  TRI_error_t* entry = (TRI_error_t*) element;
-
-  return *((int*) key) == entry->_code;
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief returns the last error
 ////////////////////////////////////////////////////////////////////////////////
 
-#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
+#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || \
+    defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
 
-int TRI_errno () {
-  return ErrorNumber._number;
-}
+int TRI_errno() { return ErrorNumber._number; }
 
 #elif defined(TRI_HAVE_POSIX_THREADS)
 
-int TRI_errno () {
+int TRI_errno() {
   tri_error_t* eptr;
 
   eptr = static_cast<decltype(eptr)>(pthread_getspecific(ErrorKey));
@@ -150,9 +87,7 @@ int TRI_errno () {
   if (eptr == nullptr) {
     return 0;
   }
-  else {
-    return eptr->_number;
-  }
+  return eptr->_number;
 }
 
 #else
@@ -163,27 +98,24 @@ int TRI_errno () {
 /// @brief returns the last error as string
 ////////////////////////////////////////////////////////////////////////////////
 
-char const* TRI_last_error () {
+char const* TRI_last_error() {
   int err;
   int sys;
-  TRI_error_t* entry;
 
-#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
+#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || \
+    defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
 
   err = ErrorNumber._number;
   sys = ErrorNumber._sys;
 
 #elif defined(TRI_HAVE_POSIX_THREADS)
 
-  tri_error_t* eptr;
-
-  eptr = static_cast<decltype(eptr)>(pthread_getspecific(ErrorKey));
+  tri_error_t* eptr = static_cast<decltype(eptr)>(pthread_getspecific(ErrorKey));
 
   if (eptr == nullptr) {
     err = 0;
     sys = 0;
-  }
-  else {
+  } else {
     err = eptr->_number;
     sys = eptr->_sys;
   }
@@ -196,41 +128,40 @@ char const* TRI_last_error () {
     return strerror(sys);
   }
 
-  entry = (TRI_error_t*)
-    TRI_LookupByKeyAssociativePointer(&ErrorMessages, (void const*) &err);
+  auto it = ErrorMessages.find(err);
 
-  if (entry == nullptr) {
+  if (it == ErrorMessages.end()) {
     return "general error";
   }
 
-  return entry->_message;
+  return (*it).second.c_str();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief sets the last error
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_set_errno (int error) {
-#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
+int TRI_set_errno(int error) {
+#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || \
+    defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
 
   ErrorNumber._number = error;
 
   if (error == TRI_ERROR_SYS_ERROR) {
     ErrorNumber._sys = errno;
-  }
-  else {
+  } else {
     ErrorNumber._sys = 0;
   }
 
 #elif defined(TRI_HAVE_POSIX_THREADS)
 
-  tri_error_t* eptr;
   int copyErrno = errno;
 
-  eptr = static_cast<decltype(eptr)>(pthread_getspecific(ErrorKey));
+  tri_error_t* eptr = static_cast<decltype(eptr)>(pthread_getspecific(ErrorKey));
 
   if (eptr == nullptr) {
-    eptr = static_cast<decltype(eptr)>(TRI_Allocate(TRI_CORE_MEM_ZONE, sizeof(tri_error_t), false));
+    eptr = static_cast<decltype(eptr)>(
+        TRI_Allocate(TRI_CORE_MEM_ZONE, sizeof(tri_error_t), false));
     pthread_setspecific(ErrorKey, eptr);
   }
 
@@ -238,8 +169,7 @@ int TRI_set_errno (int error) {
 
   if (error == TRI_ERROR_SYS_ERROR) {
     eptr->_sys = copyErrno;
-  }
-  else {
+  } else {
     eptr->_sys = 0;
   }
 
@@ -254,74 +184,43 @@ int TRI_set_errno (int error) {
 /// @brief defines an error string
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_set_errno_string (int error, char const* msg) {
-  TRI_error_t* entry;
-
-  if (TRI_LookupByKeyAssociativePointer(&ErrorMessages, (void const*) &error)) {
-
+void TRI_set_errno_string(int code, char const* msg) {
+  if (!ErrorMessages.emplace(code, std::string(msg)).second) {
     // logic error, error number is redeclared
-    printf("Error: duplicate declaration of error code %i in %s:%i\n",
-           error, __FILE__, __LINE__);
+    printf("Error: duplicate declaration of error code %i in %s:%i\n", code,
+           __FILE__, __LINE__);
     TRI_EXIT_FUNCTION(EXIT_FAILURE, nullptr);
   }
-
-  entry = (TRI_error_t*) TRI_Allocate(TRI_CORE_MEM_ZONE, sizeof(TRI_error_t), false);
-
-  entry->_code = error;
-  entry->_message = TRI_DuplicateString(msg);
-
-  TRI_InsertKeyAssociativePointer(&ErrorMessages,
-                                  &error,
-                                  entry,
-                                  false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief return an error message for an error code
 ////////////////////////////////////////////////////////////////////////////////
 
-char const* TRI_errno_string (int error) {
-  TRI_error_t* entry;
+char const* TRI_errno_string(int code) {
+  auto it = ErrorMessages.find(code);
 
-  entry = (TRI_error_t*) TRI_LookupByKeyAssociativePointer(&ErrorMessages, (void const*) &error);
-
-  if (entry == nullptr) {
+  if (it == ErrorMessages.end()) {
     // return a hard-coded string as not all callers check for nullptr
     return "unknown error";
   }
 
-  TRI_ASSERT(entry->_message != nullptr);
-
-  return entry->_message;
+  return (*it).second.c_str();
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                            MODULE
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief initializes the error messages
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_InitializeError () {
+void TRI_InitializeError() {
   if (Initialized) {
     return;
   }
 
-  TRI_InitAssociativePointer(&ErrorMessages,
-                             TRI_CORE_MEM_ZONE,
-                             HashErrorCode,
-                             HashError,
-                             EqualError,
-                             0);
-
   TRI_InitializeErrorMessages();
 
-#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
+#if defined(TRI_GCC_THREAD_LOCAL_STORAGE) || \
+    defined(TRI_WIN32_THREAD_LOCAL_STORAGE)
   ErrorNumber._number = 0;
   ErrorNumber._sys = 0;
 #elif defined(TRI_HAVE_POSIX_THREADS)
@@ -337,32 +236,6 @@ void TRI_InitializeError () {
 /// @brief shuts down the error messages
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_ShutdownError () {
-  size_t i;
-
-  if (! Initialized) {
-    return;
-  }
-
-  for (i = 0; i < ErrorMessages._nrAlloc; i++) {
-    TRI_error_t* entry = static_cast<TRI_error_t*>(ErrorMessages._table[i]);
-
-    if (entry != nullptr) {
-      TRI_Free(TRI_CORE_MEM_ZONE, entry->_message);
-      TRI_Free(TRI_CORE_MEM_ZONE, entry);
-    }
-  }
-
-  TRI_DestroyAssociativePointer(&ErrorMessages);
-
+void TRI_ShutdownError() {
   Initialized = false;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

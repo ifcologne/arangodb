@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief wrapper for single collection transactions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,290 +19,131 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_UTILS_SINGLE_COLLECTION_TRANSACTION_H
-#define ARANGODB_UTILS_SINGLE_COLLECTION_TRANSACTION_H 1
+#ifndef ARANGOD_UTILS_SINGLE_COLLECTION_TRANSACTION_H
+#define ARANGOD_UTILS_SINGLE_COLLECTION_TRANSACTION_H 1
 
 #include "Basics/Common.h"
-
-#include "Basics/logging.h"
-#include "Basics/voc-errors.h"
-#include "Basics/StringUtils.h"
 #include "Utils/Transaction.h"
-#include "Utils/TransactionContext.h"
-
-#include "VocBase/Ditch.h"
-#include "VocBase/document-collection.h"
-#include "VocBase/server.h"
 #include "VocBase/transaction.h"
-#include "VocBase/vocbase.h"
 #include "VocBase/voc-types.h"
 
-namespace triagens {
-  namespace arango {
-
-    class SingleCollectionTransaction : public Transaction {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                 class SingleCollectionTransaction
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the transaction, using a collection id
-////////////////////////////////////////////////////////////////////////////////
-
-        SingleCollectionTransaction (TransactionContext* transactionContext,
-                                     TRI_vocbase_t* vocbase,
-                                     TRI_voc_cid_t cid,
-                                     TRI_transaction_type_e accessType) 
-          : Transaction(transactionContext, vocbase, 0),
-            _cid(cid),
-            _trxCollection(nullptr),
-            _documentCollection(nullptr),
-            _accessType(accessType) {
-
-          // add the (sole) collection
-          this->addCollection(cid, _accessType);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the transaction, using a collection name
-////////////////////////////////////////////////////////////////////////////////
-
-        SingleCollectionTransaction (TransactionContext* transactionContext,
-                                     TRI_vocbase_t* vocbase,
-                                     std::string const& name,
-                                     TRI_transaction_type_e accessType) 
-          : Transaction(transactionContext, vocbase, 0),
-            _cid(this->resolver()->getCollectionId(name)),
-            _trxCollection(nullptr),
-            _documentCollection(nullptr),
-            _accessType(accessType) {
-
-          // add the (sole) collection
-          this->addCollection(_cid, _accessType);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief end the transaction
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual ~SingleCollectionTransaction () {
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the underlying transaction collection
-////////////////////////////////////////////////////////////////////////////////
-
-        inline TRI_transaction_collection_t* trxCollection () {
-          TRI_ASSERT(this->_cid > 0);
-
-          if (this->_trxCollection == nullptr) {
-            this->_trxCollection = TRI_GetCollectionTransaction(this->_trx, this->_cid, _accessType);
-
-            if (this->_trxCollection != nullptr && this->_trxCollection->_collection != nullptr) {
-              this->_documentCollection = this->_trxCollection->_collection->_collection;
-            }
-          }
-
-          TRI_ASSERT(this->_trxCollection != nullptr);
-          return this->_trxCollection;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the underlying document collection
-/// note that we have two identical versions because this is called 
-/// in two different situations
-////////////////////////////////////////////////////////////////////////////////
-
-        inline TRI_document_collection_t* documentCollection () {
-          if (this->_documentCollection != nullptr) {
-            return this->_documentCollection;
-          }
-
-          this->trxCollection();
-          TRI_ASSERT(this->_documentCollection != nullptr);
-
-          return this->_documentCollection;
-        }
-
-        inline TRI_document_collection_t* documentCollection (TRI_voc_cid_t) {
-          return documentCollection();
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the ditch for the collection
-/// note that the ditch must already exist
-/// furthermore note that we have two calling conventions because this
-/// is called in two different ways
-////////////////////////////////////////////////////////////////////////////////
-
-         inline triagens::arango::DocumentDitch* ditch () {
-           TRI_transaction_collection_t* trxCollection = this->trxCollection();
-           TRI_ASSERT(trxCollection->_ditch != nullptr);
-
-           return trxCollection->_ditch;
-         }
-
-         inline triagens::arango::DocumentDitch* ditch (TRI_voc_cid_t) {
-           return ditch();
-         }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not a ditch is available for a collection
-////////////////////////////////////////////////////////////////////////////////
-
-         inline bool hasDitch () {
-           TRI_transaction_collection_t* trxCollection = this->trxCollection();
-
-           return (trxCollection->_ditch != nullptr);
-         }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the underlying collection's id
-////////////////////////////////////////////////////////////////////////////////
-
-        inline TRI_voc_cid_t cid () const {
-          return _cid;
-        }
+namespace arangodb {
+class DocumentDitch;
+class TransactionContext;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief explicitly lock the underlying collection for read access
-////////////////////////////////////////////////////////////////////////////////
+class SingleCollectionTransaction : public Transaction {
 
-        int lockRead () {
-          return this->lock(this->trxCollection(), TRI_TRANSACTION_READ);
-        }
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create the transaction, using a collection id
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief explicitly unlock the underlying collection after read access
-////////////////////////////////////////////////////////////////////////////////
+  SingleCollectionTransaction(std::shared_ptr<TransactionContext>,
+                              TRI_voc_cid_t, TRI_transaction_type_e);
 
-        int unlockRead () {
-          return this->unlock(this->trxCollection(), TRI_TRANSACTION_READ);
-        }
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create the transaction, using a collection name
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief explicitly lock the underlying collection for write access
-////////////////////////////////////////////////////////////////////////////////
+  SingleCollectionTransaction(std::shared_ptr<TransactionContext>,
+                              std::string const&, TRI_transaction_type_e);
 
-        int lockWrite () {
-          return this->lock(this->trxCollection(), TRI_TRANSACTION_WRITE);
-        }
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief end the transaction
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read any (random) document within a transaction
-////////////////////////////////////////////////////////////////////////////////
+  ~SingleCollectionTransaction() = default;
 
-        inline int readRandom (TRI_doc_mptr_copy_t* mptr) {
-          TRI_ASSERT(mptr != nullptr);
-          return this->readAny(this->trxCollection(), mptr);
-        }
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get the underlying transaction collection
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read a document within a transaction
-////////////////////////////////////////////////////////////////////////////////
+  TRI_transaction_collection_t* trxCollection();
 
-        inline int read (TRI_doc_mptr_copy_t* mptr, const std::string& key) {
-          TRI_ASSERT(mptr != nullptr);
-          return this->readSingle(this->trxCollection(), mptr, key);
-        }
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get the underlying document collection
+  /// note that we have two identical versions because this is called
+  /// in two different situations
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read all document ids within a transaction
-////////////////////////////////////////////////////////////////////////////////
+  LogicalCollection* documentCollection();
 
-        int read (std::vector<std::string>& ids) {
-          return this->readAll(this->trxCollection(), ids, true);
-        }
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get the underlying collection's id
+  //////////////////////////////////////////////////////////////////////////////
+  
+  inline TRI_voc_cid_t cid() const { return _cid; }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read a document within a transaction
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the ditch for the collection
+  /// note that the ditch must already exist
+  /// furthermore note that we have two calling conventions because this
+  /// is called in two different ways
+  //////////////////////////////////////////////////////////////////////////////
 
-        int readPositional (std::vector<TRI_doc_mptr_copy_t>& documents,
-                            int64_t offset,
-                            int64_t count) {
-          return this->readOrdered(this->trxCollection(), documents, offset, count);
-        }
+  arangodb::DocumentDitch* ditch() const;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read documents within a transaction, using skip and limit
-////////////////////////////////////////////////////////////////////////////////
+  arangodb::DocumentDitch* ditch(TRI_voc_cid_t) const;
 
-        int read (std::vector<TRI_doc_mptr_copy_t>& docs,
-                  int64_t skip,
-                  uint64_t limit,
-                  uint64_t& total) {
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not a ditch is available for a collection
+  //////////////////////////////////////////////////////////////////////////////
 
-          return this->readSlice(this->trxCollection(), docs, skip, limit, total);
-        }
+  bool hasDitch() const;
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get the underlying collection's name
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read all documents within a transaction
-////////////////////////////////////////////////////////////////////////////////
+  std::string name();
 
-        int read (std::vector<TRI_doc_mptr_t const*>& docs) {
-          return this->readSlice(this->trxCollection(), docs);
-        }
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief explicitly lock the underlying collection for read access
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
+  int lockRead();
 
-      private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief explicitly unlock the underlying collection after read access
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection id
-////////////////////////////////////////////////////////////////////////////////
+  int unlockRead();
 
-        TRI_voc_cid_t _cid;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief explicitly lock the underlying collection for write access
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief trxCollection cache
-////////////////////////////////////////////////////////////////////////////////
+  int lockWrite();
+  
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief collection id
+  //////////////////////////////////////////////////////////////////////////////
 
-        TRI_transaction_collection_t* _trxCollection;
+  TRI_voc_cid_t _cid;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief TRI_document_collection_t* cache
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief trxCollection cache
+  //////////////////////////////////////////////////////////////////////////////
 
-        TRI_document_collection_t* _documentCollection;
+  TRI_transaction_collection_t* _trxCollection;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection access type
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief LogicalCollection* cache
+  //////////////////////////////////////////////////////////////////////////////
 
-        TRI_transaction_type_e _accessType;
+  LogicalCollection* _documentCollection;
 
-    };
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief collection access type
+  //////////////////////////////////////////////////////////////////////////////
 
-  }
+  TRI_transaction_type_e _accessType;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

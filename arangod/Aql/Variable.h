@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, AST variable
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,152 +19,81 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_VARIABLE_H
-#define ARANGODB_AQL_VARIABLE_H 1
+#ifndef ARANGOD_AQL_VARIABLE_H
+#define ARANGOD_AQL_VARIABLE_H 1
 
 #include "Basics/Common.h"
-#include "Basics/JsonHelper.h"
 #include "Aql/types.h"
 
-namespace triagens {
-  namespace aql {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   struct Variable
-// -----------------------------------------------------------------------------
+namespace arangodb {
+namespace velocypack {
+class Builder;
+class Slice;
+}
 
-    struct Variable {
+namespace aql {
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the variable
-////////////////////////////////////////////////////////////////////////////////
+struct Variable {
 
-      Variable (std::string const&,
-                VariableId);
+  /// @brief create the variable
+  Variable(std::string const&, VariableId);
 
-      Variable (basics::Json const& json);
+  explicit Variable(arangodb::velocypack::Slice const&);
 
-      Variable *clone() const {
-        return new Variable(name, id);
-      }
+  Variable* clone() const { return new Variable(name, id); }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the variable
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief destroy the variable
+  ~Variable();
 
-      ~Variable ();
+  /// @brief registers a constant value for the variable
+  /// this constant value is used for constant propagation in optimizations
+  void constValue(void* node) { value = node; }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+  /// @brief returns a constant value registered for this variable
+  inline void* constValue() const { return value; }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief registers a constant value for the variable
-/// this constant value is used for constant propagation in optimizations
-////////////////////////////////////////////////////////////////////////////////
-
-      void constValue (void* node) {
-        value = node;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns a constant value registered for this variable
-////////////////////////////////////////////////////////////////////////////////
-
-      inline void* constValue () const {
-        return value;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the variable is user-defined
-////////////////////////////////////////////////////////////////////////////////
-
-      inline bool isUserDefined () const {
-        char const c = name[0];
-        // variables starting with a number are not user-defined
-        return (c < '0' || c > '9');
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the variable needs a register assigned
-////////////////////////////////////////////////////////////////////////////////
-
-      inline bool needsRegister () const {
-        char const cf = name[0];
-        char const cb = name.back();
-        // variables starting with a number are not user-defined
-        return (cf < '0' || cf > '9') || cb != '_';
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a JSON representation of the variable
-////////////////////////////////////////////////////////////////////////////////
-
-      triagens::basics::Json toJson () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief replace a variable by another
-////////////////////////////////////////////////////////////////////////////////
-
-      static Variable const* replace (Variable const*,
-                                      std::unordered_map<VariableId, Variable const*> const&);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public variables
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief variable name
-////////////////////////////////////////////////////////////////////////////////
-
-      std::string const         name;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constant variable value (points to another AstNode)
-////////////////////////////////////////////////////////////////////////////////
-      
-      void*                     value;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief variable id
-////////////////////////////////////////////////////////////////////////////////
-
-      VariableId const          id;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief name of $OLD variable
-////////////////////////////////////////////////////////////////////////////////
-
-      static char const* const  NAME_OLD;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief name of $NEW variable
-////////////////////////////////////////////////////////////////////////////////
-
-      static char const* const  NAME_NEW;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief name of $CURRENT variable
-////////////////////////////////////////////////////////////////////////////////
-
-      static char const* const  NAME_CURRENT;
-
-    };
-
+  /// @brief whether or not the variable is user-defined
+  inline bool isUserDefined() const {
+    char const c = name[0];
+    // variables starting with a number are not user-defined
+    return (c < '0' || c > '9');
   }
+
+  /// @brief whether or not the variable needs a register assigned
+  inline bool needsRegister() const {
+    // variables starting with a number are not user-defined
+    return isUserDefined() || name.back() != '_';
+  }
+
+  /// @brief return a VelocyPack representation of the variable
+  void toVelocyPack(arangodb::velocypack::Builder&) const;
+
+  /// @brief replace a variable by another
+  static Variable const* replace(
+      Variable const*, std::unordered_map<VariableId, Variable const*> const&);
+
+  /// @brief variable name
+  std::string name;
+
+  /// @brief constant variable value (points to another AstNode)
+  void* value;
+
+  /// @brief variable id
+  VariableId const id;
+
+  /// @brief name of $OLD variable
+  static char const* const NAME_OLD;
+
+  /// @brief name of $NEW variable
+  static char const* const NAME_NEW;
+
+  /// @brief name of $CURRENT variable
+  static char const* const NAME_CURRENT;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

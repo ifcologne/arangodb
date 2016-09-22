@@ -12,7 +12,7 @@ child_process:        not supported
 cluster:              not supported
 console:              compatibility (see bootstrap/modules/console)
 constants:            not supported
-crypto:               not supported (see org/arangodb/crypto)
+crypto:               not supported (see @arangodb/crypto)
 dgram:                not supported
 dns:                  not supported
 domain:               not supported
@@ -30,10 +30,11 @@ querystring:          4.1.0
 stream:               0.10.25
 string_decoder:       4.1.0
 sys:                  not supported
+timers:               compatibility
 tls:                  not supported
 tty:                  compatibility
 url:                  4.1.0
 util:                 4.1.0 (modified)
 v8:                   not supported
-vm:                   not supported
+vm:                   compatibility (see bootstrap/modules/vm)
 zlib:                 not supported

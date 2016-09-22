@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, execution statistics
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,116 +19,83 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_EXECUTION_STATS_H
-#define ARANGODB_AQL_EXECUTION_STATS_H 1
+#ifndef ARANGOD_AQL_EXECUTION_STATS_H
+#define ARANGOD_AQL_EXECUTION_STATS_H 1
 
 #include "Basics/Common.h"
-#include "Basics/JsonHelper.h"
 
-namespace triagens {
-  namespace aql {
+#include <velocypack/Builder.h>
+#include <velocypack/Slice.h>
 
-    struct ExecutionStats {
+namespace arangodb {
+namespace velocypack {
+class Builder;
+}
+namespace aql {
 
-      ExecutionStats ();
+struct ExecutionStats {
+  ExecutionStats();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief instantiate the statistics from JSON
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief instantiate the statistics from VelocyPack
+  explicit ExecutionStats(arangodb::velocypack::Slice const& slice);
 
-      ExecutionStats (triagens::basics::Json const& jsonStats);
+  /// @brief convert the statistics to VelocyPack
+  void toVelocyPack(arangodb::velocypack::Builder&) const;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief convert the statistics to JSON
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief create empty statistics for VelocyPack
+  static void toVelocyPackStatic(arangodb::velocypack::Builder&);
+  
+  /// @brief sets query execution time from the outside
+  void setExecutionTime(double value) { executionTime = value; }
 
-      triagens::basics::Json toJson () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create empty statistics for JSON
-////////////////////////////////////////////////////////////////////////////////
-
-      static triagens::basics::Json toJsonStatic ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sumarize two sets of ExecutionStats      
-////////////////////////////////////////////////////////////////////////////////
-
-      void add (ExecutionStats const& summand) {
-        writesExecuted += summand.writesExecuted;
-        writesIgnored  += summand.writesIgnored;
-        scannedFull    += summand.scannedFull;
-        scannedIndex   += summand.scannedIndex;
-        fullCount      += summand.fullCount;
-        filtered       += summand.filtered;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sumarize the delta of two other sets of ExecutionStats to us
-////////////////////////////////////////////////////////////////////////////////
-
-      void addDelta (ExecutionStats const& lastStats, ExecutionStats const& newStats) {
-        writesExecuted += newStats.writesExecuted - lastStats.writesExecuted;
-        writesIgnored  += newStats.writesIgnored  - lastStats.writesIgnored;
-        scannedFull    += newStats.scannedFull    - lastStats.scannedFull;
-        scannedIndex   += newStats.scannedIndex   - lastStats.scannedIndex;
-        fullCount      += newStats.fullCount      - lastStats.fullCount;
-        filtered       += newStats.filtered       - lastStats.filtered;
-      }
-
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of successfully executed write operations
-////////////////////////////////////////////////////////////////////////////////
-
-      int64_t writesExecuted;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of ignored write operations (ignored due to errors)
-////////////////////////////////////////////////////////////////////////////////
-
-      int64_t writesIgnored;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of documents scanned (full-collection scan)
-////////////////////////////////////////////////////////////////////////////////
-
-      int64_t scannedFull; 
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of documents scanned (using indexes scan)
-////////////////////////////////////////////////////////////////////////////////
-
-      int64_t scannedIndex; 
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of documents filtered away
-////////////////////////////////////////////////////////////////////////////////
-
-      int64_t filtered; 
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief total number of results, before applying last limit
-////////////////////////////////////////////////////////////////////////////////
-
-      int64_t fullCount; 
-
-    };
-
+  /// @brief sumarize two sets of ExecutionStats
+  void add(ExecutionStats const& summand) {
+    writesExecuted += summand.writesExecuted;
+    writesIgnored += summand.writesIgnored;
+    scannedFull += summand.scannedFull;
+    scannedIndex += summand.scannedIndex;
+    fullCount += summand.fullCount;
+    filtered += summand.filtered;
+    // intentionally no modification of executionTime
   }
+
+  /// @brief sumarize the delta of two other sets of ExecutionStats to us
+  void addDelta(ExecutionStats const& lastStats,
+                ExecutionStats const& newStats) {
+    writesExecuted += newStats.writesExecuted - lastStats.writesExecuted;
+    writesIgnored += newStats.writesIgnored - lastStats.writesIgnored;
+    scannedFull += newStats.scannedFull - lastStats.scannedFull;
+    scannedIndex += newStats.scannedIndex - lastStats.scannedIndex;
+    fullCount += newStats.fullCount - lastStats.fullCount;
+    filtered += newStats.filtered - lastStats.filtered;
+    // intentionally no modification of executionTime
+  }
+
+  /// @brief number of successfully executed write operations
+  int64_t writesExecuted;
+
+  /// @brief number of ignored write operations (ignored due to errors)
+  int64_t writesIgnored;
+
+  /// @brief number of documents scanned (full-collection scan)
+  int64_t scannedFull;
+
+  /// @brief number of documents scanned (using indexes scan)
+  int64_t scannedIndex;
+
+  /// @brief number of documents filtered away
+  int64_t filtered;
+
+  /// @brief total number of results, before applying last limit
+  int64_t fullCount;
+  
+  /// @brief query execution time (wall-clock time). value will be set from 
+  /// the outside
+  double executionTime;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief AQL, specialized attribute accessor for expressions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2010-2014 triagens GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,187 +16,60 @@
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
 ///
-/// Copyright holder is triAGENS GmbH, Cologne, Germany
+/// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_ATTRIBUTE_ACCESSOR_H
-#define ARANGODB_AQL_ATTRIBUTE_ACCESSOR_H 1
+#ifndef ARANGOD_AQL_ATTRIBUTE_ACCESSOR_H
+#define ARANGOD_AQL_ATTRIBUTE_ACCESSOR_H 1
 
 #include "Basics/Common.h"
 #include "Aql/AqlValue.h"
 #include "Aql/types.h"
-#include "Basics/StringBuffer.h"
-#include "Utils/AqlTransaction.h"
-#include "VocBase/shaped-json.h"
 
-struct TRI_document_collection_t;
-class VocShaper;
+namespace arangodb {
+class Transaction;
 
-namespace triagens {
-  namespace aql {
+namespace aql {
 
-    class AqlItemBlock;
-    struct Variable;
+class AqlItemBlock;
+class ExpressionContext;
+struct Variable;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief AttributeAccessor
-////////////////////////////////////////////////////////////////////////////////
+class AttributeAccessor {
+ public:
+  AttributeAccessor(std::vector<std::string>&&, Variable const*);
+  ~AttributeAccessor() = default;
 
-    class AttributeAccessor {
+  /// @brief execute the accessor
+  AqlValue get(arangodb::Transaction* trx, ExpressionContext* context, bool& mustDestroy);
+    
+ public:
+  void replaceVariable(std::unordered_map<VariableId, Variable const*> const& replacements);
 
-        enum AttributeType {
-          ATTRIBUTE_TYPE_KEY,
-          ATTRIBUTE_TYPE_REV,
-          ATTRIBUTE_TYPE_ID,
-          ATTRIBUTE_TYPE_FROM,
-          ATTRIBUTE_TYPE_TO,
-          ATTRIBUTE_TYPE_REGULAR
-        };
+ private:
+  enum AccessorType {
+    EXTRACT_KEY,
+    EXTRACT_ID,
+    EXTRACT_FROM,
+    EXTRACT_TO,
+    EXTRACT_SINGLE,
+    EXTRACT_MULTI
+  };
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-      
-      public:
+  /// @brief the attribute names vector (e.g. [ "a", "b", "c" ] for a.b.c)
+  std::vector<std::string> const _attributeParts;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-      
-        AttributeAccessor (std::vector<char const*> const&,
-                           Variable const*);
+  /// @brief the accessed variable
+  Variable const* _variable;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief type of the accessor
+  AccessorType _type;
+};
 
-        ~AttributeAccessor ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief execute the accessor
-////////////////////////////////////////////////////////////////////////////////
-
-        AqlValue get (triagens::arango::AqlTransaction* trx,
-                      AqlItemBlock const*,
-                      size_t,
-                      std::vector<Variable const*> const&,
-                      std::vector<RegisterId> const&);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extract the _rev attribute from a ShapedJson marker
-////////////////////////////////////////////////////////////////////////////////
-
-        AqlValue extractRev (AqlValue const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extract the _id attribute from a ShapedJson marker
-////////////////////////////////////////////////////////////////////////////////
-
-        AqlValue extractId (AqlValue const&,
-                            triagens::arango::AqlTransaction*,
-                            struct TRI_document_collection_t const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extract the _from attribute from a ShapedJson marker
-////////////////////////////////////////////////////////////////////////////////
-
-        AqlValue extractFrom (AqlValue const&,
-                              triagens::arango::AqlTransaction*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extract the _to attribute from a ShapedJson marker
-////////////////////////////////////////////////////////////////////////////////
-
-        AqlValue extractTo (AqlValue const&,
-                            triagens::arango::AqlTransaction*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extract any other attribute from a ShapedJson marker
-////////////////////////////////////////////////////////////////////////////////
-        
-        AqlValue extractRegular (AqlValue const&,
-                                 triagens::arango::AqlTransaction*,
-                                 struct TRI_document_collection_t const*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the attribute names vector (e.g. [ "a", "b", "c" ] for a.b.c)
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<char const*> const _attributeParts;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief full attribute name (e.g. "a.b.c")
-////////////////////////////////////////////////////////////////////////////////
-        
-        std::string _combinedName;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the accessed variable
-////////////////////////////////////////////////////////////////////////////////
-
-        Variable const* _variable;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief buffer for temporary strings
-////////////////////////////////////////////////////////////////////////////////
-
-        triagens::basics::StringBuffer _buffer;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief shaper
-////////////////////////////////////////////////////////////////////////////////
-
-        VocShaper* _shaper;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief attribute path id cache for shapes
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_shape_pid_t _pid;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection name lookup cache
-////////////////////////////////////////////////////////////////////////////////
-
-        struct {
-          std::string value;
-          TRI_voc_cid_t cid;
-        }
-        _nameCache;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief attribute type (to save repeated strcmp calls)
-////////////////////////////////////////////////////////////////////////////////
-
-        AttributeType _attributeType;
-
-    };
-
-  }  // namespace triagens::aql
-}  // namespace triagens
+}  // namespace arangodb::aql
+}  // namespace arangodb
 
 #endif
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "^\\(/// @brief\\|/// {@inheritDoc}\\|/// @addtogroup\\|// --SECTION--\\|/// @\\}\\)"
-// End:

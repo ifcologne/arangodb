@@ -25,18 +25,24 @@
 /// @author Copyright 2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "Basics/Common.h"
+
+#define BOOST_TEST_INCLUDED
 #include <boost/test/unit_test.hpp>
 
 #include "Basics/SkipList.h"
 #include "Basics/voc-errors.h"
+#include "Random/RandomGenerator.h"
 
 #include <vector>
+
+static bool Initialized = false;
 
 using namespace std;
 
 static int CmpElmElm (void const* left,
                       void const* right,
-                      triagens::basics::SkipListCmpType cmptype) {
+                      arangodb::basics::SkipListCmpType cmptype) {
   auto l = *(static_cast<int const*>(left));
   auto r = *(static_cast<int const*>(right));
 
@@ -67,6 +73,11 @@ static void FreeElm (void* e) {
 struct CSkipListSetup {
   CSkipListSetup () {
     BOOST_TEST_MESSAGE("setup SkipList");
+    if (!Initialized) {
+      Initialized = true;
+      arangodb::RandomGenerator::initialize(arangodb::RandomGenerator::RandomType::MERSENNE);
+    }
+
   }
 
   ~CSkipListSetup () {
@@ -89,7 +100,7 @@ BOOST_FIXTURE_TEST_SUITE(CSkipListTest, CSkipListSetup)
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_unique_forward) {
-  triagens::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
+  arangodb::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
   
   // check start node
   BOOST_CHECK_EQUAL((void*) 0, skiplist.startNode()->nextNode());
@@ -120,7 +131,7 @@ BOOST_AUTO_TEST_CASE (tst_unique_forward) {
   // check end node
   BOOST_CHECK_EQUAL((void*) 0, skiplist.endNode());
 
-  triagens::basics::SkipListNode<void, void>* current;
+  arangodb::basics::SkipListNode<void, void>* current;
 
   // do a forward iteration
   current = skiplist.startNode()->nextNode();
@@ -169,7 +180,7 @@ BOOST_AUTO_TEST_CASE (tst_unique_forward) {
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_unique_reverse) {
-  triagens::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
+  arangodb::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
   
   // check start node
   BOOST_CHECK_EQUAL((void*) 0, skiplist.startNode()->nextNode());
@@ -200,7 +211,7 @@ BOOST_AUTO_TEST_CASE (tst_unique_reverse) {
   // check end node
   BOOST_CHECK_EQUAL((void*) 0, skiplist.endNode());
 
-  triagens::basics::SkipListNode<void, void>* current;
+  arangodb::basics::SkipListNode<void, void>* current;
 
   // do a forward iteration
   current = skiplist.startNode()->nextNode();
@@ -249,7 +260,7 @@ BOOST_AUTO_TEST_CASE (tst_unique_reverse) {
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_unique_lookup) {
-  triagens::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
+  arangodb::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
   
   std::vector<int*> values; 
   for (int i = 0; i < 100; ++i) {
@@ -292,7 +303,7 @@ BOOST_AUTO_TEST_CASE (tst_unique_lookup) {
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_unique_remove) {
-  triagens::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
+  arangodb::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
   
   std::vector<int*> values; 
   for (int i = 0; i < 100; ++i) {
@@ -397,7 +408,7 @@ BOOST_AUTO_TEST_CASE (tst_unique_remove) {
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_unique_remove_all) {
-  triagens::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
+  arangodb::basics::SkipList<void, void> skiplist(CmpElmElm, CmpKeyElm, FreeElm, true, false);
   
   std::vector<int*> values; 
   for (int i = 0; i < 100; ++i) {

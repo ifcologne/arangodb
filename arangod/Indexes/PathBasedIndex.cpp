@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief path-based index
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,45 +19,98 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "PathBasedIndex.h"
-#include "Basics/logging.h"
+#include "Aql/AstNode.h"
+#include "Basics/VelocyPackHelper.h"
+#include "Logger/Logger.h"
 
-using namespace triagens::arango;
+#include <velocypack/Iterator.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class PathBasedIndex
-// -----------------------------------------------------------------------------
+using namespace arangodb;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+arangodb::aql::AstNode const* PathBasedIndex::PermutationState::getValue()
+    const {
+  if (type == arangodb::aql::NODE_TYPE_OPERATOR_BINARY_EQ) {
+    TRI_ASSERT(current == 0);
+    return value;
+  } else if (type == arangodb::aql::NODE_TYPE_OPERATOR_BINARY_IN) {
+    TRI_ASSERT(n > 0);
+    TRI_ASSERT(current < n);
+    return value->getMember(current);
+  }
+
+  TRI_ASSERT(false);
+  return nullptr;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create the index
 ////////////////////////////////////////////////////////////////////////////////
 
-PathBasedIndex::PathBasedIndex (TRI_idx_iid_t iid,
-                                TRI_document_collection_t* collection,
-                                std::vector<std::vector<triagens::basics::AttributeName>> const& fields,
-                                bool unique,
-                                bool sparse) 
-  : Index(iid, collection, fields),
-    _shaper(_collection->getShaper()),
-    _paths(fillPidPaths()),
-    _unique(unique),
-    _sparse(sparse),
-    _useExpansion(false) {
-
-  TRI_ASSERT(! fields.empty());
+PathBasedIndex::PathBasedIndex(
+    TRI_idx_iid_t iid, arangodb::LogicalCollection* collection,
+    std::vector<std::vector<arangodb::basics::AttributeName>> const& fields,
+    bool unique, bool sparse, bool allowPartialIndex)
+    : Index(iid, collection, fields, unique, sparse),
+      _useExpansion(false),
+      _allowPartialIndex(allowPartialIndex) {
+  TRI_ASSERT(!fields.empty());
 
   TRI_ASSERT(iid != 0);
-  
-  for (auto const& list : fields) {
-    if (TRI_AttributeNamesHaveExpansion(list)) {
+
+  fillPaths(_paths, _expanding);
+
+  for (auto const& it : fields) {
+    if (TRI_AttributeNamesHaveExpansion(it)) {
+      _useExpansion = true;
+      break;
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief create the index
+////////////////////////////////////////////////////////////////////////////////
+
+PathBasedIndex::PathBasedIndex(TRI_idx_iid_t iid,
+                               arangodb::LogicalCollection* collection,
+                               VPackSlice const& info, bool allowPartialIndex)
+    : Index(iid, collection, info),
+      _useExpansion(false),
+      _allowPartialIndex(allowPartialIndex) {
+  TRI_ASSERT(!_fields.empty());
+
+  TRI_ASSERT(iid != 0);
+
+  fillPaths(_paths, _expanding);
+
+  for (auto const& it : _fields) {
+    if (TRI_AttributeNamesHaveExpansion(it)) {
+      _useExpansion = true;
+      break;
+    }
+  }
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief create an index stub with a hard-coded selectivity estimate
+/// this is used in the cluster coordinator case
+////////////////////////////////////////////////////////////////////////////////
+
+PathBasedIndex::PathBasedIndex(VPackSlice const& slice, bool allowPartialIndex)
+    : Index(slice),
+      _paths(),
+      _useExpansion(false),
+      _allowPartialIndex(allowPartialIndex) {
+  TRI_ASSERT(!_fields.empty());
+
+  for (auto const& it : _fields) {
+    if (TRI_AttributeNamesHaveExpansion(it)) {
       _useExpansion = true;
       break;
     }
@@ -72,76 +121,72 @@ PathBasedIndex::PathBasedIndex (TRI_idx_iid_t iid,
 /// @brief destroy the index
 ////////////////////////////////////////////////////////////////////////////////
 
-PathBasedIndex::~PathBasedIndex () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
+PathBasedIndex::~PathBasedIndex() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief helper function to insert a document into any index type
 ////////////////////////////////////////////////////////////////////////////////
 
-int PathBasedIndex::fillElement (std::vector<TRI_index_element_t*>& elements,
-                                 TRI_doc_mptr_t const* document) {
+int PathBasedIndex::fillElement(std::vector<TRI_index_element_t*>& elements,
+                                TRI_doc_mptr_t const* document) {
   TRI_ASSERT(document != nullptr);
-  TRI_ASSERT_EXPENSIVE(document->getDataPtr() != nullptr);   // ONLY IN INDEX, PROTECTED by RUNTIME
+  TRI_ASSERT(document->vpack() != nullptr);
 
-  TRI_shaped_json_t shapedJson;
+  VPackSlice const slice(document->vpack());
 
-  TRI_EXTRACT_SHAPED_JSON_MARKER(shapedJson, document->getDataPtr());  // ONLY IN INDEX, PROTECTED by RUNTIME
-
-  if (shapedJson._sid == TRI_SHAPE_ILLEGAL) {
-    LOG_WARNING("encountered invalid marker with shape id 0");
+  if (slice.isNone()) {
+    LOG(WARN) << "encountered invalid marker with slice of type None";
 
     return TRI_ERROR_INTERNAL;
   }
 
-  TRI_IF_FAILURE("FillElementIllegalShape") {
-    return TRI_ERROR_INTERNAL;
-  }
-  
+  TRI_IF_FAILURE("FillElementIllegalSlice") { return TRI_ERROR_INTERNAL; }
+
   size_t const n = _paths.size();
-  std::vector<TRI_shaped_json_t> shapes;
 
-  if (! _useExpansion) {
+  if (!_useExpansion) {
     // fast path for inserts... no array elements used
-    buildIndexValue(&shapedJson, shapes);
+    auto slices = buildIndexValue(slice);
 
-    if (shapes.size() == n) {
-      // if shapes.size() != n, then the value is not inserted into the index because of
-      // index sparsity!
-      char const* ptr = document->getShapedJsonPtr();  // ONLY IN INDEX, PROTECTED by RUNTIME
-
+    if (slices.size() == n) {
+      // if shapes.size() != n, then the value is not inserted into the index
+      // because of index sparsity!
       TRI_index_element_t* element = TRI_index_element_t::allocate(n);
-
       if (element == nullptr) {
         return TRI_ERROR_OUT_OF_MEMORY;
       }
       TRI_IF_FAILURE("FillElementOOM") {
+        // clean up manually
+        TRI_index_element_t::freeElement(element);
         return TRI_ERROR_OUT_OF_MEMORY;
       }
 
       element->document(const_cast<TRI_doc_mptr_t*>(document));
-      TRI_shaped_sub_t* subObjects = element->subObjects();
+      TRI_vpack_sub_t* subObjects = element->subObjects();
 
       for (size_t i = 0; i < n; ++i) {
-        TRI_FillShapedSub(&subObjects[i], &shapes[i], ptr);
+        TRI_FillVPackSub(&subObjects[i], slice, slices[i]);
       }
 
-      elements.emplace_back(element);
+      try {
+        TRI_IF_FAILURE("FillElementOOM2") {
+          THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+        }
+
+        elements.emplace_back(element);
+      } catch (...) {
+        TRI_index_element_t::freeElement(element);
+        return TRI_ERROR_OUT_OF_MEMORY;
+      }
     }
-  }
-  else {
+  } else {
     // other path for handling array elements, too
-    std::unordered_set<std::vector<TRI_shaped_json_t>> toInsert;
+    std::vector<std::vector<VPackSlice>> toInsert;
+    std::vector<VPackSlice> sliceStack;
 
-    buildIndexValues(&shapedJson, &shapedJson, 0, 0, toInsert, shapes);
+    buildIndexValues(slice, 0, toInsert, sliceStack);
 
-    if (! toInsert.empty()) {
-      char const* ptr = document->getShapedJsonPtr();  // ONLY IN INDEX, PROTECTED by RUNTIME
-
+    if (!toInsert.empty()) {
       elements.reserve(toInsert.size());
 
       for (auto& info : toInsert) {
@@ -152,16 +197,28 @@ int PathBasedIndex::fillElement (std::vector<TRI_index_element_t*>& elements,
           return TRI_ERROR_OUT_OF_MEMORY;
         }
         TRI_IF_FAILURE("FillElementOOM") {
+          // clean up manually
+          TRI_index_element_t::freeElement(element);
           return TRI_ERROR_OUT_OF_MEMORY;
         }
 
         element->document(const_cast<TRI_doc_mptr_t*>(document));
-        TRI_shaped_sub_t* subObjects = element->subObjects();
+        TRI_vpack_sub_t* subObjects = element->subObjects();
 
         for (size_t j = 0; j < n; ++j) {
-          TRI_FillShapedSub(&subObjects[j], &info[j], ptr);
+          TRI_FillVPackSub(&subObjects[j], slice, info[j]);
         }
-        elements.emplace_back(element);
+
+        try {
+          TRI_IF_FAILURE("FillElementOOM2") {
+            THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+          }
+
+          elements.emplace_back(element);
+        } catch (...) {
+          TRI_index_element_t::freeElement(element);
+          return TRI_ERROR_OUT_OF_MEMORY;
+        }
       }
     }
   }
@@ -169,189 +226,174 @@ int PathBasedIndex::fillElement (std::vector<TRI_index_element_t*>& elements,
   return TRI_ERROR_NO_ERROR;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief helper function to create the sole index value insert
 ////////////////////////////////////////////////////////////////////////////////
 
-void PathBasedIndex::buildIndexValue (TRI_shaped_json_t const* documentShape, 
-                                      std::vector<TRI_shaped_json_t>& shapes) {
-  TRI_shape_t const* shape = nullptr;
-
+std::vector<VPackSlice> PathBasedIndex::buildIndexValue(
+    VPackSlice const documentSlice) {
   size_t const n = _paths.size();
 
+  std::vector<VPackSlice> result;
   for (size_t i = 0; i < n; ++i) {
-    TRI_ASSERT(_paths[i].size() == 1);
+    TRI_ASSERT(!_paths[i].empty());
 
-    TRI_shaped_json_t shapedJson;
-    TRI_shape_pid_t pid = _paths[i][0].first;
-
-    bool check = _shaper->extractShapedJson(documentShape, 0, pid, &shapedJson, &shape);
-
-    if (! check || shape == nullptr || shapedJson._sid == BasicShapes::TRI_SHAPE_SID_NULL) {
-      // attribute not, found
+    VPackSlice slice = documentSlice.get(_paths[i]);
+    if (slice.isNone() || slice.isNull()) {
+      // attribute not found
       if (_sparse) {
-        // If sparse we do not have to index
-        return;
+        // if sparse we do not have to index, this is indicated by result
+        // being shorter than n
+        result.clear();
+        break;
       }
-      
-      // If not sparse we insert null here
-      shapedJson._sid = BasicShapes::TRI_SHAPE_SID_NULL;
-      shapedJson._data.data = nullptr;
-      shapedJson._data.length = 0;
+      // null, note that this will be copied later!
+      result.emplace_back(arangodb::basics::VelocyPackHelper::NullValue());
+    } else {
+      result.emplace_back(slice);
     }
-
-    shapes.emplace_back(shapedJson);
   }
+  return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief helper function to create a set of index combinations to insert
 ////////////////////////////////////////////////////////////////////////////////
 
-void PathBasedIndex::buildIndexValues (TRI_shaped_json_t const* documentShape, 
-                                       TRI_shaped_json_t const* subShape,
-                                       size_t subShapeLevel,
-                                       size_t level, 
-                                       std::unordered_set<std::vector<TRI_shaped_json_t>>& toInsert,
-                                       std::vector<TRI_shaped_json_t>& shapes) {
-  TRI_ASSERT(level < _paths.size());
-  TRI_shaped_json_t currentShape = *subShape;
-  TRI_shape_t const* shape = nullptr;
+void PathBasedIndex::buildIndexValues(
+    VPackSlice const document, size_t level,
+    std::vector<std::vector<VPackSlice>>& toInsert,
+    std::vector<VPackSlice>& sliceStack) {
+  // Invariant: level == sliceStack.size()
 
-  size_t const n = _paths[level].size();
-  size_t i = subShapeLevel;
-
-  while (i < n) {
-    TRI_shaped_json_t shapedJson;
-    TRI_shape_pid_t pid = _paths[level][i].first;
-
-    bool check = _shaper->extractShapedJson(subShape, 0, pid, &shapedJson, &shape);
-
-    if (! check || shape == nullptr || shapedJson._sid == BasicShapes::TRI_SHAPE_SID_NULL) {
-      // attribute not, found
-      if (_sparse) {
-        // If sparse we do not have to index
-        return;
-      }
-      
-      // If not sparse we insert null here
-      currentShape._sid = BasicShapes::TRI_SHAPE_SID_NULL;
-      currentShape._data.data = nullptr;
-      currentShape._data.length = 0;
-      break;
-    }
-
-    bool expand = _paths[level][i].second;
-
-    if (expand) {
-      size_t len = 0;
-      TRI_shaped_json_t shapedArrayElement;
-      bool ok = false;
-      switch (shape->_type) {
-        case TRI_SHAPE_LIST:
-          len = TRI_LengthListShapedJson((const TRI_list_shape_t*) shape, &shapedJson);
-          for (size_t index = 0; index < len; ++index) {
-            ok = TRI_AtListShapedJson((const TRI_list_shape_t*) shape, &shapedJson, index, &shapedArrayElement);
-            if (ok) {
-              buildIndexValues(documentShape, &shapedArrayElement, i + 1, level, toInsert, shapes);
-            }
-            else {
-              TRI_ASSERT(false);
-            }
-          }
-          break;
-        case TRI_SHAPE_HOMOGENEOUS_LIST:
-          len = TRI_LengthHomogeneousListShapedJson((const TRI_homogeneous_list_shape_t*) shape, &shapedJson);
-          for (size_t index = 0; index < len; ++index) {
-            ok = TRI_AtHomogeneousListShapedJson((const TRI_homogeneous_list_shape_t*) shape, &shapedJson, index, &shapedArrayElement);
-            if (ok) {
-              buildIndexValues(documentShape, &shapedArrayElement, i + 1, level, toInsert, shapes);
-            }
-            else {
-              TRI_ASSERT(false);
-            }
-          }
-          break;
-        case TRI_SHAPE_HOMOGENEOUS_SIZED_LIST:
-          len = TRI_LengthHomogeneousSizedListShapedJson((const TRI_homogeneous_sized_list_shape_t*) shape, &shapedJson);
-          for (size_t index = 0; index < len; ++index) {
-            ok = TRI_AtHomogeneousSizedListShapedJson((const TRI_homogeneous_sized_list_shape_t*) shape, &shapedJson, index, &shapedArrayElement);
-            if (ok) {
-              buildIndexValues(documentShape, &shapedArrayElement, i + 1, level, toInsert, shapes);
-            }
-            else {
-              TRI_ASSERT(false);
-            }
-          }
-          break;
-
-        default:
-          // Non Array attribute cannot be expanded
-          if (_sparse) {
-            // If sparse we do not have to index
-            return;
-          }
-           
-          // If not sparse we insert null here
-          currentShape._sid = BasicShapes::TRI_SHAPE_SID_NULL;
-          currentShape._data.data = nullptr;
-          currentShape._data.length = 0;
-          break;
-      }
-
-      // Leave the while loop here, it has been walked through in recursion
-      return;
-    }
-    else {
-      currentShape = shapedJson;
-    }
-    ++i;
-  }
-
-  shapes.emplace_back(currentShape);
-
-  if (level + 1 == _paths.size()) {
-    toInsert.emplace(shapes);
-    shapes.pop_back();
+  // Stop the recursion:
+  if (level == _paths.size()) {
+    toInsert.push_back(sliceStack);
     return;
   }
 
-  buildIndexValues(documentShape, documentShape, 0, level + 1, toInsert, shapes);
-  shapes.pop_back();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief helper function to transform AttributeNames into pid lists
-/// This will create PIDs for all indexed Attributes
-////////////////////////////////////////////////////////////////////////////////
-
-std::vector<std::vector<std::pair<TRI_shape_pid_t, bool>>> PathBasedIndex::fillPidPaths () {
-  TRI_ASSERT(_shaper != nullptr);
-
-  std::vector<std::vector<std::pair<TRI_shape_pid_t, bool>>> result;
-
-  for (auto const& list : _fields) {
-    std::vector<std::pair<TRI_shape_pid_t, bool>> interior;
-
-    for (auto const& attr : list) {
-      auto pid = _shaper->findOrCreateAttributePathByName(attr.name.c_str());
-      interior.emplace_back(pid, attr.shouldExpand);
+  if (_expanding[level] == -1) {   // the trivial, non-expanding case
+    VPackSlice slice = document.get(_paths[level]);
+    if (slice.isNone() || slice.isNull()) {
+      if (_sparse) {
+        return;
+      }
+      slice = arangodb::basics::VelocyPackHelper::NullValue();
     }
-    result.emplace_back(interior);
+    sliceStack.push_back(slice);
+    buildIndexValues(document, level+1, toInsert, sliceStack);
+    sliceStack.pop_back();
+    return;
   }
 
-  return result;
+  // Finally, the complex case, where we have to expand one entry.
+  // Note again that at most one step in the attribute path can be
+  // an array step. Furthermore, if _allowPartialIndex is true and
+  // anything goes wrong with this attribute path, we have to bottom out
+  // with None values to be able to use the index for a prefix match.
+
+  // Trivial case to bottom out with Illegal types.
+  VPackSlice illegalSlice = arangodb::basics::VelocyPackHelper::IllegalValue();
+
+  auto finishWithNones = [&]() -> void {
+    if (!_allowPartialIndex || level == 0) {
+      return;
+    }
+    for (size_t i = level; i < _paths.size(); i++) {
+      sliceStack.push_back(illegalSlice);
+    }
+    toInsert.push_back(sliceStack);
+    for (size_t i = level; i < _paths.size(); i++) {
+      sliceStack.pop_back();
+    }
+  };
+  size_t const n = _paths[level].size();
+  // We have 0 <= _expanding[level] < n.
+  VPackSlice current(document);
+  for (size_t i = 0; i <= static_cast<size_t>(_expanding[level]); i++) {
+    if (!current.isObject()) {
+      finishWithNones();
+      return;
+    }
+    current = current.get(_paths[level][i]);
+    if (current.isNone()) {
+      finishWithNones();
+      return;
+    }
+  }
+  // Now the expansion:
+  if (!current.isArray() || current.length() == 0) {
+    finishWithNones();
+    return;
+  }
+
+  std::unordered_set<VPackSlice,
+                     arangodb::basics::VelocyPackHelper::VPackHash,
+                     arangodb::basics::VelocyPackHelper::VPackEqual>
+      seen(2, arangodb::basics::VelocyPackHelper::VPackHash(),
+              arangodb::basics::VelocyPackHelper::VPackEqual());
+
+  auto moveOn = [&](VPackSlice something) -> void {
+    auto it = seen.find(something);
+    if (it == seen.end()) {
+      seen.insert(something);
+      sliceStack.push_back(something);
+      buildIndexValues(document, level + 1, toInsert, sliceStack);
+      sliceStack.pop_back();
+    }
+  };
+  for (auto const& member : VPackArrayIterator(current)) {
+    VPackSlice current2(member);
+    bool doneNull = false;
+    for (size_t i = _expanding[level] + 1; i < n; i++) {
+      if (!current2.isObject()) {
+        if (!_sparse) {
+          moveOn(arangodb::basics::VelocyPackHelper::NullValue());
+        }
+        doneNull = true;
+        break;
+      }
+      current2 = current2.get(_paths[level][i]);
+      if (current2.isNone()) {
+        if (!_sparse) {
+          moveOn(arangodb::basics::VelocyPackHelper::NullValue());
+        }
+        doneNull = true;
+        break;
+      }
+    }
+    if (!doneNull) {
+      moveOn(current2);
+    }
+    // Finally, if, because of sparsity, we have not inserted anything by now,
+    // we need to play the above trick with None because of the above mentioned
+    // reasons:
+    if (seen.empty()) {
+      finishWithNones();
+    }
+  }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
+/// @brief helper function to transform AttributeNames into strings.
+////////////////////////////////////////////////////////////////////////////////
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+void PathBasedIndex::fillPaths(std::vector<std::vector<std::string>>& paths,
+                               std::vector<int>& expanding) {
+  paths.clear();
+  expanding.clear();
+  for (std::vector<arangodb::basics::AttributeName> const& list : _fields) {
+    paths.emplace_back();
+    std::vector<std::string>& interior(paths.back());
+    int expands = -1;
+    int count = 0;
+    for (auto const& att : list) {
+      interior.emplace_back(att.name);
+      if (att.shouldExpand) {
+        expands = count;
+      }
+      ++count;
+    }
+    expanding.emplace_back(expands);
+  }
+}

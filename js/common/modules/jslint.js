@@ -28,46 +28,44 @@
 
 var internal = require("internal");
 var fs = require("fs");
+fs.readdirSync = function() { return fs.listTree(arguments[0]).filter(file => file != ""); };
+fs.existsSync = function() { return false; };
+fs.ReadStream = {};
+fs.ReadStream.prototype = {};
+fs.WriteStream = {};
+fs.WriteStream.prototype = {};
+var os = require("os");
+os.type = function() { return 'Linux'; };
+var process = require("process");
+process.version = 'v0.1';
 var console = require("console");
-var _ = require('underscore')
 
-var JSHINT = require("jshint").JSHINT;
-var jshintrc = {};
-
-try {
-  jshintrc = JSON.parse(fs.read('./js/.jshintrc'));
-}
-catch (err) {
-  // ignore any errors
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+var linter = require("eslint").linter;
+var ConfigFile = require("eslint/lib/config/config-file.js");
+var config = ConfigFile.load('./js/.eslintrc');
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief runs a JSLint test on a file
 ////////////////////////////////////////////////////////////////////////////////
 
-function RunTest (path, options) {
+function RunTest(path, options) {
   var content;
 
   try {
     content = fs.read(path);
-  }
-  catch (err) {
+  } catch (err) {
     console.error("cannot load test file '%s'", path);
-    return;
+    return false;
   }
-
-  var result = { };
-  content = content.replace("/*jslint", "/*xxxxxx");
-  result["passed"] = JSHINT(content, _.extend({}, jshintrc, options));
-
-  if (JSHINT.errors) {
-    result["errors"] = JSHINT.errors;
+  var result = {};
+  try {
+    var messages = linter.verify(content, config);
+    result.passed = !messages.some(message => message.severity == 2);
+    result.messages = messages;
+  } catch (e) {
+    result.passed = false;
+    console.error(e);
   }
-
   return result;
 }
 
@@ -75,35 +73,43 @@ function RunTest (path, options) {
 /// @brief runs tests from command-line
 ////////////////////////////////////////////////////////////////////////////////
 
-function RunCommandLineTests (options) {
+function RunCommandLineTests(options) {
   var result = true;
   var tests = internal.unitTests();
 
-  for (var i = 0;  i < tests.length;  ++i) {
+  for (var i = 0; i < tests.length; ++i) {
     var file = tests[i];
 
     try {
       var testResult = RunTest(file, options);
       result = result && testResult && testResult.passed;
-      if (testResult && (! testResult.passed && testResult.errors)) {
-        for (var j = 0; j < testResult.errors.length; ++j) {
-          var err = testResult.errors[j];
-          if (! err) {
-            continue;
-          }
+      
+      for (var j = 0; j < testResult.messages.length; ++j) {
+        var err = testResult.messages[j];
 
-          var position = file + ":" + err.line + ", " + err.character;
-          var reason = err.reason;
-          console.error("jslint: %s : %s", position, reason);
+        if (!err) {
+          continue;
         }
+        var level = "UNKNOWN";
+        var outFn = console.error.bind(console);
+        if (err.severity == 1) {
+          level = "WARN";
+          outFn = console.warn.bind(console);
+        } else if (err.severity == 2) {
+          level = "ERROR";
+          outFn = console.error.bind(console);
+        }
+        outFn(`jslint(${level}): ${file}:${err.line},${err.column} (Rule: ${err.ruleId}, Severity: ${err.severity}) ${err.message}`);
       }
-      else {
-        console.info("jslint: %s passed", file);
+
+      if (result) {
+        console.log(`jslint: ${file} passed`);
+      } else {
+        console.log(`jslint: ${file} failed`);
       }
-    }
-    catch (err) {
-      print("cannot run test file '" + file + "': " + err);
-      print(err.stack);
+    } catch (err) {
+      console.error(`cannot run test file "${file}": ${err}`);
+      console.error(err.stack);
       result = false;
     }
   }
@@ -111,14 +117,5 @@ function RunCommandLineTests (options) {
   internal.setUnitTestsResult(result);
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    MODULE EXPORTS
-// -----------------------------------------------------------------------------
-
 exports.runTest = RunTest;
 exports.runCommandLineTests = RunCommandLineTests;
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "^\\(/// @brief\\|/// @addtogroup\\|// --SECTION--\\|/// @page\\|/// @}\\)"
-// End:

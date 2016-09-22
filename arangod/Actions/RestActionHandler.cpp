@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief action request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,62 +19,38 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestActionHandler.h"
+
 #include "Actions/actions.h"
 #include "Basics/StringUtils.h"
+#include "Basics/tri-strings.h"
 #include "Rest/HttpRequest.h"
 #include "VocBase/vocbase.h"
 
-using namespace std;
-using namespace triagens::basics;
-using namespace triagens::rest;
-using namespace triagens::arango;
+using namespace arangodb;
+using namespace arangodb::basics;
+using namespace arangodb::rest;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-RestActionHandler::RestActionHandler (HttpRequest* request,
-                                      action_options_t* data)
-  : RestVocbaseBaseHandler(request),
-    _action(nullptr),
-    _dataLock(),
-    _data(nullptr) {
-
+RestActionHandler::RestActionHandler(GeneralRequest* request,
+                                     GeneralResponse* response)
+    : RestVocbaseBaseHandler(request, response),
+      _action(nullptr),
+      _dataLock(),
+      _data(nullptr) {
   _action = TRI_LookupActionVocBase(request);
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
+bool RestActionHandler::isDirect() const { return _action == nullptr; }
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-bool RestActionHandler::isDirect () const {
-  return _action == nullptr;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-HttpHandler::status_t RestActionHandler::execute () {
+RestHandler::status RestActionHandler::execute() {
   TRI_action_result_t result;
 
   // check the request path
   if (_request->databaseName() == "_system") {
-    if (TRI_IsPrefixString(_request->requestPath(), "/_admin/aardvark")) {
-      RequestStatisticsAgentSetIgnore(this);
+    if (StringUtils::isPrefix(_request->requestPath(), "/_admin/aardvark")) {
+      requestStatisticsAgentSetIgnore();
     }
   }
 
@@ -89,19 +61,18 @@ HttpHandler::status_t RestActionHandler::execute () {
 
   // execute
   else {
-
     // extract the sub-request type
-    HttpRequest::HttpRequestType type = _request->requestType();
+    rest::RequestType type = _request->requestType();
 
     // execute one of the HTTP methods
     switch (type) {
-      case HttpRequest::HTTP_REQUEST_GET:
-      case HttpRequest::HTTP_REQUEST_POST:
-      case HttpRequest::HTTP_REQUEST_PUT:
-      case HttpRequest::HTTP_REQUEST_DELETE:
-      case HttpRequest::HTTP_REQUEST_HEAD:
-      case HttpRequest::HTTP_REQUEST_OPTIONS:
-      case HttpRequest::HTTP_REQUEST_PATCH: {
+      case rest::RequestType::GET:
+      case rest::RequestType::POST:
+      case rest::RequestType::PUT:
+      case rest::RequestType::DELETE_REQ:
+      case rest::RequestType::HEAD:
+      case rest::RequestType::OPTIONS:
+      case rest::RequestType::PATCH: {
         result = executeAction();
         break;
       }
@@ -114,61 +85,26 @@ HttpHandler::status_t RestActionHandler::execute () {
   }
 
   // handler has finished, generate result
-  if (result.isValid) {
-    if (result.requeue) {
-      status_t status(HANDLER_REQUEUE);
-      status.sleep = result.sleep;
-
-      return status;
-    }
-    else {
-      return status_t(HANDLER_DONE);
-    }
-  }
-  else {
-    return status_t(HANDLER_FAILED);
-  }
+  return result.isValid ? status::DONE : status::FAILED;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-bool RestActionHandler::cancel () {
-  return _action->cancel(&_dataLock, &_data);
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
+bool RestActionHandler::cancel() { return _action->cancel(&_dataLock, &_data); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief executes an action
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_action_result_t RestActionHandler::executeAction () {
-  TRI_action_result_t result = _action->execute(_vocbase, _request, &_dataLock, &_data);
+TRI_action_result_t RestActionHandler::executeAction() {
+  TRI_action_result_t result = _action->execute(
+      _vocbase, _request.get(), _response.get(), &_dataLock, &_data);
 
-  if (result.isValid) {
-    _response = result.response;
+  if (!result.isValid) {
+    if (result.canceled) {
+      generateCanceled();
+    } else {
+      generateNotImplemented(_action->_url);
+    }
   }
-  else if (result.canceled) {
-    result.isValid = true;
-    generateCanceled();
-  }
-  else {
-    result.isValid = true;
-    generateNotImplemented(_action->_url);
-  }
-  
+
   return result;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

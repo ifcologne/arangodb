@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, variable generator
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,158 +19,75 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_VARIABLE_GENERATOR_H
-#define ARANGODB_AQL_VARIABLE_GENERATOR_H 1
+#ifndef ARANGOD_AQL_VARIABLE_GENERATOR_H
+#define ARANGOD_AQL_VARIABLE_GENERATOR_H 1
 
 #include "Basics/Common.h"
-#include "Basics/JsonHelper.h"
 #include "Aql/Variable.h"
 #include "Aql/types.h"
 
-namespace triagens {
-  namespace aql {
+namespace arangodb {
+namespace aql {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                           class VariableGenerator
-// -----------------------------------------------------------------------------
+class VariableGenerator {
+ public:
+  /// @brief create the generator
+  VariableGenerator();
 
-    class VariableGenerator {
+  /// @brief destroy the generator
+  ~VariableGenerator();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
+ public:
+  /// @brief return a map of all variable ids with their names
+  std::unordered_map<VariableId, std::string const> variables(bool) const;
 
-      public:
+  /// @brief generate a variable
+  Variable* createVariable(char const*, size_t, bool);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the generator
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief generate a variable
+  Variable* createVariable(std::string const&, bool);
 
-        VariableGenerator ();
+  /// @brief generate a variable from VelocyPack
+  Variable* createVariable(arangodb::velocypack::Slice const);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the generator
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief clones a variable from an existing one
+  Variable* createVariable(Variable const*);
 
-        ~VariableGenerator ();
+  /// @brief generate a temporary variable
+  Variable* createTemporaryVariable();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+  /// @brief renames a variable (assigns a temporary name)
+  Variable* renameVariable(VariableId);
 
-      public:
+  /// @brief renames a variable (assigns the specified name)
+  Variable* renameVariable(VariableId, std::string const&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a map of all variable ids with their names
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief return a variable by id - this does not respect the scopes!
+  Variable* getVariable(VariableId) const;
 
-        std::unordered_map<VariableId, std::string const> variables (bool) const;
+  /// @brief return the next temporary variable name
+  std::string nextName();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generate a variable
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief export to VelocyPack
+  void toVelocyPack(arangodb::velocypack::Builder& builder) const;
 
-        Variable* createVariable (char const*,
-                                  size_t,
-                                  bool);
+  /// @brief import from VelocyPack
+  void fromVelocyPack(arangodb::velocypack::Slice const& allVariablesList);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generate a variable
-////////////////////////////////////////////////////////////////////////////////
+ private:
+  /// @brief returns the next variable id
+  inline VariableId nextId() { return _id++; }
 
-        Variable* createVariable (std::string const&,
-                                  bool);
+ private:
+  /// @brief all variables created
+  std::unordered_map<VariableId, Variable*> _variables;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generate a variable from JSON
-////////////////////////////////////////////////////////////////////////////////
-
-        Variable* createVariable (triagens::basics::Json const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief clones a variable from an existing one
-////////////////////////////////////////////////////////////////////////////////
-
-        Variable* createVariable (Variable const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generate a temporary variable
-////////////////////////////////////////////////////////////////////////////////
-  
-        Variable* createTemporaryVariable ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a variable by id - this does not respect the scopes!
-////////////////////////////////////////////////////////////////////////////////
-
-        Variable* getVariable (VariableId) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the next temporary variable name
-////////////////////////////////////////////////////////////////////////////////
-  
-        std::string nextName ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief export to JSON, returns an AUTOFREE Json object
-////////////////////////////////////////////////////////////////////////////////
-
-        triagens::basics::Json toJson (TRI_memory_zone_t*) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief import from JSON
-////////////////////////////////////////////////////////////////////////////////
-
-        void fromJson (triagens::basics::Json const& jsonAllVariablesList);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private functions
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the next variable id
-////////////////////////////////////////////////////////////////////////////////
-
-        inline VariableId nextId () {
-          return _id++;
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief all variables created
-////////////////////////////////////////////////////////////////////////////////
-
-        std::unordered_map<VariableId, Variable*>  _variables;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the next assigned variable id
-////////////////////////////////////////////////////////////////////////////////
-
-        VariableId                                 _id;
-
-    };
-
-  }
+  /// @brief the next assigned variable id
+  VariableId _id;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

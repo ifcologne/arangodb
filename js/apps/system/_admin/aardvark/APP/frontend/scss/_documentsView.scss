@@ -1,11 +1,6 @@
-#documentsDiv {
-  margin-top: 20px;
-}
-
 .new-index-view {
   input[type='checkbox'] {
     float: left;
-    margin-top: -9px;
   }
 
   table {
@@ -20,6 +15,16 @@
     th {
       font-weight: 300 !important;
       width: 200px !important;
+    }
+  }
+}
+
+#documentsDiv {
+  padding-top: 0;
+
+  .pure-table {
+    .snippet-container {
+      margin-top: 10px;
     }
   }
 }
@@ -48,6 +53,23 @@
     margin-left: 10px;
   }
 
+  tfoot {
+
+    border-top: 1px solid $c-modal-table-border-bottom;
+
+    i {
+      color: $c-positive;
+      font-size: 19px;
+      margin-left: 22px;
+      margin-top: 5px;
+    }
+
+    i:hover {
+      color: $c-positive-hover;
+      cursor: pointer;
+    }
+  }
+
 }
 
 .contentIn {
@@ -59,11 +81,50 @@
   }
 }
 
-.index-button-bar {
-  margin-top: 15px;
+#collectionEditIndexTable {
+  thead {
+    border-bottom: 1px solid $c-grey;
+  }
+}
 
-  button {
-    margin-left: 0;
+.newIndexClass {
+  table {
+    border-top: 1px solid $c-modal-table-border-bottom;
+    margin-bottom: 60px;
+
+    input,
+    select {
+      @extend %inputs;
+    }
+
+    select {
+      margin-right: 7px;
+    }
+
+    .arangoicon {
+      float: right;
+      margin-right: -12px;
+      margin-top: 5px;
+    }
+  }
+}
+
+.index-button-bar {
+
+  float: right;
+
+  i {
+    color: $c-positive;
+    font-size: 16pt;
+    margin-right: 43px;
+  }
+
+  i:hover {
+    cursor: pointer;
+  }
+
+  #cancelIndex {
+    margin-right: 13px;
   }
 }
 
@@ -92,7 +153,7 @@
 }
 
 .add-filter-item {
-  margin-left: 5px;
+  margin-left: 4px;
 
   i {
     margin-top: 0 !important;
@@ -109,20 +170,22 @@
   .dropdownImport,
   .headerDropdown {
     clear: both;
-    margin-bottom: 5px;
+    margin-bottom: 10px;
   }
 }
 
 .documents-size {
   background-color: $c-white !important;
   border: 1px solid $c-grey;
-  border-radius: 2px;
+  border-radius: 0;
   box-shadow: none;
+  color: $c-black;
   float: right;
+  font-size: 11pt;
+  font-weight: 300;
   height: 28px;
   line-height: 18px;
   margin-left: 10px;
-  margin-right: -2px;
   margin-top: 0;
   outline: none;
   outline-color: transparent;

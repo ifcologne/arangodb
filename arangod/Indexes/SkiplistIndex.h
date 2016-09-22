@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief skiplist index
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,32 +19,144 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_INDEXES_SKIPLIST_INDEX_H
-#define ARANGODB_INDEXES_SKIPLIST_INDEX_H 1
+#ifndef ARANGOD_INDEXES_SKIPLIST_INDEX_H
+#define ARANGOD_INDEXES_SKIPLIST_INDEX_H 1
 
 #include "Basics/Common.h"
+#include "Aql/AstNode.h"
 #include "Basics/SkipList.h"
+#include "Indexes/IndexIterator.h"
 #include "Indexes/PathBasedIndex.h"
-#include "IndexOperators/index-operator.h"
-#include "VocBase/shaped-json.h"
+#include "Utils/Transaction.h"
 #include "VocBase/vocbase.h"
 #include "VocBase/voc-types.h"
 
-typedef struct {
-  TRI_shaped_json_t* _fields;   // list of shaped json objects which the
-                                // collection should know about
-  size_t _numFields;   // Note that the number of fields coming from
-                       // a query can be smaller than the number of
-                       // fields indexed
-}
-TRI_skiplist_index_key_t;
+#include <list>
 
-namespace triagens {
-  namespace arango {
+namespace arangodb {
+namespace aql {
+class SortCondition;
+struct Variable;
+}
+
+class SkiplistIndex;
+class Transaction;
+
+
+/// @brief Abstract Builder for lookup values in skiplist index
+
+class BaseSkiplistLookupBuilder {
+ protected:
+  bool _isEquality;
+  bool _includeLower;
+  bool _includeUpper;
+
+  TransactionBuilderLeaser _lowerBuilder;
+  arangodb::velocypack::Slice _lowerSlice;
+
+  TransactionBuilderLeaser _upperBuilder;
+  arangodb::velocypack::Slice _upperSlice;
+
+ public:
+  explicit BaseSkiplistLookupBuilder(Transaction* trx) :
+    _lowerBuilder(trx), _upperBuilder(trx)
+  {
+    _isEquality = true;
+    _includeUpper = true;
+    _includeLower = true;
+
+    _lowerBuilder->clear();
+    _upperBuilder->clear();
+  }
+
+  virtual ~BaseSkiplistLookupBuilder() {};
+
+  /// @brief Compute the next lookup values
+  ///        If returns false there is no further lookup
+  virtual bool next() = 0;
+
+  /// @brief Returns if we only have equality checks (== or IN)
+  bool isEquality() const;
+
+  /// @brief Get the lookup value for the lower bound.
+  arangodb::velocypack::Slice const* getLowerLookup() const;
+
+  /// @brief Test if the lower bound should be included.
+  ///        If there is no lower bound given returns true
+  ///        as well.
+  bool includeLower() const;
+
+  /// @brief Get the lookup value for the upper bound.
+  arangodb::velocypack::Slice const* getUpperLookup() const;
+
+  /// @brief Test if the upper bound should be included.
+  ///        If there is no upper bound given returns true
+  ///        as well.
+  bool includeUpper() const;
+};
+
+/// @brief Builder for lookup values in skiplist index
+///        Offers lower and upper bound lookup values
+///        and handles multiplication of IN search values.
+///        Also makes sure that the lookup values are
+///        returned in the correct ordering. And no
+///        lookup is returned twice.
+
+class SkiplistLookupBuilder : public BaseSkiplistLookupBuilder {
+
+  public:
+   SkiplistLookupBuilder(
+       Transaction* trx,
+       std::vector<std::vector<arangodb::aql::AstNode const*>>&,
+       arangodb::aql::Variable const*, bool);
+
+    ~SkiplistLookupBuilder() {}
+
+/// @brief Compute the next lookup values
+///        If returns false there is no further lookup
+    bool next() override;
+
+};
+
+class SkiplistInLookupBuilder : public BaseSkiplistLookupBuilder {
+
+  private:
+
+    struct PosStruct {
+      size_t field;
+      size_t current;
+      size_t _max; // thanks, windows.h!
+
+      PosStruct(size_t f, size_t c, size_t m) : field(f), current(c), _max(m) {}
+    };
+
+    TransactionBuilderLeaser _dataBuilder;
+    /// @brief keeps track of the positions in the in-lookup
+    /// values. (field, inPosition, maxPosition)
+    std::list<PosStruct> _inPositions;
+
+    bool _done;
+
+  public:
+   SkiplistInLookupBuilder(
+       Transaction* trx,
+       std::vector<std::vector<arangodb::aql::AstNode const*>>&,
+       arangodb::aql::Variable const*, bool);
+
+    ~SkiplistInLookupBuilder() {}
+
+/// @brief Compute the next lookup values
+///        If returns false there is no further lookup
+    bool next() override;
+
+  private:
+
+    bool forwardInPosition();
+
+    void buildSearchValues();
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief Iterator structure for skip list. We require a start and stop node
@@ -60,241 +168,300 @@ namespace triagens {
 /// are non-empty.
 ////////////////////////////////////////////////////////////////////////////////
 
-    class SkiplistIterator {
+class SkiplistIterator final : public IndexIterator {
+ private:
+  friend class SkiplistIndex;
 
-      private:
+ private:
+  // Shorthand for the skiplist node
+  typedef arangodb::basics::SkipListNode<VPackSlice,
+                                         TRI_index_element_t> Node;
 
-        friend class SkiplistIndex;
+ private:
+  bool _reverse;
+  Node* _cursor;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private structs
-// -----------------------------------------------------------------------------
-      
-      private:
+  Node* _leftEndPoint;   // Interval left border, first excluded element
+  Node* _rightEndPoint;  // Interval right border, first excluded element
 
-        // Shorthand for the skiplist node
-        typedef triagens::basics::SkipListNode<TRI_skiplist_index_key_t, TRI_index_element_t> Node;
-
-        struct SkiplistIteratorInterval {
-          Node* _leftEndPoint;
-          Node* _rightEndPoint;
-
-          SkiplistIteratorInterval ()
-            : _leftEndPoint(nullptr),
-              _rightEndPoint(nullptr) { 
-          }
-        };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-      
-      private:
-
-        SkiplistIndex const* _index;
-        size_t _currentInterval; // starts with 0, current interval used
-        bool _reverse;
-        Node* _cursor;
-        std::vector<SkiplistIteratorInterval> _intervals;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-      
-      public:
-
-        SkiplistIterator (SkiplistIndex const* idx,
-                          bool reverse) 
-          : _index(idx) ,
-            _currentInterval(0),
-            _reverse(reverse),
-            _cursor(nullptr) {
-        }
-
-        ~SkiplistIterator () {
-        }
-
-        // always holds the last node returned, initially equal to
-        // the _leftEndPoint of the first interval (or the 
-        // _rightEndPoint of the last interval in the reverse
-        // case), can be nullptr if there are no intervals
-        // (yet), or, in the reverse case, if the cursor is
-        // at the end of the last interval. Additionally
-        // in the non-reverse case _cursor is set to nullptr
-        // if the cursor is exhausted.
-        // See SkiplistNextIterationCallback and
-        // SkiplistPrevIterationCallback for the exact
-        // condition for the iterator to be exhausted.
-        
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-      
-      public:
-        
-        size_t size () const;
-
-        bool hasNext () const;
-
-        TRI_index_element_t* next ();
-
-        void initCursor ();
-
-        void findHelper (
-          TRI_index_operator_t const* indexOperator,
-          std::vector<SkiplistIteratorInterval>& interval
-        );
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-        bool hasPrevIteration () const;
-        TRI_index_element_t* prevIteration ();
-
-        bool hasNextIteration () const;
-        TRI_index_element_t* nextIteration ();
-
-        bool findHelperIntervalIntersectionValid (
-          SkiplistIteratorInterval const& lInterval,
-          SkiplistIteratorInterval const& rInterval,
-          SkiplistIteratorInterval& interval
-        );
-
-        bool findHelperIntervalValid (SkiplistIteratorInterval const& interval);
-    };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               class SkiplistIndex
-// -----------------------------------------------------------------------------
-
-    class SkiplistIndex : public PathBasedIndex {
-
-      struct KeyElementComparator {
-        int operator() (TRI_skiplist_index_key_t const* leftKey,
-                        TRI_index_element_t const* rightElement) const;
-
-        KeyElementComparator (SkiplistIndex* idx) {
-          _idx = idx;
-        }
-
-        private:
-          SkiplistIndex* _idx;
-
-      };
-
-      struct ElementElementComparator {
-        int operator() (TRI_index_element_t const* leftElement,
-                        TRI_index_element_t const* rightElement,
-                        triagens::basics::SkipListCmpType cmptype) const;
-
-        ElementElementComparator (SkiplistIndex* idx) {
-          _idx = idx;
-        }
-
-        private:
-          SkiplistIndex* _idx;
-
-      };
-
-      friend class SkiplistIterator;
-      friend struct KeyElementComparator;
-      friend struct ElementElementComparator;
-
-      typedef triagens::basics::SkipList<TRI_skiplist_index_key_t, TRI_index_element_t> TRI_Skiplist;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-        SkiplistIndex () = delete;
-
-        SkiplistIndex (TRI_idx_iid_t,
-                        struct TRI_document_collection_t*,
-                        std::vector<std::vector<triagens::basics::AttributeName>> const&,
-                        bool,
-                        bool);
-
-        ~SkiplistIndex ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-        
-        IndexType type () const override final {
-          return Index::TRI_IDX_TYPE_SKIPLIST_INDEX;
-        }
-
-        bool hasSelectivityEstimate () const override final {
-          return false;
-        }
-        
-        size_t memory () const override final;
-
-        triagens::basics::Json toJson (TRI_memory_zone_t*, bool) const override final;
-        triagens::basics::Json toJsonFigures (TRI_memory_zone_t*) const override final;
-  
-        int insert (struct TRI_doc_mptr_t const*, bool) override final;
-         
-        int remove (struct TRI_doc_mptr_t const*, bool) override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief attempts to locate an entry in the skip list index
-///
-/// Note: this function will not destroy the passed slOperator before it returns
-/// Warning: who ever calls this function is responsible for destroying
-/// the TRI_index_operator_t* and the TRI_skiplist_iterator_t* results
-////////////////////////////////////////////////////////////////////////////////
-
-        SkiplistIterator* lookup (TRI_index_operator_t*, bool);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-        int _CmpElmElm (TRI_index_element_t const* leftElement,
-                       TRI_index_element_t const* rightElement,
-                       triagens::basics::SkipListCmpType cmptype);
-
-        int _CmpKeyElm (TRI_skiplist_index_key_t const* leftKey,
-                       TRI_index_element_t const* rightElement);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-        ElementElementComparator CmpElmElm;
-
-        KeyElementComparator CmpKeyElm;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the actual skiplist index
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_Skiplist* _skiplistIndex;
-
-    };
-
+ public:
+  SkiplistIterator(bool reverse, Node* left,
+                   Node* right)
+      : _reverse(reverse),
+        _leftEndPoint(left),
+        _rightEndPoint(right) {
+    reset(); // Initializes the cursor
   }
+
+  // always holds the last node returned, initially equal to
+  // the _leftEndPoint (or the
+  // _rightEndPoint in the reverse case),
+  // can be nullptr if the iterator is exhausted.
+
+ public:
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Get the next element in the skiplist
+  ////////////////////////////////////////////////////////////////////////////////
+
+  TRI_doc_mptr_t* next() override;
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Reset the cursor
+  ////////////////////////////////////////////////////////////////////////////////
+
+  void reset() override;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief Iterator structure for skip list. We require a start and stop node
+///
+/// Intervals are open in the sense that both end points are not members
+/// of the interval. This means that one has to use SkipList::nextNode
+/// on the start node to get the first element and that the stop node
+/// can be NULL. Note that it is ensured that all intervals in an iterator
+/// are non-empty.
+////////////////////////////////////////////////////////////////////////////////
+
+class SkiplistIterator2 final : public IndexIterator {
+ private:
+  // Shorthand for the skiplist node
+  typedef arangodb::basics::SkipListNode<VPackSlice,
+                                         TRI_index_element_t> Node;
+
+  typedef arangodb::basics::SkipList<VPackSlice,
+                                     TRI_index_element_t> TRI_Skiplist;
+
+ private:
+
+  TRI_Skiplist const* _skiplistIndex;
+  bool _reverse;
+  Node* _cursor;
+
+  // The pair.first is the left border
+  // The pair.second is the right border
+  // Both borders are inclusive
+  std::vector<std::pair<Node*, Node*>> _intervals;
+  size_t _currentInterval;
+
+  BaseSkiplistLookupBuilder* _builder;
+
+  std::function<int(TRI_index_element_t const*, TRI_index_element_t const*,
+                      arangodb::basics::SkipListCmpType)> _CmpElmElm;
+
+ public:
+  SkiplistIterator2(
+      TRI_Skiplist const* skiplist,
+      std::function<int(TRI_index_element_t const*, TRI_index_element_t const*,
+                        arangodb::basics::SkipListCmpType)> const& CmpElmElm,
+      bool reverse, BaseSkiplistLookupBuilder* builder)
+      : _skiplistIndex(skiplist),
+        _reverse(reverse),
+        _cursor(nullptr),
+        _currentInterval(0),
+        _builder(builder),
+        _CmpElmElm(CmpElmElm) {
+    TRI_ASSERT(_builder != nullptr);
+    initNextInterval(); // Initializes the cursor
+    TRI_ASSERT((_intervals.empty() && _cursor == nullptr) ||
+               (!_intervals.empty() && _cursor != nullptr));
+  }
+
+  ~SkiplistIterator2() {
+    delete _builder;
+  }
+
+  // always holds the last node returned, initially equal to
+  // the _leftEndPoint (or the
+  // _rightEndPoint in the reverse case),
+  // can be nullptr if the iterator is exhausted.
+
+ public:
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Get the next element in the skiplist
+  ////////////////////////////////////////////////////////////////////////////////
+
+  TRI_doc_mptr_t* next() override;
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Reset the cursor
+  ////////////////////////////////////////////////////////////////////////////////
+
+  void reset() override;
+
+ private:
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Initialize left and right endpoints with current lookup
+  ///        value. Also points the _cursor to the border of this interval.
+  ////////////////////////////////////////////////////////////////////////////////
+
+  void initNextInterval();
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Forward the cursor to the next interval. If there was no
+  ///        interval the next one is computed. If the _cursor has
+  ///        nullptr after this call the iterator is exhausted.
+  ////////////////////////////////////////////////////////////////////////////////
+
+  void forwardCursor();
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Checks if the interval is valid. It is declared invalid if
+  ///        one border is nullptr or the right is lower than left.
+  ////////////////////////////////////////////////////////////////////////////////
+
+  bool intervalValid(Node*, Node*) const;
+};
+
+
+
+class SkiplistIndex final : public PathBasedIndex {
+  struct KeyElementComparator {
+    int operator()(VPackSlice const* leftKey,
+                   TRI_index_element_t const* rightElement) const;
+
+    explicit KeyElementComparator(SkiplistIndex* idx) { _idx = idx; }
+
+   private:
+    SkiplistIndex* _idx;
+  };
+
+  struct ElementElementComparator {
+    int operator()(TRI_index_element_t const* leftElement,
+                   TRI_index_element_t const* rightElement,
+                   arangodb::basics::SkipListCmpType cmptype) const;
+
+    explicit ElementElementComparator(SkiplistIndex* idx) { _idx = idx; }
+
+   private:
+    SkiplistIndex* _idx;
+  };
+
+  friend class SkiplistIterator;
+  friend struct KeyElementComparator;
+  friend struct ElementElementComparator;
+
+  typedef arangodb::basics::SkipList<VPackSlice,
+                                     TRI_index_element_t> TRI_Skiplist;
+
+ public:
+  SkiplistIndex() = delete;
+
+  SkiplistIndex(TRI_idx_iid_t, LogicalCollection*,
+                arangodb::velocypack::Slice const&);
+
+  SkiplistIndex(
+      TRI_idx_iid_t, arangodb::LogicalCollection*,
+      std::vector<std::vector<arangodb::basics::AttributeName>> const&, bool,
+      bool);
+
+  explicit SkiplistIndex(VPackSlice const&);
+
+  ~SkiplistIndex();
+
+ public:
+  IndexType type() const override final {
+    return Index::TRI_IDX_TYPE_SKIPLIST_INDEX;
+  }
+  
+  bool allowExpansion() const override final { return true; }
+
+  bool canBeDropped() const override final { return true; }
+
+  bool isSorted() const override final { return true; }
+
+  bool hasSelectivityEstimate() const override final { return false; }
+
+  size_t memory() const override final;
+
+  void toVelocyPack(VPackBuilder&, bool) const override final;
+  void toVelocyPackFigures(VPackBuilder&) const override final;
+
+  int insert(arangodb::Transaction*, struct TRI_doc_mptr_t const*,
+             bool) override final;
+
+  int remove(arangodb::Transaction*, struct TRI_doc_mptr_t const*,
+             bool) override final;
+  
+  int unload() override final;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief attempts to locate an entry in the skip list index
+  ///
+  /// Warning: who ever calls this function is responsible for destroying
+  /// the velocypack::Slice and the SkiplistIterator* results
+  //////////////////////////////////////////////////////////////////////////////
+
+  SkiplistIterator* lookup(arangodb::Transaction*, arangodb::velocypack::Slice const,
+                           bool) const;
+
+  bool supportsFilterCondition(arangodb::aql::AstNode const*,
+                               arangodb::aql::Variable const*, size_t, size_t&,
+                               double&) const override;
+
+  bool supportsSortCondition(arangodb::aql::SortCondition const*,
+                             arangodb::aql::Variable const*, size_t,
+                             double&, size_t&) const override;
+
+  IndexIterator* iteratorForCondition(arangodb::Transaction*,
+                                      IndexIteratorContext*,
+                                      arangodb::aql::AstNode const*,
+                                      arangodb::aql::Variable const*,
+                                      bool) const override;
+
+  arangodb::aql::AstNode* specializeCondition(
+      arangodb::aql::AstNode*, arangodb::aql::Variable const*) const override;
+
+ private:
+  bool isDuplicateOperator(arangodb::aql::AstNode const*,
+                           std::unordered_set<int> const&) const;
+
+  bool accessFitsIndex(
+      arangodb::aql::AstNode const*, arangodb::aql::AstNode const*,
+      arangodb::aql::AstNode const*, arangodb::aql::Variable const*,
+      std::unordered_map<size_t, std::vector<arangodb::aql::AstNode const*>>&,
+      bool) const;
+
+  bool accessFitsIndex(
+      arangodb::aql::AstNode const*, arangodb::aql::AstNode const*,
+      arangodb::aql::AstNode const*, arangodb::aql::Variable const*,
+      std::vector<std::vector<arangodb::aql::AstNode const*>>&) const;
+
+
+  void matchAttributes(
+      arangodb::aql::AstNode const*, arangodb::aql::Variable const*,
+      std::unordered_map<size_t, std::vector<arangodb::aql::AstNode const*>>&,
+      size_t&, bool) const;
+
+  bool findMatchingConditions(
+      arangodb::aql::AstNode const*, arangodb::aql::Variable const*,
+      std::vector<std::vector<arangodb::aql::AstNode const*>>&, bool&) const;
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief Checks if the interval is valid. It is declared invalid if
+  ///        one border is nullptr or the right is lower than left.
+  ////////////////////////////////////////////////////////////////////////////////
+
+  // Shorthand for the skiplist node
+  typedef arangodb::basics::SkipListNode<VPackSlice,
+                                         TRI_index_element_t> Node;
+
+  bool intervalValid(Node* left, Node* right) const;
+
+ private:
+
+  ElementElementComparator CmpElmElm;
+
+  KeyElementComparator CmpKeyElm;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief the actual skiplist index
+  //////////////////////////////////////////////////////////////////////////////
+
+  TRI_Skiplist* _skiplistIndex;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

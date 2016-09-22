@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, collection scanners
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,105 +19,41 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "CollectionScanner.h"
+#include "Basics/VelocyPackHelper.h"
 
-using namespace triagens::aql;
+using namespace arangodb::aql;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                          struct CollectionScanner
-// -----------------------------------------------------------------------------
-      
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-CollectionScanner::CollectionScanner (triagens::arango::AqlTransaction* trx,
-                                      TRI_transaction_collection_t* trxCollection) 
-  : trx(trx), 
-    trxCollection(trxCollection),
-    totalCount(0) {
-}
-  
-CollectionScanner::~CollectionScanner () {
+CollectionScanner::CollectionScanner(arangodb::Transaction* trx,
+                                     std::string const& collection,
+                                     bool readRandom)
+    : _cursor(trx->indexScan(collection,
+                             (readRandom ? Transaction::CursorType::ANY
+                                         : Transaction::CursorType::ALL),
+                             Transaction::IndexHandle(), VPackSlice(), 0, 
+                             UINT64_MAX, 1000, false)) {
+  TRI_ASSERT(_cursor->successful());
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                    struct RandomCollectionScanner
-// -----------------------------------------------------------------------------
+CollectionScanner::~CollectionScanner() {}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-  
-RandomCollectionScanner::RandomCollectionScanner (triagens::arango::AqlTransaction* trx,
-                                                  TRI_transaction_collection_t* trxCollection) 
-  : CollectionScanner(trx, trxCollection),
-    step(0) {
+VPackSlice CollectionScanner::scan(size_t batchSize) {
+  if (!_cursor->hasMore()) {
+    return arangodb::basics::VelocyPackHelper::EmptyArrayValue();
+  }
+  _cursor->getMore(_currentBatch, batchSize, true);
+  if (_currentBatch->failed()) {
+    return arangodb::basics::VelocyPackHelper::EmptyArrayValue();
+  }
+  return _currentBatch->slice();
 }
 
-int RandomCollectionScanner::scan (std::vector<TRI_doc_mptr_copy_t>& docs,
-                                   size_t batchSize) {
-  return trx->readRandom(trxCollection,
-                         docs,
-                         initialPosition,
-                         position,
-                         static_cast<uint64_t>(batchSize),
-                         step,
-                         totalCount);
+int CollectionScanner::forward(size_t batchSize, uint64_t& skipped) {
+  return _cursor->skip(batchSize, skipped);
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-void RandomCollectionScanner::reset () {
-  initialPosition.reset();
-  position.reset();
-  step = 0;
+void CollectionScanner::reset() {
+  _cursor->reset();
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                    struct LinearCollectionScanner
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-LinearCollectionScanner::LinearCollectionScanner (triagens::arango::AqlTransaction* trx,
-                                                  TRI_transaction_collection_t* trxCollection) 
-  : CollectionScanner(trx, trxCollection) {
-
-}
-
-int LinearCollectionScanner::scan (std::vector<TRI_doc_mptr_copy_t>& docs,
-                                   size_t batchSize) {
-  return trx->readIncremental(trxCollection,
-                              docs,
-                              position,
-                              static_cast<uint64_t>(batchSize),
-                              0,
-                              UINT64_MAX,
-                              totalCount);
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-void LinearCollectionScanner::reset () {
-  position.reset();
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

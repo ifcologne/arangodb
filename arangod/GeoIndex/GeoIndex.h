@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief geo index
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,18 +19,15 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author R. A. Parker
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2012, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-/* GeoIndex.h - header file for GeoIndex algorithms  */
-/* Version 2.1   8.1.2012   R. A. Parker             */
+/* GeoIdx.h - header file for GeoIdx algorithms  */
+/* Version 2.2  25.11.2015  R. A. Parker             */
 
-#ifndef ARANGODB_GEO_INDEX_GEO_INDEX_H
-#define ARANGODB_GEO_INDEX_GEO_INDEX_H 1
+#ifndef ARANGOD_GEO_INDEX_GEO_INDEX_H
+#define ARANGOD_GEO_INDEX_GEO_INDEX_H 1
 
 #include "Basics/Common.h"
-#include "IndexOperators/index-operator.h"
 
 /* first the things that a user might want to change */
 
@@ -83,46 +76,39 @@ typedef unsigned int GeoFix;
 typedef struct {
   double latitude;
   double longitude;
-  void * data;
-}
-GeoCoordinate;
+  void* data;
+} GeoCoordinate;
 
 typedef struct {
   size_t length;
-  GeoCoordinate * coordinates;
-  double * distances;
-}
-GeoCoordinates;
+  GeoCoordinate* coordinates;
+  double* distances;
+} GeoCoordinates;
 
-typedef char GeoIndex;   /* to keep the structure private  */
+typedef void GeoIdx;  /* to keep the structure private  */
+typedef void GeoCursor; /* to keep the structure private  */
 
+size_t GeoIndex_MemoryUsage(void*);
 
-size_t GeoIndex_MemoryUsage (void*);
-
-GeoIndex * GeoIndex_new(void);
-void GeoIndex_free(GeoIndex * gi);
-double GeoIndex_distance(GeoCoordinate * c1, GeoCoordinate * c2);
-int GeoIndex_insert(GeoIndex * gi, GeoCoordinate * c);
-int GeoIndex_remove(GeoIndex * gi, GeoCoordinate * c);
-int GeoIndex_hint(GeoIndex * gi, int hint);
-GeoCoordinates * GeoIndex_PointsWithinRadius(GeoIndex * gi,
-                    GeoCoordinate * c, double d);
-GeoCoordinates * GeoIndex_NearestCountPoints(GeoIndex * gi,
-                    GeoCoordinate * c, int count);
-void GeoIndex_CoordinatesFree(GeoCoordinates * clist);
+GeoIdx* GeoIndex_new(void);
+void GeoIndex_free(GeoIdx* gi);
+double GeoIndex_distance(GeoCoordinate* c1, GeoCoordinate* c2);
+int GeoIndex_insert(GeoIdx* gi, GeoCoordinate* c);
+int GeoIndex_remove(GeoIdx* gi, GeoCoordinate* c);
+int GeoIndex_hint(GeoIdx* gi, int hint);
+GeoCoordinates* GeoIndex_PointsWithinRadius(GeoIdx* gi, GeoCoordinate* c,
+                                            double d);
+GeoCoordinates* GeoIndex_NearestCountPoints(GeoIdx* gi, GeoCoordinate* c,
+                                            int count);
+GeoCursor* GeoIndex_NewCursor(GeoIdx* gi, GeoCoordinate* c);
+GeoCoordinates* GeoIndex_ReadCursor(GeoCursor* gc, int count);
+void GeoIndex_CursorFree(GeoCursor* gc);
+void GeoIndex_CoordinatesFree(GeoCoordinates* clist);
 #ifdef TRI_GEO_DEBUG
-void GeoIndex_INDEXDUMP(GeoIndex * gi, FILE * f);
-int  GeoIndex_INDEXVALID(GeoIndex * gi);
+void GeoIndex_INDEXDUMP(GeoIdx* gi, FILE* f);
+int GeoIndex_INDEXVALID(GeoIdx* gi);
 #endif
 
 #endif
 
-/* end of GeoIndex.h  */
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+/* end of GeoIdx.h  */

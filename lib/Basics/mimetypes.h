@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief mimetypes
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,64 +19,33 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_BASICS_C_MIMETYPES_H
-#define ARANGODB_BASICS_C_MIMETYPES_H 1
-
-#ifndef TRI_WITHIN_COMMON
-#error use <Basics/Common.h>
-#endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+#ifndef ARANGODB_BASICS_MIMETYPES_H
+#define ARANGODB_BASICS_MIMETYPES_H 1
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief register a mimetype for an extension
 ////////////////////////////////////////////////////////////////////////////////
 
-bool TRI_RegisterMimetype (const char*, const char*, bool);
+bool TRI_RegisterMimetype(char const*, char const*, bool);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief gets the mimetype for an extension
 ////////////////////////////////////////////////////////////////////////////////
 
-char* TRI_GetMimetype (const char*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                            MODULE
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+char const* TRI_GetMimetype(char const*);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief initializes mimetypes
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_InitializeMimetypes (void);
+void TRI_InitializeMimetypes();
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief shuts down mimetypes
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_ShutdownMimetypes (void);
+void TRI_ShutdownMimetypes();
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

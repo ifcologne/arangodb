@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Write-ahead log slots
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,12 +19,10 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_WAL_SLOTS_H
-#define ARANGODB_WAL_SLOTS_H 1
+#ifndef ARANGOD_WAL_SLOTS_H
+#define ARANGOD_WAL_SLOTS_H 1
 
 #include "Basics/Common.h"
 #include "Basics/ConditionVariable.h"
@@ -37,323 +31,179 @@
 #include "Wal/Slot.h"
 #include "Wal/SyncRegion.h"
 
-namespace triagens {
-  namespace wal {
-
-    class LogfileManager;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               struct SlotInfoCopy
-// -----------------------------------------------------------------------------
-
-    struct SlotInfoCopy {
-      explicit SlotInfoCopy (Slot const* slot)
-        : mem(slot->mem()),
-          size(slot->size()),
-          logfileId(slot->logfileId()),
-          tick(slot->tick()),
-          errorCode(TRI_ERROR_NO_ERROR) {
-      }
-
-      explicit SlotInfoCopy (int errorCode)
-        : mem(nullptr),
-          size(0),
-          logfileId(0),
-          tick(0),
-          errorCode(errorCode) {
-      }
-
-      void const*           mem;
-      uint32_t const        size;
-      Logfile::IdType const logfileId;
-      Slot::TickType const  tick;
-      int const             errorCode;
-    };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   struct SlotInfo
-// -----------------------------------------------------------------------------
-
-    struct SlotInfo {
-      explicit SlotInfo (int errorCode)
-        : slot(nullptr),
-          mem(nullptr),
-          size(0),
-          errorCode(errorCode) {
-      }
-
-      explicit SlotInfo (Slot* slot)
-        : slot(slot),
-          mem(slot->mem()),
-          size(slot->size()),
-          errorCode(TRI_ERROR_NO_ERROR) {
-      }
-
-      SlotInfo ()
-        : SlotInfo(TRI_ERROR_NO_ERROR) {
-      }
+namespace arangodb {
+namespace wal {
+
+class LogfileManager;
+
+struct SlotInfoCopy {
+  explicit SlotInfoCopy(Slot const* slot)
+      : mem(slot->mem()),
+        size(slot->size()),
+        logfileId(slot->logfileId()),
+        tick(slot->tick()),
+        errorCode(TRI_ERROR_NO_ERROR) {}
+
+  explicit SlotInfoCopy(int errorCode)
+      : mem(nullptr), size(0), logfileId(0), tick(0), errorCode(errorCode) {}
+
+  void const* mem;
+  uint32_t const size;
+  Logfile::IdType const logfileId;
+  Slot::TickType const tick;
+  int const errorCode;
+};
+
+struct SlotInfo {
+  explicit SlotInfo(int errorCode)
+      : slot(nullptr), mem(nullptr), size(0), errorCode(errorCode) {}
+
+  explicit SlotInfo(Slot* slot)
+      : slot(slot),
+        mem(slot->mem()),
+        size(slot->size()),
+        errorCode(TRI_ERROR_NO_ERROR) {}
 
-      Slot*       slot;
-      void const* mem;
-      uint32_t    size;
-      int         errorCode;
-    };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       class Slots
-// -----------------------------------------------------------------------------
-
-    class Slots {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      private:
-
-        Slots (Slots const&) = delete;
-        Slots& operator= (Slots const&) = delete;
+  SlotInfo() : SlotInfo(TRI_ERROR_NO_ERROR) {}
 
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the slots
-////////////////////////////////////////////////////////////////////////////////
-
-        Slots (LogfileManager*,
-               size_t,
-               Slot::TickType);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the slots
-////////////////////////////////////////////////////////////////////////////////
+  Slot* slot;
+  void const* mem;
+  uint32_t size;
+  int errorCode;
+};
 
-        ~Slots ();
+class Slots {
+ private:
+  Slots(Slots const&) = delete;
+  Slots& operator=(Slots const&) = delete;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+ public:
+  /// @brief create the slots
+  Slots(LogfileManager*, size_t, Slot::TickType);
 
-      public:
+  /// @brief destroy the slots
+  ~Slots();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the statistics of the slots
-////////////////////////////////////////////////////////////////////////////////
+ public:
+  /// @brief sets a shutdown flag, disabling the request for new logfiles
+  void shutdown();
 
-        void statistics (Slot::TickType&,
-                         Slot::TickType&,
-                         uint64_t&);
+  /// @brief get the statistics of the slots
+  void statistics(Slot::TickType&, Slot::TickType&, Slot::TickType&, uint64_t&, uint64_t&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief execute a flush operation
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief execute a flush operation
+  int flush(bool);
 
-        int flush (bool);
+  /// @brief return the last committed tick
+  Slot::TickType lastCommittedTick();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the last committed tick
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief return the next unused slot
+  SlotInfo nextUnused(uint32_t size);
+  
+  /// @brief return the next unused slot
+  SlotInfo nextUnused(TRI_voc_tick_t databaseId, 
+                      TRI_voc_cid_t collectionId, uint32_t size);
 
-        Slot::TickType lastCommittedTick ();
+  /// @brief return a used slot, allowing its synchronization
+  void returnUsed(SlotInfo&, bool wakeUpSynchronizer,
+                  bool waitForSyncRequested, bool waitUntilSyncDone);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the next unused slot
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief get the next synchronizable region
+  SyncRegion getSyncRegion();
 
-        SlotInfo nextUnused (uint32_t);
+  /// @brief return a region to the freelist
+  void returnSyncRegion(SyncRegion const&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the next unused slot, version for legends
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief get the current open region of a logfile
+  /// this uses the slots lock
+  void getActiveLogfileRegion(Logfile*, char const*&, char const*&);
 
-        SlotInfo nextUnused (uint32_t size,
-                             TRI_voc_cid_t cid,
-                             TRI_shape_sid_t sid,
-                             uint32_t legendIncluded,
-                             void*& oldLegend);
+  /// @brief get the current tick range of a logfile
+  /// this uses the slots lock
+  void getActiveTickRange(Logfile*, TRI_voc_tick_t&, TRI_voc_tick_t&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a used slot, allowing its synchronization
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief close a logfile
+  int closeLogfile(Slot::TickType&, bool&);
 
-        void returnUsed (SlotInfo&,
-                         bool);
+  /// @brief write a header marker
+  int writeHeader(Slot*);
+  
+  /// @brief writes a prologue for a document/remove marker
+  int writePrologue(Slot*, void*, TRI_voc_tick_t, TRI_voc_cid_t);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the next synchronizable region
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief write a footer marker
+  int writeFooter(Slot*);
 
-        SyncRegion getSyncRegion ();
+  /// @brief handout a region and advance the handout index
+  Slot::TickType handout();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a region to the freelist
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief return the next slots that would be handed out, without 
+  /// actually handing it out
+  size_t nextHandoutIndex() const;
 
-        void returnSyncRegion (SyncRegion const&);
+  /// @brief wait until all data has been synced up to a certain marker
+  bool waitForTick(Slot::TickType);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the current open region of a logfile
-/// this uses the slots lock
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief request a new logfile which can satisfy a marker of the
+  /// specified size
+  int newLogfile(uint32_t, Logfile::StatusType& status);
 
-        void getActiveLogfileRegion (Logfile*,
-                                     char const*&,
-                                     char const*&);
+ private:
+  /// @brief the logfile manager
+  LogfileManager* _logfileManager;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the current tick range of a logfile
-/// this uses the slots lock
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief condition variable for slots
+  basics::ConditionVariable _condition;
 
-        void getActiveTickRange (Logfile*,
-                                 TRI_voc_tick_t&,
-                                 TRI_voc_tick_t&);
+  /// @brief mutex protecting the slots interface
+  Mutex _lock;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
+  /// @brief all slots
+  Slot* _slots;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief close a logfile
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief the total number of slots
+  size_t const _numberOfSlots;
 
-        int closeLogfile (Slot::TickType&,
-                          bool&);
+  /// @brief the number of currently free slots
+  size_t _freeSlots;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief write a header marker
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not someone is waiting for a slot
+  uint32_t _waiting;
 
-        int writeHeader (Slot*);
+  /// @brief the index of the slot to hand out next
+  size_t _handoutIndex;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief write a footer marker
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief the index of the slot to recycle
+  size_t _recycleIndex;
 
-        int writeFooter (Slot*);
+  /// @brief the current logfile to write into
+  Logfile* _logfile;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief handout a region and advance the handout index
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief last assigned tick value
+  Slot::TickType _lastAssignedTick;
 
-        Slot::TickType handout ();
+  /// @brief last committed tick value
+  Slot::TickType _lastCommittedTick;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief wait until all data has been synced up to a certain marker
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief last committed data tick value
+  Slot::TickType _lastCommittedDataTick;
 
-        bool waitForTick (Slot::TickType);
+  /// @brief number of log events handled
+  uint64_t _numEvents;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief request a new logfile which can satisfy a marker of the
-/// specified size
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief number of sync log events handled
+  uint64_t _numEventsSync;
+  
+  /// @brief last written database id (in prologue marker)
+  TRI_voc_tick_t _lastDatabaseId;
+  
+  /// @brief last written collection id (in prologue marker)
+  TRI_voc_cid_t _lastCollectionId;
 
-        int newLogfile (uint32_t,
-                        Logfile::StatusType& status);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the logfile manager
-////////////////////////////////////////////////////////////////////////////////
-
-        LogfileManager* _logfileManager;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief condition variable for slots
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::ConditionVariable _condition;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief mutex protecting the slots interface
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::Mutex _lock;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief all slots
-////////////////////////////////////////////////////////////////////////////////
-
-        Slot* _slots;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the total number of slots
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t const _numberOfSlots;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the number of currently free slots
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t _freeSlots;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not someone is waiting for a slot
-////////////////////////////////////////////////////////////////////////////////
-
-        uint32_t _waiting;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the index of the slot to hand out next
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t _handoutIndex;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the index of the slot to recycle
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t _recycleIndex;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the current logfile to write into
-////////////////////////////////////////////////////////////////////////////////
-
-        Logfile* _logfile;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief last assigned tick value
-////////////////////////////////////////////////////////////////////////////////
-
-        Slot::TickType _lastAssignedTick;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief last committed tick value
-////////////////////////////////////////////////////////////////////////////////
-
-        Slot::TickType _lastCommittedTick;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief last committed data tick value
-////////////////////////////////////////////////////////////////////////////////
-
-        Slot::TickType _lastCommittedDataTick;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of log events handled
-////////////////////////////////////////////////////////////////////////////////
-
-        uint64_t _numEvents;
-
-    };
-
-  }
+  /// @brief shutdown flag, set by LogfileManager on shutdown
+  bool _shutdown;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

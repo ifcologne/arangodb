@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief task manager
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,37 +20,22 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2009-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Task.h"
 
 #include "Scheduler/Scheduler.h"
 
-using namespace triagens::rest;
+using namespace arangodb::rest;
 
 // -----------------------------------------------------------------------------
 // TaskManager
 // -----------------------------------------------------------------------------
 
-void TaskManager::deleteTask (Task* task) {
-  delete task;
-}
+void TaskManager::deleteTask(Task* task) { delete task; }
 
-bool TaskManager::setupTask (Task* task, Scheduler* scheduler, EventLoop loop) {
+bool TaskManager::setupTask(Task* task, Scheduler* scheduler, EventLoop loop) {
   return task->setup(scheduler, loop);
 }
 
-void TaskManager::cleanupTask (Task* task) {
-  task->cleanup();
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+void TaskManager::cleanupTask(Task* task) { task->cleanup(); }

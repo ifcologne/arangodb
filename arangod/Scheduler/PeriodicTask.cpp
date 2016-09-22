@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief tasks used to handle periodic events
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,41 +20,30 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2008-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "PeriodicTask.h"
-
-#include "Basics/json.h"
-#include "Basics/logging.h"
 #include "Scheduler/Scheduler.h"
 
-using namespace std;
-using namespace triagens::rest;
+#include <velocypack/Builder.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb::rest;
 
-PeriodicTask::PeriodicTask (string const& id,
-                            double offset,
-                            double interval)
-  : Task(id, "PeriodicTask"),
-    _watcher(nullptr),
-    _offset(offset),
-    _interval(interval) {
-}
+PeriodicTask::PeriodicTask(std::string const& id, double offset,
+                           double interval)
+    : Task(id, "PeriodicTask"),
+      _watcher(nullptr),
+      _offset(offset),
+      _interval(interval) {}
 
-PeriodicTask::~PeriodicTask () {
-  cleanup();
-}
+PeriodicTask::~PeriodicTask() { cleanup(); }
 
 // -----------------------------------------------------------------------------
 // Task methods
 // -----------------------------------------------------------------------------
 
-void PeriodicTask::resetTimer (double offset, double interval) {
+void PeriodicTask::resetTimer(double offset, double interval) {
   _scheduler->rearmPeriodic(_watcher, offset, interval);
 }
 
@@ -67,15 +52,16 @@ void PeriodicTask::resetTimer (double offset, double interval) {
 // -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief get a task specific description in JSON format
+/// @brief get a task specific description in VelocyPack format
 ////////////////////////////////////////////////////////////////////////////////
 
-void PeriodicTask::getDescription (TRI_json_t* json) const {
-  TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, json, "type", TRI_CreateStringCopyJson(TRI_UNKNOWN_MEM_ZONE, "periodic", strlen("periodic")));
-  TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, json, "period", TRI_CreateNumberJson(TRI_UNKNOWN_MEM_ZONE, _interval));
+void PeriodicTask::getDescription(VPackBuilder& builder) const {
+  TRI_ASSERT(builder.isOpenObject());
+  builder.add("type", VPackValue("periodic"));
+  builder.add("period", VPackValue(_interval));
 }
 
-bool PeriodicTask::setup (Scheduler* scheduler, EventLoop loop) {
+bool PeriodicTask::setup(Scheduler* scheduler, EventLoop loop) {
   this->_scheduler = scheduler;
   this->_loop = loop;
 
@@ -84,15 +70,14 @@ bool PeriodicTask::setup (Scheduler* scheduler, EventLoop loop) {
   return true;
 }
 
-void PeriodicTask::cleanup () {
+void PeriodicTask::cleanup() {
   if (_scheduler != nullptr) {
     _scheduler->uninstallEvent(_watcher);
   }
   _watcher = nullptr;
 }
 
-bool PeriodicTask::handleEvent (EventToken token, 
-                                EventType revents) {
+bool PeriodicTask::handleEvent(EventToken token, EventType revents) {
   bool result = true;
 
   if (token == _watcher && (revents & EVENT_PERIODIC)) {
@@ -101,12 +86,3 @@ bool PeriodicTask::handleEvent (EventToken token,
 
   return result;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

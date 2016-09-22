@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief V8 Traverser
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014-2015 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,355 +19,71 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Michael Hackstein
-/// @author Copyright 2014-2015, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_V8_TRAVERSER_H
-#define ARANGODB_V8_TRAVERSER_H 1
+#ifndef ARANGOD_V8_SERVER_V8_TRAVERSER_H
+#define ARANGOD_V8_SERVER_V8_TRAVERSER_H 1
 
-#include "Basics/Common.h"
-#include "Basics/Traverser.h"
-#include "Utils/ExplicitTransaction.h"
-#include "VocBase/edge-collection.h"
-#include "VocBase/ExampleMatcher.h"
+#include "Basics/VelocyPackHelper.h"
+#include "VocBase/Traverser.h"
 
-class VocShaper;
+namespace arangodb {
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Template for a vertex id. Is simply a pair of cid and key
-////////////////////////////////////////////////////////////////////////////////
-
-struct VertexId {
-  TRI_voc_cid_t cid;
-  char const*   key;
-
-  VertexId () 
-    : cid(0), 
-      key("") {
-  }
-
-  VertexId (TRI_voc_cid_t cid, char const* key) 
-    : cid(cid), key(key) {
-  }
-  
-  bool operator== (const VertexId& other) const {
-    if (cid == other.cid) {
-      return strcmp(key, other.key) == 0;
-    }
-    return false;
-  }
-
-  // Find unnecessary copies
-  //   VertexId(const VertexId&) = delete;
-  // VertexId(const VertexId& v) : first(v.first), second(v.second) { std::cout << "move failed!\n";}
-  // VertexId(VertexId&& v) : first(v.first), second(std::move(v.second)) {}
-};
-
-namespace std {
-  template<>
-  struct hash<VertexId> {
-    public:
-      size_t operator() (VertexId const& s) const {
-        size_t h1 = std::hash<TRI_voc_cid_t>()(s.cid);
-        size_t h2 = TRI_FnvHashString(s.key);
-        return h1 ^ ( h2 << 1 );
-      }
-  };
-
-  template<>
-  struct equal_to<VertexId> {
-    public:
-      bool operator() (VertexId const& s, VertexId const& t) const {
-        return s.cid == t.cid && strcmp(s.key, t.key) == 0;
-      }
-  };
-
-  template<>
-    struct less<VertexId> {
-      public:
-        bool operator() (const VertexId& lhs, const VertexId& rhs) {
-          if (lhs.cid != rhs.cid) {
-            return lhs.cid < rhs.cid;
-          }
-          return strcmp(lhs.key, rhs.key) < 0;
-        }
-    };
-
+namespace velocypack {
+class Slice;
+}
 }
 
-// EdgeId and VertexId are similar here. both have a key and a cid
-typedef VertexId EdgeId; 
+namespace arangodb {
+namespace traverser {
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Template for information required by vertex filter.
-///        Contains transaction, barrier and the Matcher Class.
-////////////////////////////////////////////////////////////////////////////////
+// A collection of shared options used in several functions.
+// Should not be used directly, use specialization instead.
+struct BasicOptions {
 
-struct VertexFilterInfo {
-  triagens::arango::ExplicitTransaction* trx;
-  TRI_transaction_collection_t* col;
-  triagens::arango::ExampleMatcher* matcher;
+  arangodb::Transaction* _trx;
 
-  VertexFilterInfo (triagens::arango::ExplicitTransaction* trx,
-                    TRI_transaction_collection_t* col,
-                    triagens::arango::ExampleMatcher* matcher) 
-    : trx(trx), 
-      col(col), 
-      matcher(matcher) {
-    }
+ protected:
 
-};
+  explicit BasicOptions(arangodb::Transaction* trx)
+      : _trx(trx) {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief typedef the template instantiation of the PathFinder
-////////////////////////////////////////////////////////////////////////////////
-
-typedef triagens::basics::PathFinder<VertexId, EdgeId, double> 
-        ArangoDBPathFinder;
-
-typedef triagens::basics::ConstDistanceFinder<VertexId, EdgeId> 
-        ArangoDBConstDistancePathFinder;
-
-namespace triagens {
-  namespace basics {
-    namespace traverser {
-
-      // A collection of shared options used in several functions.
-      // Should not be used directly, use specialization instead.
-      struct BasicOptions {
-
-        protected:
-
-          std::unordered_map<TRI_voc_cid_t, triagens::arango::ExampleMatcher*> _edgeFilter;
-          std::unordered_map<TRI_voc_cid_t, VertexFilterInfo> _vertexFilter;
-
-          BasicOptions () :
-            useEdgeFilter(false),
-            useVertexFilter(false) {
-          }
-
-          ~BasicOptions () {
-            // properly clean up the mess
-            for (auto& it : _edgeFilter) {
-              delete it.second;
-            }
-            for (auto& it: _vertexFilter) {
-              delete it.second.matcher;
-              it.second.matcher = nullptr;
-            }
-          }
-
-        public:
-          VertexId start;
-          bool useEdgeFilter;
-          bool useVertexFilter;
-
-          void addEdgeFilter (v8::Isolate* isolate,
-                              v8::Handle<v8::Value> const& example,
-                              VocShaper* shaper,
-                              TRI_voc_cid_t const& cid,
-                              std::string& errorMessage);
-
-          void addEdgeFilter (Json const& example,
-                              VocShaper* shaper,
-                              TRI_voc_cid_t const& cid,
-                              triagens::arango::CollectionNameResolver const* resolver);
-
-          void addVertexFilter (v8::Isolate* isolate,
-                                v8::Handle<v8::Value> const& example,
-                                triagens::arango::ExplicitTransaction* trx,
-                                TRI_transaction_collection_t* col,
-                                VocShaper* shaper,
-                                TRI_voc_cid_t const& cid,
-                                std::string& errorMessage);
-
-          bool matchesEdge (EdgeId& e, TRI_doc_mptr_copy_t* edge) const;
-
-          bool matchesVertex (VertexId const& v) const;
-
-      };
- 
-      struct NeighborsOptions : BasicOptions {
-
-        private:
-          std::unordered_set<TRI_voc_cid_t> _explicitCollections; 
-
-        public:
-          TRI_edge_direction_e direction;
-          uint64_t minDepth;
-          uint64_t maxDepth;
-
-          NeighborsOptions () 
-            : direction(TRI_EDGE_OUT),
-              minDepth(1),
-              maxDepth(1) {
-          }
-
-          bool matchesVertex (VertexId const&) const;
-
-          void addCollectionRestriction (TRI_voc_cid_t cid);
-      };
-
-
-
-      struct ShortestPathOptions : BasicOptions {
-
-        public:
-          std::string direction;
-          bool useWeight;
-          std::string weightAttribute;
-          double defaultWeight;
-          bool bidirectional;
-          bool multiThreaded;
-          VertexId end;
-
-          ShortestPathOptions () 
-            : direction("outbound"),
-              useWeight(false),
-              weightAttribute(""),
-              defaultWeight(1),
-              bidirectional(true),
-              multiThreaded(true) {
-          }
-          
-          bool matchesVertex (VertexId const&) const;
-
-      };
-    }
+  virtual ~BasicOptions() {
   }
+
+ public:
+  std::string start;
+
+
+ public:
+
+  arangodb::Transaction* trx() { return _trx; }
+
+};
+
+struct ShortestPathOptions : BasicOptions {
+ public:
+  std::string direction;
+  bool useWeight;
+  std::string weightAttribute;
+  double defaultWeight;
+  bool bidirectional;
+  bool multiThreaded;
+  std::string end;
+  arangodb::velocypack::Builder startBuilder;
+  arangodb::velocypack::Builder endBuilder;
+
+  explicit ShortestPathOptions(arangodb::Transaction* trx);
+
+  void setStart(std::string const&);
+  void setEnd(std::string const&);
+
+  arangodb::velocypack::Slice getStart() const;
+  arangodb::velocypack::Slice getEnd() const;
+
+};
+
 }
-
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief callback to weight an edge
-////////////////////////////////////////////////////////////////////////////////
-
-typedef std::function<double(TRI_doc_mptr_copy_t& edge)> WeightCalculatorFunction;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Information required internally of the traverser.
-///        Used to easily pass around collections.
-///        Also offer abstraction to extract edges.
-////////////////////////////////////////////////////////////////////////////////
-
-class EdgeCollectionInfo {
-  private:
-    
-////////////////////////////////////////////////////////////////////////////////
-/// @brief edge collection
-////////////////////////////////////////////////////////////////////////////////
-
-    TRI_voc_cid_t _edgeCollectionCid;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief edge collection
-////////////////////////////////////////////////////////////////////////////////
-
-    TRI_document_collection_t* _edgeCollection;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief weighter functions
-////////////////////////////////////////////////////////////////////////////////
-
-    WeightCalculatorFunction _weighter;
-
-  public:
-
-    EdgeCollectionInfo (TRI_voc_cid_t& edgeCollectionCid,
-                        TRI_document_collection_t* edgeCollection,
-                        WeightCalculatorFunction weighter)
-      : _edgeCollectionCid(edgeCollectionCid),
-        _edgeCollection(edgeCollection),
-        _weighter(weighter) {
-    }
-
-    EdgeId extractEdgeId (TRI_doc_mptr_copy_t& ptr) {
-      return EdgeId(_edgeCollectionCid, TRI_EXTRACT_MARKER_KEY(&ptr));
-    }
-
-    std::vector<TRI_doc_mptr_copy_t> getEdges (TRI_edge_direction_e direction,
-                                               VertexId const& vertexId) const {
-      return TRI_LookupEdgesDocumentCollection(_edgeCollection,
-                   direction, vertexId.cid, const_cast<char*>(vertexId.key));
-    }
-
-    TRI_voc_cid_t getCid () {
-      return _edgeCollectionCid;
-    }
-
-    VocShaper* getShaper () {
-      return _edgeCollection->getShaper();
-    }
-
-    double weightEdge (TRI_doc_mptr_copy_t& ptr) {
-      return _weighter(ptr);
-    }
-};
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Information required internally of the traverser.
-///        Used to easily pass around collections.
-////////////////////////////////////////////////////////////////////////////////
-
-class VertexCollectionInfo {
-
-  private:
-    
-////////////////////////////////////////////////////////////////////////////////
-/// @brief vertex collection
-////////////////////////////////////////////////////////////////////////////////
-
-    TRI_voc_cid_t _vertexCollectionCid;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief vertex collection
-////////////////////////////////////////////////////////////////////////////////
-
-    TRI_transaction_collection_t* _vertexCollection;
-
-  public:
-
-    VertexCollectionInfo (TRI_voc_cid_t& vertexCollectionCid,
-                          TRI_transaction_collection_t* vertexCollection) 
-      : _vertexCollectionCid(vertexCollectionCid),
-        _vertexCollection(vertexCollection) {
-    }
-
-    TRI_voc_cid_t getCid () {
-      return _vertexCollectionCid;
-    }
-
-    TRI_transaction_collection_t* getCollection () {
-      return _vertexCollection;
-    }
-
-    VocShaper* getShaper () {
-      return _vertexCollection->_collection->_collection->getShaper();
-    }
-};
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Wrapper for the shortest path computation
-////////////////////////////////////////////////////////////////////////////////
-
-std::unique_ptr<ArangoDBPathFinder::Path> TRI_RunShortestPathSearch (
-    std::vector<EdgeCollectionInfo*>& collectionInfos,
-    triagens::basics::traverser::ShortestPathOptions& opts
-);
-
-
-std::unique_ptr<ArangoDBConstDistancePathFinder::Path> TRI_RunSimpleShortestPathSearch (
-    std::vector<EdgeCollectionInfo*>& collectionInfos,
-    triagens::basics::traverser::ShortestPathOptions& opts
-);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Wrapper for the neighbors computation
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_RunNeighborsSearch (std::vector<EdgeCollectionInfo*>& collectionInfos,
-                             triagens::basics::traverser::NeighborsOptions& opts,
-                             std::unordered_set<VertexId>& distinct);
+}
 
 #endif

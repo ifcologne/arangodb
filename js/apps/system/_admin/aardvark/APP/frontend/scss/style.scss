@@ -16,6 +16,8 @@
 // Tooltips
 @import 'tooltips';
 // dbSelection
+@import 'toolbar';
+// dbSelection
 @import 'dbSelection';
 // new dashboard, will be the highlander
 @import 'newDashboard';
@@ -53,6 +55,8 @@
 @import 'logs';
 // Graph Viewer
 @import 'graphViewer';
+// Graph Viewer 2
+@import 'graphViewer2';
 // General Dialogs
 @import 'dialogs';
 // Collections
@@ -65,16 +69,41 @@
 @import 'documentView';
 // progress view
 @import 'progressView';
+// spotlight view
+@import 'spotlightView';
+// cluster view
+@import 'clusterView';
 // application detail view
 @import 'applicationDetailView';
-
+// new modal alternative (modal -> subview)
+@import 'subViewModal';
+// pure responsive components
+@import 'pure';
 // screen hotkeys
 @import 'hotkeys';
+// screen nodes
+@import 'nodes';
+// screen shards
+@import 'shards';
+
+// input type range
+@import 'range';
+// state
+@import 'state';
 
 //arangoTable Template
 @import 'arangoTable';
 //arangoTabbar Template
 @import 'arangoTabbar';
+//Sub Navigation
+@import 'subNavbar';
+//Help View
+@import 'help';
+//Support View
+@import 'support';
+
+// Extra CSS for internet explorer :)
+@import 'ie';
 
 // Data Tables, TODO: might all be superflous
 @import 'dataTables';
@@ -85,6 +114,4 @@
 
 // Plugin
 @import 'uploadfile';
-
-// Demo
-@import 'demo';
+@import 'animate';

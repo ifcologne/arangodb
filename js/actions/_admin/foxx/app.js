@@ -1,49 +1,45 @@
-/*jshint strict: false */
+/* jshint strict: false */
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief foxx administration actions
-///
-/// @file
-///
-/// DISCLAIMER
-///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-/// Copyright holder is ArangoDB GmbH, Cologne, Germany
-///
-/// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012, triAGENS GmbH, Cologne, Germany
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief foxx administration actions
+// /
+// / @file
+// /
+// / DISCLAIMER
+// /
+// / Copyright 2014 ArangoDB GmbH, Cologne, Germany
+// /
+// / Licensed under the Apache License, Version 2.0 (the "License")
+// / you may not use this file except in compliance with the License.
+// / You may obtain a copy of the License at
+// /
+// /     http://www.apache.org/licenses/LICENSE-2.0
+// /
+// / Unless required by applicable law or agreed to in writing, software
+// / distributed under the License is distributed on an "AS IS" BASIS,
+// / WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// / See the License for the specific language governing permissions and
+// / limitations under the License.
+// /
+// / Copyright holder is ArangoDB GmbH, Cologne, Germany
+// /
+// / @author Dr. Frank Celler
+// / @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
+// / @author Copyright 2012, triAGENS GmbH, Cologne, Germany
+// //////////////////////////////////////////////////////////////////////////////
 
-var actions = require("org/arangodb/actions");
-var foxxManager = require("org/arangodb/foxx/manager");
+var actions = require('@arangodb/actions');
+var foxxManager = require('@arangodb/foxx/manager');
 
 var easyPostCallback = actions.easyPostCallback;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets up a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief sets up a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/setup",
-  prefix : false,
+  url: '_admin/foxx/setup',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -55,13 +51,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief tears down a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief tears down a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/teardown",
-  prefix : false,
+  url: '_admin/foxx/teardown',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -73,13 +69,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief installs a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief installs a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/install",
-  prefix : false,
+  url: '_admin/foxx/install',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -87,19 +83,18 @@ actions.defineHttp({
       var appInfo = body.appInfo;
       var mount = body.mount;
       var options = body.options;
-      foxxManager.update();
       return foxxManager.install(appInfo, mount, options);
     }
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief uninstalls a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief uninstalls a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/uninstall",
-  prefix : false,
+  url: '_admin/foxx/uninstall',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -112,13 +107,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief replaces a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief replaces a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/replace",
-  prefix : false,
+  url: '_admin/foxx/replace',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -132,13 +127,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief upgrades a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief upgrades a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/upgrade",
-  prefix : false,
+  url: '_admin/foxx/upgrade',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -152,13 +147,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief configures a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief configures a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/configure",
-  prefix : false,
+  url: '_admin/foxx/configure',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -174,13 +169,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Gets the configuration of a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief Gets the configuration of a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/configuration",
-  prefix : false,
+  url: '_admin/foxx/configuration',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -192,13 +187,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief configures a Foxx application's dependencies
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief configures a Foxx application's dependencies
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/set-dependencies",
-  prefix : false,
+  url: '_admin/foxx/set-dependencies',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -211,13 +206,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Gets the dependencies of a Foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief Gets the dependencies of a Foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/dependencies",
-  prefix : false,
+  url: '_admin/foxx/dependencies',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -229,13 +224,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Toggles the development mode of a foxx application
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief Toggles the development mode of a foxx application
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/development",
-  prefix : false,
+  url: '_admin/foxx/development',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -251,13 +246,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Run tests for an app
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief Run tests for an app
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/tests",
-  prefix : false,
+  url: '_admin/foxx/tests',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -269,13 +264,13 @@ actions.defineHttp({
   })
 });
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Run script for an app
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief Run script for an app
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : "_admin/foxx/script",
-  prefix : false,
+  url: '_admin/foxx/script',
+  prefix: false,
 
   callback: easyPostCallback({
     body: true,
@@ -283,16 +278,7 @@ actions.defineHttp({
       var name = body.name;
       var mount = body.mount;
       var options = body.options;
-      try {
-        var result = foxxManager.runScript(name, mount, options);
-        return result;
-      } catch (e) {
-        throw e.cause || e;
-      }
+      return foxxManager.runScript(name, mount, options);
     }
   })
 });
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Transaction context
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,101 +19,196 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_UTILS_TRANSACTION_CONTEXT_H
-#define ARANGODB_UTILS_TRANSACTION_CONTEXT_H 1
+#ifndef ARANGOD_UTILS_TRANSACTION_CONTEXT_H
+#define ARANGOD_UTILS_TRANSACTION_CONTEXT_H 1
 
 #include "Basics/Common.h"
+#include "Basics/SmallVector.h"
+#include "VocBase/voc-types.h"
 
-#include "Utils/CollectionNameResolver.h"
+#include <velocypack/Options.h>
 
-struct TRI_transaction_s;
+struct TRI_transaction_t;
+struct TRI_vocbase_t;
 
-namespace triagens {
-  namespace arango {
+namespace arangodb {
+namespace basics {
+class StringBuffer;
+}
 
-    class TransactionContext {
+namespace velocypack {
+class Builder;
+struct CustomTypeHandler;
+}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                          class TransactionContext
-// -----------------------------------------------------------------------------
+class CollectionNameResolver;
+class DocumentDitch;
+class LogicalCollection;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+class TransactionContext {
+ public:
+  TransactionContext(TransactionContext const&) = delete;
+  TransactionContext& operator=(TransactionContext const&) = delete;
 
-      public:
+ protected:
 
-        TransactionContext (TransactionContext const&) = delete;
-        TransactionContext& operator= (TransactionContext const&) = delete;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create the context
+  //////////////////////////////////////////////////////////////////////////////
 
-      protected:
+  explicit TransactionContext(TRI_vocbase_t* vocbase);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the context
-////////////////////////////////////////////////////////////////////////////////
+ public:
 
-        TransactionContext ();
-      
-      public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief destroy the context
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the context
-////////////////////////////////////////////////////////////////////////////////
+  virtual ~TransactionContext();
 
-        virtual ~TransactionContext ();
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief factory to create a custom type handler, not managed
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+  static arangodb::velocypack::CustomTypeHandler* createCustomTypeHandler(
+           TRI_vocbase_t*,
+           arangodb::CollectionNameResolver const*);
 
-      public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the vocbase
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the resolver
-////////////////////////////////////////////////////////////////////////////////
+  TRI_vocbase_t* vocbase() const { return _vocbase; }
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief order a document ditch for the collection
+  /// this will create one if none exists. if no ditch can be created, the
+  /// function will return a nullptr!
+  //////////////////////////////////////////////////////////////////////////////
 
-        virtual CollectionNameResolver const* getResolver () const = 0;
+  DocumentDitch* orderDitch(arangodb::LogicalCollection*);
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the ditch for a collection
+  /// this will return a nullptr if no ditch exists
+  //////////////////////////////////////////////////////////////////////////////
+  
+  DocumentDitch* ditch(TRI_voc_cid_t) const;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get parent transaction (if any)
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief temporarily lease a StringBuffer object
+  //////////////////////////////////////////////////////////////////////////////
 
-        virtual struct TRI_transaction_s* getParentTransaction () const = 0;
+  basics::StringBuffer* leaseStringBuffer(size_t initialSize);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the transaction is embeddable
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return a temporary StringBuffer object
+  //////////////////////////////////////////////////////////////////////////////
 
-        virtual bool isEmbeddable () const = 0;
+  void returnStringBuffer(basics::StringBuffer* stringBuffer);
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief temporarily lease a Builder object
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief register the transaction in the context
-////////////////////////////////////////////////////////////////////////////////
+  arangodb::velocypack::Builder* leaseBuilder();
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return a temporary Builder object
+  //////////////////////////////////////////////////////////////////////////////
 
-        virtual int registerTransaction (struct TRI_transaction_s*) = 0;
+  void returnBuilder(arangodb::velocypack::Builder*);
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get velocypack options with a custom type handler
+  //////////////////////////////////////////////////////////////////////////////
+  
+  arangodb::velocypack::Options* getVPackOptions();
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get velocypack options for dumping
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief unregister the transaction from the context
-////////////////////////////////////////////////////////////////////////////////
+  arangodb::velocypack::Options* getVPackOptionsForDump();
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief unregister the transaction
+  /// this will save the transaction's id and status locally
+  //////////////////////////////////////////////////////////////////////////////
 
-        virtual int unregisterTransaction () = 0;
+  void storeTransactionResult(TRI_voc_tid_t, bool);
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get a custom type handler
+  //////////////////////////////////////////////////////////////////////////////
 
-    };
+  virtual std::shared_ptr<VPackCustomTypeHandler> orderCustomTypeHandler() = 0;
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the resolver
+  //////////////////////////////////////////////////////////////////////////////
 
-  }
+  virtual CollectionNameResolver const* getResolver() = 0;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get parent transaction (if any)
+  //////////////////////////////////////////////////////////////////////////////
+
+  virtual struct TRI_transaction_t* getParentTransaction() const = 0;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not the transaction is embeddable
+  //////////////////////////////////////////////////////////////////////////////
+
+  virtual bool isEmbeddable() const = 0;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief register the transaction in the context
+  //////////////////////////////////////////////////////////////////////////////
+
+  virtual int registerTransaction(struct TRI_transaction_t*) = 0;
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief unregister the transaction
+  //////////////////////////////////////////////////////////////////////////////
+
+  virtual void unregisterTransaction() = 0;
+
+ protected:
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create a resolver
+  //////////////////////////////////////////////////////////////////////////////
+    
+  CollectionNameResolver const* createResolver();
+ 
+ protected:
+  
+  TRI_vocbase_t* _vocbase; 
+  
+  CollectionNameResolver const* _resolver;
+  
+  std::shared_ptr<velocypack::CustomTypeHandler> _customTypeHandler;
+  
+  std::unordered_map<TRI_voc_cid_t, DocumentDitch*> _ditches;
+  
+  SmallVector<arangodb::velocypack::Builder*, 32>::allocator_type::arena_type _arena;
+  SmallVector<arangodb::velocypack::Builder*, 32> _builders;
+  
+  std::unique_ptr<arangodb::basics::StringBuffer> _stringBuffer;
+
+  arangodb::velocypack::Options _options;
+  arangodb::velocypack::Options _dumpOptions;
+
+  struct {
+    TRI_voc_tid_t id; 
+    bool hasFailedOperations;
+  } _transaction;
+
+  bool _ownsResolver;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

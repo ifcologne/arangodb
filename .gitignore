@@ -1,4 +1,7 @@
-js-*.h
+tags
+build
+core.*
+*.vim
 .deps
 .dirstamp
 *.o
@@ -7,6 +10,7 @@ js-*.h
 *.pyc
 *.sdf
 *.suo
+*.log
 
 *.iml
 *.orig
@@ -14,48 +18,32 @@ js-*.h
 *.gcno
 *.gcda
 
+.DS_Store
+*.swp
 *.diff
 *.patch
 *.lnk
+Thumbs.db
 
-.libev-build-64
-.v8-build-64
-.idea
-.zlib-build-64
-.libev-build-32
-.v8-build-32
-.zlib-build-32
-.setup-mr-directories
-.setup-js-directories
-.file-list-js
+enterprise
+compile_commands.json
+instanceinfo.json
+testresult.json
+botschaft.txt
+testsStarted
 
-3rdParty/libev/ARCH.x64/
-3rdParty/libev/ARCH.ia32/
-3rdParty/zlib-1.2.7/
+build.sh
+build*/
+Build64/
+Build32/
+Debug64/
+Debug32/
+Release64/
+Release32/
+WindowsLibraries/
 
-Build*
-WindowsLibraries
-
-Makefile
-Makefile.in
-aclocal.m4
-autom4te.cache
-build.h
-config/*
-config.log
-config.status
-config/compile
-config/config.guess
-config/config.h
-config/config.sub
-config/install-sh
-config/depcomp
-config/missing
-config/stamp-h1
-configure
 core
 TAGS
-tags
 
 CMakeCache.txt
 CMakeFiles/
@@ -74,26 +62,25 @@ lib/CMakeFiles/
 lib/cmake_install.cmake
 
 Documentation/Examples/*.generated
-Documentation/Books/Users/book.json
-Documentation/Books/Users/manual.epub
-Documentation/Books/Users/manual.mobi
-Documentation/Books/Users/manual.pdf
-Documentation/Books/Makefile
-Documentation/Books/Users/node_modules/
-Documentation/Examples/*.generated
-Documentation/Books/ppbooks/
+
 UnitTests/HttpInterface/logs/
-UnitTests/basics_suite
-UnitTests/geo_suite
+
 arangod/Aql/grammar.c
 arangod/Aql/grammar.cpp
 arangod/Aql/grammar.h
 arangod/Aql/grammar.hpp
 arangod/Aql/grammar.output
 arangod/Aql/tokens.cpp
+
 bin/
+logs/
+output/
+out/
+
 etc/arangodb/*.conf
+
 js/common/bootstrap/errors.js
+
 lib/Basics/local-configuration.h
 lib/Basics/stamp-h2
 lib/Basics/voc-errors.cpp
@@ -102,12 +89,11 @@ lib/JsonParser/json-parser.c
 lib/JsonParser/json-parser.cpp
 lib/V8/v8-json.cpp
 
-cppcheck.log
-cppcheck.tmp
-
 Installation/epm/arangodb.sublist
 Installation/MacOSX/Bundle/Info.plist
+
 nbproject/
+.idea
 
 test.cpp.txt
 
@@ -121,12 +107,24 @@ js/apps/*
 !js/apps/system/_admin/aardvark/APP/build/*
 !js/apps/system/_admin/aardvark/APP/frontend/build
 !js/apps/system/_admin/aardvark/APP/frontend/build/*
-!js/apps/system/_admin/aardvark/APP/clusterFrontend/build
-!js/apps/system/_admin/aardvark/APP/clusterFrontend/build/*
 js/apps/system/_admin/aardvark/APP/node_modules/*
 
+js/apps/system/_admin/aardvark/APP/frontend/build/app.js
+js/apps/system/_admin/aardvark/APP/frontend/build/app.js.gz
+js/apps/system/_admin/aardvark/APP/frontend/build/extra.css
+js/apps/system/_admin/aardvark/APP/frontend/build/extra.css.gz
+js/apps/system/_admin/aardvark/APP/frontend/build/index.html
+js/apps/system/_admin/aardvark/APP/frontend/build/libs.js
+js/apps/system/_admin/aardvark/APP/frontend/build/libs.js.gz
+js/apps/system/_admin/aardvark/APP/frontend/build/style.css
+js/apps/system/_admin/aardvark/APP/frontend/build/scripts.html.part
+
 3rdParty/etcd/src/
-Documentation/Books/allComments.txt
+3rdParty/boost/1.61.0/b2
+3rdParty/boost/1.61.0/bin.v2/
+3rdParty/boost/1.61.0/bjam
+3rdParty/boost/1.61.0/project-config.jam
+3rdParty/boost/1.61.0/stage/
 
 .gdb-history
 npm-debug.log

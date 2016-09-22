@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief error handling
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,92 +19,55 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_BASICS_C_ERROR_H
-#define ARANGODB_BASICS_C_ERROR_H 1
+#ifndef ARANGODB_BASICS_ERROR_H
+#define ARANGODB_BASICS_ERROR_H 1
 
 #ifndef TRI_WITHIN_COMMON
 #error use <Basics/Common.h>
 #endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief error code/message container
-////////////////////////////////////////////////////////////////////////////////
-
-typedef struct TRI_error_s {
-  int   _code;
-  char* _message;
-}
-TRI_error_t;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief returns the last error
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_errno (void);
+int TRI_errno();
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief returns the last error as string
 ////////////////////////////////////////////////////////////////////////////////
 
-char const* TRI_last_error (void);
+char const* TRI_last_error();
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief sets the last error
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_set_errno (int);
+int TRI_set_errno(int);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief defines an error string
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_set_errno_string (int, char const*);
+void TRI_set_errno_string(int, char const*);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief return an error message for an error code
 ////////////////////////////////////////////////////////////////////////////////
 
-char const* TRI_errno_string (int);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                            MODULE
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+char const* TRI_errno_string(int);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief initializes the error messages
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_InitializeError (void);
+void TRI_InitializeError();
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief shuts down the error messages
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_ShutdownError (void);
+void TRI_ShutdownError();
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

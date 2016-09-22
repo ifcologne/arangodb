@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief collection read locker
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,102 +19,59 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_UTILS_COLLECTION_READ_LOCKER_H
-#define ARANGODB_UTILS_COLLECTION_READ_LOCKER_H 1
+#ifndef ARANGOD_UTILS_COLLECTION_READ_LOCKER_H
+#define ARANGOD_UTILS_COLLECTION_READ_LOCKER_H 1
 
 #include "Basics/Common.h"
+#include "Basics/Exceptions.h"
+#include "VocBase/LogicalCollection.h"
+#include "VocBase/transaction.h"
 
-#include "VocBase/document-collection.h"
+namespace arangodb {
 
-namespace triagens {
-  namespace arango {
+class CollectionReadLocker {
+ public:
+  CollectionReadLocker(CollectionReadLocker const&) = delete;
+  CollectionReadLocker& operator=(CollectionReadLocker const&) = delete;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        class CollectionReadLocker
-// -----------------------------------------------------------------------------
+  /// @brief create the locker
+  CollectionReadLocker(LogicalCollection* collection, bool useDeadlockDetector, bool doLock)
+      : _collection(collection), _useDeadlockDetector(useDeadlockDetector), _doLock(false) {
+    if (doLock) {
+      int res = _collection->beginReadTimed(_useDeadlockDetector,
+          0, TRI_TRANSACTION_DEFAULT_SLEEP_DURATION);
 
-    class CollectionReadLocker {
+      if (res != TRI_ERROR_NO_ERROR) {
+        THROW_ARANGO_EXCEPTION(res);
+      }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-        CollectionReadLocker (CollectionReadLocker const&) = delete;
-        CollectionReadLocker& operator= (CollectionReadLocker const&) = delete;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the locker
-////////////////////////////////////////////////////////////////////////////////
-
-        CollectionReadLocker (TRI_document_collection_t* document,
-                              bool doLock)
-          : _document(document),
-            _doLock(false) {
-
-          if (doLock) {
-            _document->beginRead();
-            _doLock = true;
-          }
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the locker
-////////////////////////////////////////////////////////////////////////////////
-
-        ~CollectionReadLocker () {
-          unlock();
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief release the lock
-////////////////////////////////////////////////////////////////////////////////
-
-        inline void unlock () {
-          if (_doLock) {
-            _document->endRead();
-            _doLock = false;
-          }
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection pointer
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_document_collection_t* _document;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief lock flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _doLock;
-
-    };
+      _doLock = true;
+    }
   }
+
+  /// @brief destroy the locker
+  ~CollectionReadLocker() { unlock(); }
+
+  /// @brief release the lock
+  inline void unlock() {
+    if (_doLock) {
+      _collection->endRead(_useDeadlockDetector);
+      _doLock = false;
+    }
+  }
+
+ private:
+  /// @brief collection pointer
+  LogicalCollection* _collection;
+  
+  /// @brief whether or not to use the deadlock detector
+  bool const _useDeadlockDetector;
+
+  /// @brief lock flag
+  bool _doLock;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

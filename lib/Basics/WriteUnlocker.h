@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief write unlocker
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,20 +20,13 @@
 ///
 /// @author Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_BASICS_WRITE_UNLOCKER_H
 #define ARANGODB_BASICS_WRITE_UNLOCKER_H 1
 
 #include "Basics/Common.h"
-
 #include "Basics/ReadWriteLock.h"
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                     public macros
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief construct unlocker with file and line information
@@ -46,18 +35,19 @@
 /// number.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define WRITE_UNLOCKER_VAR_A(a) _write_unlock_variable ## a
-#define WRITE_UNLOCKER_VAR_B(a) WRITE_UNLOCKER_VAR_A(a)
+#ifdef TRI_SHOW_LOCK_TIME
 
-#define WRITE_UNLOCKER(b) \
-  triagens::basics::WriteUnlocker WRITE_UNLOCKER_VAR_B(__LINE__)(&b, __FILE__, __LINE__)
+#define WRITE_UNLOCKER(obj, lock) \
+  arangodb::basics::WriteUnlocker obj(&lock, __FILE__, __LINE__)
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                               class WriteUnlocker
-// -----------------------------------------------------------------------------
+#else
 
-namespace triagens {
-  namespace basics {
+#define WRITE_UNLOCKER(obj, lock) arangodb::basics::WriteUnlocker obj(&lock)
+
+#endif
+
+namespace arangodb {
+namespace basics {
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief write unlocker
@@ -66,73 +56,67 @@ namespace triagens {
 /// the write lock when it is destroyed.
 ////////////////////////////////////////////////////////////////////////////////
 
-    class WriteUnlocker {
-        WriteUnlocker (WriteUnlocker const&);
-        WriteUnlocker& operator= (WriteUnlocker const&);
+class WriteUnlocker {
+  WriteUnlocker(WriteUnlocker const&) = delete;
+  WriteUnlocker& operator=(WriteUnlocker const&) = delete;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
+ public:
+//////////////////////////////////////////////////////////////////////////////
 /// @brief unlocks the lock
 ///
 /// The constructor unlocks the lock, the destructors aquires a write-lock.
-////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
 
-        explicit
-        WriteUnlocker (ReadWriteLock* readWriteLock);
+#ifdef TRI_SHOW_LOCK_TIME
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief unlocks the lock
-///
-/// The constructor unlocks the lock, the destructors aquires a write-lock.
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief unlocks the lock
+  ///
+  /// The constructor unlocks the lock, the destructors aquires a write-lock.
+  //////////////////////////////////////////////////////////////////////////////
 
-        WriteUnlocker (ReadWriteLock* readWriteLock, char const* file, int line);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief aquires the write-lock
-////////////////////////////////////////////////////////////////////////////////
-
-        ~WriteUnlocker ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the read-write lock
-////////////////////////////////////////////////////////////////////////////////
-
-        ReadWriteLock* _readWriteLock;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief file
-////////////////////////////////////////////////////////////////////////////////
-
-        char const* _file;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief line number
-////////////////////////////////////////////////////////////////////////////////
-
-        int _line;
-    };
+  WriteUnlocker(ReadWriteLocker* readWriteLock, char const* file, int line)
+      : _readWriteLock(readWriteLock), _file(file), _line(line) {
+    _readWriteLock->unlock();
   }
-}
+
+#else
+
+  explicit WriteUnlocker(ReadWriteLock* readWriteLock)
+      : _readWriteLock(readWriteLock) {}
 
 #endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief aquires the write-lock
+  ////////////////////////////////////////////////////////////////////////////////
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+  ~WriteUnlocker() { _readWriteLock->writeLock(); }
+
+ private:
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief the read-write lock
+  ////////////////////////////////////////////////////////////////////////////////
+
+  ReadWriteLocker* _readWriteLock;
+
+#ifdef TRI_SHOW_LOCK_TIME
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief file
+  ////////////////////////////////////////////////////////////////////////////////
+
+  char const* _file;
+
+  ////////////////////////////////////////////////////////////////////////////////
+  /// @brief line number
+  ////////////////////////////////////////////////////////////////////////////////
+
+  int _line;
+
+#endif
+};
+}
+}
+
+#endif

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, scopes
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,52 +19,24 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Aql/Scopes.h"
 #include "Basics/Exceptions.h"
 
-using namespace triagens::aql;
+using namespace arangodb::aql;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief create the scope
-////////////////////////////////////////////////////////////////////////////////
+Scope::Scope(ScopeType type) : _type(type), _variables() {}
 
-Scope::Scope (ScopeType type) 
-  : _type(type),
-    _variables() {
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy the scope
-////////////////////////////////////////////////////////////////////////////////
+Scope::~Scope() {}
 
-Scope::~Scope () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return the name of a scope type
-////////////////////////////////////////////////////////////////////////////////
+std::string Scope::typeName() const { return typeName(_type); }
 
-std::string Scope::typeName () const {
-  return std::move(typeName(_type));
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return the name of a scope type
-////////////////////////////////////////////////////////////////////////////////
-
-std::string Scope::typeName (ScopeType type) {
+std::string Scope::typeName(ScopeType type) {
   switch (type) {
     case AQL_SCOPE_MAIN:
       return "main";
@@ -83,37 +51,25 @@ std::string Scope::typeName (ScopeType type) {
   return "unknown";
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief adds a variable to the scope
-////////////////////////////////////////////////////////////////////////////////
-
-void Scope::addVariable (Variable* variable) {
-  _variables.emplace(std::make_pair(variable->name, variable));
+void Scope::addVariable(Variable* variable) {
+  // intentionally like this... must always overwrite the value
+  // if the key already exists
+  _variables[variable->name] = variable;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief checks if a variable exists in the scope
-////////////////////////////////////////////////////////////////////////////////
-
-bool Scope::existsVariable (char const* name,
-                            size_t nameLength) const {
+bool Scope::existsVariable(char const* name, size_t nameLength) const {
   return (getVariable(name, nameLength) != nullptr);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief checks if a variable exists in the scope
-////////////////////////////////////////////////////////////////////////////////
-
-bool Scope::existsVariable (std::string const& name) const {
+bool Scope::existsVariable(std::string const& name) const {
   return (getVariable(name) != nullptr);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief returns a variable
-////////////////////////////////////////////////////////////////////////////////
-
-Variable const* Scope::getVariable (char const* name,
-                                    size_t nameLength) const {
+Variable const* Scope::getVariable(char const* name, size_t nameLength) const {
   std::string const varname(name, nameLength);
 
   auto it = _variables.find(varname);
@@ -125,11 +81,8 @@ Variable const* Scope::getVariable (char const* name,
   return (*it).second;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief returns a variable
-////////////////////////////////////////////////////////////////////////////////
-
-Variable const* Scope::getVariable (std::string const& name) const {
+Variable const* Scope::getVariable(std::string const& name) const {
   auto it = _variables.find(name);
 
   if (it == _variables.end()) {
@@ -139,14 +92,10 @@ Variable const* Scope::getVariable (std::string const& name) const {
   return (*it).second;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return a variable, allowing usage of special pseudo vars such
 /// as OLD and NEW
-////////////////////////////////////////////////////////////////////////////////
-
-Variable const* Scope::getVariable (char const* name,
-                                    size_t nameLength,
-                                    bool allowSpecial) const {
+Variable const* Scope::getVariable(char const* name, size_t nameLength,
+                                   bool allowSpecial) const {
   auto variable = getVariable(name, nameLength);
 
   if (variable == nullptr && allowSpecial) {
@@ -154,8 +103,7 @@ Variable const* Scope::getVariable (char const* name,
     // now try variable aliases OLD (= $OLD) and NEW (= $NEW)
     if (strcmp(name, "OLD") == 0) {
       variable = getVariable(TRI_CHAR_LENGTH_PAIR(Variable::NAME_OLD));
-    }
-    else if (strcmp(name, "NEW") == 0) {
+    } else if (strcmp(name, "NEW") == 0) {
       variable = getVariable(TRI_CHAR_LENGTH_PAIR(Variable::NAME_NEW));
     }
   }
@@ -163,70 +111,44 @@ Variable const* Scope::getVariable (char const* name,
   return variable;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief create the scopes
-////////////////////////////////////////////////////////////////////////////////
-
-Scopes::Scopes () 
-  : _activeScopes(),
-    _currentVariables() {
-
+Scopes::Scopes() : _activeScopes(), _currentVariables() {
   _activeScopes.reserve(4);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy the scopes
-////////////////////////////////////////////////////////////////////////////////
-
-Scopes::~Scopes () {
+Scopes::~Scopes() {
   for (auto& it : _activeScopes) {
     delete it;
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief start a new scope
-////////////////////////////////////////////////////////////////////////////////
-
-void Scopes::start (ScopeType type) {
-  std::unique_ptr<Scope> scope(new Scope(type));
+void Scopes::start(ScopeType type) {
+  auto scope = std::make_unique<Scope>(type);
 
   _activeScopes.emplace_back(scope.get());
   scope.release();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief end the current scope
-////////////////////////////////////////////////////////////////////////////////
-
-void Scopes::endCurrent () {
-  TRI_ASSERT(! _activeScopes.empty());
+void Scopes::endCurrent() {
+  TRI_ASSERT(!_activeScopes.empty());
 
   Scope* scope = _activeScopes.back();
   TRI_ASSERT(scope != nullptr);
 
   _activeScopes.pop_back();
-  
+
   delete scope;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief end the current scope plus any FOR scopes it is nested in
-////////////////////////////////////////////////////////////////////////////////
-
-void Scopes::endNested () {
-  TRI_ASSERT(! _activeScopes.empty());
+void Scopes::endNested() {
+  TRI_ASSERT(!_activeScopes.empty());
   int iterations = 0;
 
-  while (! _activeScopes.empty()) {
+  while (!_activeScopes.empty()) {
     ++iterations;
 
     auto scope = _activeScopes.back();
@@ -247,12 +169,9 @@ void Scopes::endNested () {
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief adds a variable to the current scope
-////////////////////////////////////////////////////////////////////////////////
-
-void Scopes::addVariable (Variable* variable) {
-  TRI_ASSERT(! _activeScopes.empty());
+void Scopes::addVariable(Variable* variable) {
+  TRI_ASSERT(!_activeScopes.empty());
   TRI_ASSERT(variable != nullptr);
 
   for (auto it = _activeScopes.rbegin(); it != _activeScopes.rend(); ++it) {
@@ -260,7 +179,8 @@ void Scopes::addVariable (Variable* variable) {
 
     if (scope->existsVariable(variable->name)) {
       // duplicate variable name
-      THROW_ARANGO_EXCEPTION_PARAMS(TRI_ERROR_QUERY_VARIABLE_REDECLARED, variable->name.c_str());
+      THROW_ARANGO_EXCEPTION_PARAMS(TRI_ERROR_QUERY_VARIABLE_REDECLARED,
+                                    variable->name.c_str());
     }
   }
 
@@ -268,22 +188,32 @@ void Scopes::addVariable (Variable* variable) {
   _activeScopes.back()->addVariable(variable);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks whether a variable exists in any scope
-////////////////////////////////////////////////////////////////////////////////
+/// @brief replaces an existing variable in the current scope
+void Scopes::replaceVariable(Variable* variable) {
+  TRI_ASSERT(!_activeScopes.empty());
+  TRI_ASSERT(variable != nullptr);
 
-bool Scopes::existsVariable (char const* name,
-                             size_t nameLength) const {
+  for (auto it = _activeScopes.rbegin(); it != _activeScopes.rend(); ++it) {
+    auto scope = (*it);
+
+    if (scope->existsVariable(variable->name)) {
+      // replace existing variable
+      scope->addVariable(variable);
+      return;
+    }
+  }
+
+  THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+}
+
+/// @brief checks whether a variable exists in any scope
+bool Scopes::existsVariable(char const* name, size_t nameLength) const {
   return (getVariable(name, nameLength) != nullptr);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return a variable by name - this respects the current scopes
-////////////////////////////////////////////////////////////////////////////////
-        
-Variable const* Scopes::getVariable (char const* name,
-                                     size_t nameLength) const {
-  TRI_ASSERT(! _activeScopes.empty());
+Variable const* Scopes::getVariable(char const* name, size_t nameLength) const {
+  TRI_ASSERT(!_activeScopes.empty());
 
   for (auto it = _activeScopes.rbegin(); it != _activeScopes.rend(); ++it) {
     auto variable = (*it)->getVariable(name, nameLength);
@@ -296,12 +226,9 @@ Variable const* Scopes::getVariable (char const* name,
   return nullptr;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return a variable by name - this respects the current scopes
-////////////////////////////////////////////////////////////////////////////////
-        
-Variable const* Scopes::getVariable (std::string const& name) const {
-  TRI_ASSERT(! _activeScopes.empty());
+Variable const* Scopes::getVariable(std::string const& name) const {
+  TRI_ASSERT(!_activeScopes.empty());
 
   for (auto it = _activeScopes.rbegin(); it != _activeScopes.rend(); ++it) {
     auto variable = (*it)->getVariable(name);
@@ -314,14 +241,10 @@ Variable const* Scopes::getVariable (std::string const& name) const {
   return nullptr;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return a variable by name - this respects the current scopes
-////////////////////////////////////////////////////////////////////////////////
-        
-Variable const* Scopes::getVariable (char const* name, 
-                                     size_t nameLength,
-                                     bool allowSpecial) const {
-  TRI_ASSERT(! _activeScopes.empty());
+Variable const* Scopes::getVariable(char const* name, size_t nameLength,
+                                    bool allowSpecial) const {
+  TRI_ASSERT(!_activeScopes.empty());
 
   for (auto it = _activeScopes.rbegin(); it != _activeScopes.rend(); ++it) {
     auto variable = (*it)->getVariable(name, nameLength, allowSpecial);
@@ -334,42 +257,25 @@ Variable const* Scopes::getVariable (char const* name,
   return nullptr;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief get the $CURRENT variable
-////////////////////////////////////////////////////////////////////////////////
-
-Variable const* Scopes::getCurrentVariable () const {
+Variable const* Scopes::getCurrentVariable() const {
   if (_currentVariables.empty()) {
-    THROW_ARANGO_EXCEPTION_PARAMS(TRI_ERROR_QUERY_VARIABLE_NAME_UNKNOWN, Variable::NAME_CURRENT);
+    THROW_ARANGO_EXCEPTION_PARAMS(TRI_ERROR_QUERY_VARIABLE_NAME_UNKNOWN,
+                                  Variable::NAME_CURRENT);
   }
   auto result = _currentVariables.back();
   TRI_ASSERT(result != nullptr);
   return result;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief stack a $CURRENT variable from the stack
-////////////////////////////////////////////////////////////////////////////////
-
-void Scopes::stackCurrentVariable (Variable const* variable) {
+void Scopes::stackCurrentVariable(Variable const* variable) {
   _currentVariables.emplace_back(variable);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief unregister the $CURRENT variable from the stack
-////////////////////////////////////////////////////////////////////////////////
-
-void Scopes::unstackCurrentVariable () {
-  TRI_ASSERT(! _currentVariables.empty());
+void Scopes::unstackCurrentVariable() {
+  TRI_ASSERT(!_currentVariables.empty());
 
   _currentVariables.pop_back();
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

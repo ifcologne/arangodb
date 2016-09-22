@@ -1,9 +1,11 @@
-div.headerDropdown {
+div.headerDropdown,
+.dropdownImport {
   background-color: $c-white;
   border: 1px solid $c-content-border;
-  border-radius: 3px;
+  border-radius: 2px;
   clear: both;
   display: none;
+  margin-bottom: 15px;
   padding: 10px;
   position: relative;
   width: auto;
@@ -67,9 +69,10 @@ div.dropdownInner {
     border-left: 1px solid $c-content-border;
     display: inline;
     list-style-type: none;
+    margin-left: 10px;
     margin-top: 10px;
     min-height: 105px;
-    width: 230px;
+    width: 175px;
 
     &:first-of-type {
       border: 0;
@@ -118,6 +121,10 @@ div.queryline {
     margin-bottom: 5px;
   }
 
+  input {
+    width: 16%;
+  }
+
   input[type='file'] {
     border: 0;
   }
@@ -130,7 +137,8 @@ div.queryline {
   }
 
   .removeFilterItem i {
-    margin-left: 5px !important;
+    font-size: 16pt;
+    margin-left: 4px !important;
     margin-top: 0 !important;
   }
 
@@ -138,6 +146,10 @@ div.queryline {
     margin-left: 6px;
     margin-right: 6px;
     position: relative;
+
+    input {
+      width: 140px;
+    }
 
     > ul.gv-dropdown-menu {
       @include border-radius(0);
@@ -149,6 +161,7 @@ div.queryline {
       position: absolute;
       top: 20px;
       width: 247px;
+
     }
   }
 }
@@ -173,9 +186,10 @@ div.dropdownImport {
 }
 
 select.filterSelect {
+  color: $c-blue;
   margin-left: 10px;
   margin-right: 10px;
-  width: 100px;
+  width: 80px;
 }
 
 //TODO Le fix

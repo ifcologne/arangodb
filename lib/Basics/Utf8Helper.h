@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Utf8/Utf16 Helper class
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,303 +20,198 @@
 ///
 /// @author Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_BASICS_UTF8HELPER_H
 #define ARANGODB_BASICS_UTF8HELPER_H 1
 
 #include "Basics/Common.h"
-#include "Basics/vector.h"
+
 #include <unicode/coll.h>
 #include <unicode/regex.h>
 #include <unicode/ustring.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  class Utf8Helper
-// -----------------------------------------------------------------------------
+namespace arangodb {
+namespace basics {
 
-namespace triagens {
-  namespace basics {
+class Utf8Helper {
+  Utf8Helper(Utf8Helper const&) = delete;
+  Utf8Helper& operator=(Utf8Helper const&) = delete;
 
-    class Utf8Helper {
-        Utf8Helper (Utf8Helper const&) = delete;
-        Utf8Helper& operator= (Utf8Helper const&) = delete;
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief a default helper
+  //////////////////////////////////////////////////////////////////////////////
 
-      public:
+  static Utf8Helper DefaultUtf8Helper;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief a default helper
-////////////////////////////////////////////////////////////////////////////////
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief constructor
+  /// @param lang   Lowercase two-letter or three-letter ISO-639 code.
+  ///     This parameter can instead be an ICU style C locale (e.g. "en_US")
+  //////////////////////////////////////////////////////////////////////////////
 
-        static Utf8Helper DefaultUtf8Helper;
+  explicit Utf8Helper(std::string const& lang);
 
-      public:
+  Utf8Helper();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-/// @param lang   Lowercase two-letter or three-letter ISO-639 code.
-///     This parameter can instead be an ICU style C locale (e.g. "en_US")
-////////////////////////////////////////////////////////////////////////////////
+  ~Utf8Helper();
 
-        explicit Utf8Helper (std::string const& lang);
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  ///  public functions
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief compare utf8 strings
+  /// -1 : left < right
+  ///  0 : left == right
+  ///  1 : left > right
+  //////////////////////////////////////////////////////////////////////////////
 
-        Utf8Helper();
+  int compareUtf8(char const* left, char const* right) const;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
+  int compareUtf8(char const* left, size_t leftLength, char const* right,
+                  size_t rightLength) const;
 
-        ~Utf8Helper();
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief compare utf16 strings
+  /// -1 : left < right
+  ///  0 : left == right
+  ///  1 : left > right
+  //////////////////////////////////////////////////////////////////////////////
 
-      public:
+  int compareUtf16(uint16_t const* left, size_t leftLength,
+                   uint16_t const* right, size_t rightLength) const;
 
-////////////////////////////////////////////////////////////////////////////////
-///  public functions
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief set collator by language
+  /// @param lang   Lowercase two-letter or three-letter ISO-639 code.
+  ///     This parameter can instead be an ICU style C locale (e.g. "en_US")
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief compare utf8 strings
-/// -1 : left < right
-///  0 : left == right
-///  1 : left > right
-////////////////////////////////////////////////////////////////////////////////
+  bool setCollatorLanguage(std::string const& lang);
 
-        int compareUtf8 (char const* left, 
-                         char const* right) const;
-        
-        int compareUtf8 (char const* left, 
-                         size_t leftLength,
-                         char const* right,
-                         size_t rightLength) const;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get collator language
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief compare utf16 strings
-/// -1 : left < right
-///  0 : left == right
-///  1 : left > right
-////////////////////////////////////////////////////////////////////////////////
+  std::string getCollatorLanguage();
 
-        int compareUtf16 (const uint16_t* left, size_t leftLength, const uint16_t* right, size_t rightLength) const;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get collator country
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief set collator by language
-/// @param lang   Lowercase two-letter or three-letter ISO-639 code.
-///     This parameter can instead be an ICU style C locale (e.g. "en_US")
-////////////////////////////////////////////////////////////////////////////////
+  std::string getCollatorCountry();
 
-        bool setCollatorLanguage (std::string const& lang);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief Lowercase the characters in a UTF-8 string.
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get collator language
-////////////////////////////////////////////////////////////////////////////////
+  std::string toLowerCase(std::string const& src);
 
-        std::string getCollatorLanguage ();
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief Lowercase the characters in a UTF-8 string.
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get collator country
-////////////////////////////////////////////////////////////////////////////////
+  char* tolower(TRI_memory_zone_t* zone, char const* src, int32_t srcLength,
+                int32_t& dstLength);
 
-        std::string getCollatorCountry ();
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief Uppercase the characters in a UTF-8 string.
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Lowercase the characters in a UTF-8 string.
-////////////////////////////////////////////////////////////////////////////////
+  std::string toUpperCase(std::string const& src);
 
-        std::string toLowerCase (std::string const& src);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief Uppercase the characters in a UTF-8 string.
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Lowercase the characters in a UTF-8 string.
-////////////////////////////////////////////////////////////////////////////////
+  char* toupper(TRI_memory_zone_t* zone, char const* src, int32_t srcLength,
+                int32_t& dstLength);
 
-        char* tolower (TRI_memory_zone_t* zone, 
-                       char const* src, 
-                       int32_t srcLength, 
-                       int32_t& dstLength);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the words of a UTF-8 string.
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Uppercase the characters in a UTF-8 string.
-////////////////////////////////////////////////////////////////////////////////
+  bool getWords(std::vector<std::string>& words, std::string const& text,
+                size_t minimalWordLength, size_t maximalWordLength,
+                bool lowerCase);
 
-        std::string toUpperCase (std::string const& src);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief builds a regex matcher for the specified pattern
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Uppercase the characters in a UTF-8 string.
-////////////////////////////////////////////////////////////////////////////////
+  RegexMatcher* buildMatcher(std::string const&);
 
-        char* toupper (TRI_memory_zone_t* zone, 
-                       char const* src, 
-                       int32_t srcLength, 
-                       int32_t& dstLength);
- 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the words of a UTF-8 string.
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not value matches a regex
+  //////////////////////////////////////////////////////////////////////////////
 
-        TRI_vector_string_t* getWords (char const* text,
-                                       size_t textLength,
-                                       size_t minimalWordLength,
-                                       size_t maximalWordLength,
-                                       bool lowerCase);
+  bool matches(RegexMatcher*, char const*, size_t, bool partial, bool& error);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the words of a UTF-8 string.
-////////////////////////////////////////////////////////////////////////////////
-
-        bool getWords (TRI_vector_string_t*& words,
-                       char const* text,
-                       size_t textLength,
-                       size_t minimalWordLength,
-                       size_t maximalWordLength,
-                       bool lowerCase);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief builds a regex matcher for the specified pattern
-////////////////////////////////////////////////////////////////////////////////
-
-        RegexMatcher* buildMatcher (std::string const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not value matches a regex
-////////////////////////////////////////////////////////////////////////////////
-    
-        bool matches (RegexMatcher*,
-                      std::string const&,
-                      bool&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not value matches a regex
-////////////////////////////////////////////////////////////////////////////////
-    
-        bool matches (RegexMatcher*,
-                      char const*,
-                      size_t,
-                      bool&);
-
-      private:
-
-        Collator* _coll;
-    };
-
-  }
+ private:
+  Collator* _coll;
+};
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        public non-class functions
-// -----------------------------------------------------------------------------
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief convert a utf-8 string to a uchar (utf-16)
 ////////////////////////////////////////////////////////////////////////////////
 
-UChar* TRI_Utf8ToUChar (TRI_memory_zone_t* zone,
-                        char const* utf8,
-                        size_t inLength,
-                        size_t* outLength);
+UChar* TRI_Utf8ToUChar(TRI_memory_zone_t* zone, char const* utf8,
+                       size_t inLength, size_t* outLength);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief convert a uchar (utf-16) to a utf-8 string
 ////////////////////////////////////////////////////////////////////////////////
 
-char* TRI_UCharToUtf8 (TRI_memory_zone_t* zone,
-                       UChar const* uchar,
-                       size_t inLength,
-                       size_t* outLength);
+char* TRI_UCharToUtf8(TRI_memory_zone_t* zone, UChar const* uchar,
+                      size_t inLength, size_t* outLength);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief normalize an utf8 string (NFC)
 ////////////////////////////////////////////////////////////////////////////////
 
-char* TRI_normalize_utf8_to_NFC (TRI_memory_zone_t* zone,
-                                 char const* utf8,
-                                 size_t inLength,
-                                 size_t* outLength);
+char* TRI_normalize_utf8_to_NFC(TRI_memory_zone_t* zone, char const* utf8,
+                                size_t inLength, size_t* outLength);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief normalize an utf16 string (NFC) and export it to utf8
 ////////////////////////////////////////////////////////////////////////////////
 
-char * TRI_normalize_utf16_to_NFC (TRI_memory_zone_t* zone,
-                                   uint16_t const* utf16,
-                                   size_t inLength,
-                                   size_t* outLength);
+char* TRI_normalize_utf16_to_NFC(TRI_memory_zone_t* zone, uint16_t const* utf16,
+                                 size_t inLength, size_t* outLength);
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief compare two utf16 strings (implemented in Basic/Utf8Helper.cpp)
+/// @brief compare two utf8 strings
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_compare_utf16 (uint16_t const* left,
-                       size_t leftLength,
-                       uint16_t const* right,
-                       size_t rightLength);
+static inline int TRI_compare_utf8(char const* left, char const* right) {
+  TRI_ASSERT(left != nullptr);
+  TRI_ASSERT(right != nullptr);
+  return arangodb::basics::Utf8Helper::DefaultUtf8Helper.compareUtf8(left, right);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief compare two utf8 strings (implemented in Basic/Utf8Helper.cpp)
+/// @brief compare two utf8 strings
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_compare_utf8 (char const* left, 
-                      char const* right);
+static inline int TRI_compare_utf8(char const* left, size_t leftLength, 
+                                   char const* right, size_t rightLength) {
+  TRI_ASSERT(left != nullptr);
+  TRI_ASSERT(right != nullptr);
+  return arangodb::basics::Utf8Helper::DefaultUtf8Helper.compareUtf8(left, leftLength, 
+                                                                     right, rightLength);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief compare two utf8 strings (implemented in Basic/Utf8Helper.cpp)
+/// @brief Lowercase the characters in a UTF-8 string
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_compare_utf8 (char const* left, 
-                      size_t leftLength, 
-                      char const* right, 
-                      size_t rightLength);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Lowercase the characters in a UTF-8 string (implemented in Basic/Utf8Helper.cpp)
-////////////////////////////////////////////////////////////////////////////////
-
-char* TRI_tolower_utf8 (TRI_memory_zone_t* zone,
-                        const char *src,
-                        int32_t srcLength,
-                        int32_t* dstLength);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Uppercase the characters in a UTF-8 string (implemented in Basic/Utf8Helper.cpp)
-////////////////////////////////////////////////////////////////////////////////
-
-char* TRI_toupper_utf8 (TRI_memory_zone_t* zone,
-                        const char *src,
-                        int32_t srcLength,
-                        int32_t* dstLength);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Get words of an UTF-8 string (implemented in Basic/Utf8Helper.cpp)
-////////////////////////////////////////////////////////////////////////////////
-
-TRI_vector_string_t* TRI_get_words (char const* text,
-                                    size_t textLength,
-                                    size_t minimalWordLength,
-                                    size_t maximalWordLength,
-                                    bool lowerCase);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Get words of an UTF-8 string (implemented in Basic/Utf8Helper.cpp)
-////////////////////////////////////////////////////////////////////////////////
-
-bool TRI_get_words (TRI_vector_string_t*& words,
-                    char const* text,
-                    size_t textLength,
-                    size_t minimalWordLength,
-                    size_t maximalWordLength,
-                    bool lowerCase);
+char* TRI_tolower_utf8(TRI_memory_zone_t* zone, char const* src,
+                       int32_t srcLength, int32_t* dstLength);
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

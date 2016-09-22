@@ -31,19 +31,14 @@
 /// @author Copyright 2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                            database version check
-// -----------------------------------------------------------------------------
 
 (function() {
-  return require("org/arangodb/database-version").databaseVersion().result;
+  try {
+    console.debug("checking database version");
+    return require("@arangodb/database-version").databaseVersion().result;
+  } catch (err) {
+    console.error("database version check failed: " + err);
+  }
 }());
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

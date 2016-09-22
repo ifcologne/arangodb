@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Write-ahead log garbage collection thread
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,454 +19,120 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_WAL_COLLECTOR_THREAD_H
-#define ARANGODB_WAL_COLLECTOR_THREAD_H 1
+#ifndef ARANGOD_WAL_COLLECTOR_THREAD_H
+#define ARANGOD_WAL_COLLECTOR_THREAD_H 1
 
 #include "Basics/Common.h"
 #include "Basics/ConditionVariable.h"
 #include "Basics/Mutex.h"
 #include "Basics/Thread.h"
+#include "Utils/SingleCollectionTransaction.h"
 #include "VocBase/datafile.h"
 #include "VocBase/Ditch.h"
-#include "VocBase/document-collection.h"
 #include "VocBase/voc-types.h"
+#include "Wal/CollectorCache.h"
 #include "Wal/Logfile.h"
 
-struct TRI_datafile_s;
-struct TRI_df_marker_s;
-struct TRI_document_collection_t;
-struct TRI_server_t;
-
-namespace triagens {
-  namespace wal {
-
-    class LogfileManager;
-    class Logfile;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                         struct CollectorOperation
-// -----------------------------------------------------------------------------
-
-    struct CollectorOperation {
-      CollectorOperation (char const* datafilePosition,
-                          TRI_voc_size_t datafileMarkerSize,
-                          char const* walPosition,
-                          TRI_voc_fid_t datafileId)
-        : datafilePosition(datafilePosition),
-          datafileMarkerSize(datafileMarkerSize),
-          walPosition(walPosition),
-          datafileId(datafileId) {
-        TRI_ASSERT_EXPENSIVE(datafilePosition != nullptr);
-        TRI_ASSERT_EXPENSIVE(datafileMarkerSize > 0);
-        TRI_ASSERT_EXPENSIVE(walPosition != nullptr);
-        TRI_ASSERT_EXPENSIVE(datafileId > 0);
-      }
-
-      char const*     datafilePosition;
-      TRI_voc_size_t  datafileMarkerSize;
-      char const*     walPosition;
-      TRI_voc_fid_t   datafileId;
-    };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                             struct CollectorCache
-// -----------------------------------------------------------------------------
-
-    struct CollectorCache {
-      CollectorCache (CollectorCache const&) = delete;
-      CollectorCache& operator= (CollectorCache const&) = delete;
-
-      explicit CollectorCache (TRI_voc_cid_t collectionId,
-                               TRI_voc_tick_t databaseId,
-                               Logfile* logfile,
-                               int64_t totalOperationsCount,
-                               size_t operationsSize)
-        : collectionId(collectionId),
-          databaseId(databaseId),
-          logfile(logfile),
-          totalOperationsCount(totalOperationsCount),
-          operations(new std::vector<CollectorOperation>()),
-          ditches(),
-          dfi(),
-          lastFid(0),
-          lastDatafile(nullptr) {
-
-        operations->reserve(operationsSize);
-      }
-
-      ~CollectorCache () {
-        if (operations != nullptr) {
-          delete operations;
-        }
-        freeDitches();
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief add a ditch
-////////////////////////////////////////////////////////////////////////////////
-
-      void addDitch (triagens::arango::DocumentDitch* ditch) {
-        TRI_ASSERT(ditch != nullptr);
-        ditches.emplace_back(ditch);
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief free all ditches
-////////////////////////////////////////////////////////////////////////////////
-
-      void freeDitches () {
-        for (auto& it : ditches) {
-          it->ditches()->freeDocumentDitch(it, false);
-        }
-
-        ditches.clear();
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief id of collection
-////////////////////////////////////////////////////////////////////////////////
-
-      TRI_voc_cid_t const collectionId;
+namespace arangodb {
+class LogicalCollection;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief id of database
-////////////////////////////////////////////////////////////////////////////////
+namespace wal {
 
-      TRI_voc_tick_t const databaseId;
+class LogfileManager;
+class Logfile;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief id of the WAL logfile
-////////////////////////////////////////////////////////////////////////////////
+class CollectorThread final : public Thread {
+  CollectorThread(CollectorThread const&) = delete;
+  CollectorThread& operator=(CollectorThread const&) = delete;
 
-      Logfile* logfile;
+ public:
+  explicit CollectorThread(LogfileManager*);
+  ~CollectorThread() { shutdown(); }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief total number of operations in this block
-////////////////////////////////////////////////////////////////////////////////
+ public:
+  void beginShutdown() override final;
 
-      int64_t const totalOperationsCount;
+ public:
+  /// @brief wait for the collector result
+  int waitForResult(uint64_t);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief all collector operations of a collection
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief signal the thread that there is something to do
+  void signal();
 
-      std::vector<CollectorOperation>* operations;
+  /// @brief check whether there are queued operations left
+  bool hasQueuedOperations();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief ditches held by the operations
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief check whether there are queued operations left for the given
+  /// collection
+  bool hasQueuedOperations(TRI_voc_cid_t);
 
-      std::vector<triagens::arango::DocumentDitch*> ditches;
+ protected:
+  /// @brief main loop
+  void run() override;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief datafile info cache, updated when the collector transfers markers
-////////////////////////////////////////////////////////////////////////////////
+ private:
+  /// @brief process a single marker in collector step 2
+  void processCollectionMarker(
+      arangodb::SingleCollectionTransaction&,
+      arangodb::LogicalCollection*, CollectorCache*, CollectorOperation const&);
 
-      std::unordered_map<TRI_voc_fid_t, TRI_doc_datafile_info_t> dfi;
+  /// @brief return the number of queued operations
+  size_t numQueuedOperations();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief id of last datafile handled
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief step 1: perform collection of a logfile (if any)
+  int collectLogfiles(bool&);
 
-      TRI_voc_fid_t lastFid;
+  /// @brief step 2: process all still-queued collection operations
+  int processQueuedOperations(bool&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief last datafile written to
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief process all operations for a single collection
+  int processCollectionOperations(CollectorCache*);
 
-      TRI_datafile_t* lastDatafile;
-    };
+  /// @brief collect one logfile
+  int collect(Logfile*);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                             class CollectorThread
-// -----------------------------------------------------------------------------
+  /// @brief transfer markers into a collection
+  int transferMarkers(arangodb::wal::Logfile*, TRI_voc_cid_t, TRI_voc_tick_t,
+                      int64_t, OperationsType const&);
 
-    class CollectorThread : public basics::Thread {
+  /// @brief insert the collect operations into a per-collection queue
+  int queueOperations(arangodb::wal::Logfile*, std::unique_ptr<CollectorCache>&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief CollectorThread
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief update a collection's datafile information
+  int updateDatafileStatistics(LogicalCollection*, CollectorCache*);
 
-      private:
-        CollectorThread (CollectorThread const&) = delete;
-        CollectorThread& operator= (CollectorThread const&) = delete;
+ private:
+  /// @brief the logfile manager
+  LogfileManager* _logfileManager;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+  /// @brief condition variable for the collector thread
+  basics::ConditionVariable _condition;
 
-      public:
+  /// @brief operations lock
+  arangodb::Mutex _operationsQueueLock;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the collector thread
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief operations to collect later
+  std::unordered_map<TRI_voc_cid_t, std::vector<CollectorCache*>>
+      _operationsQueue;
 
-        CollectorThread (LogfileManager*,
-                         TRI_server_t*);
+  /// @brief whether or not the queue is currently in use
+  bool _operationsQueueInUse;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the collector thread
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief number of pending operations in collector queue
+  uint64_t _numPendingOperations;
 
-        ~CollectorThread ();
+  /// @brief condition variable for the collector thread result
+  basics::ConditionVariable _collectorResultCondition;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   public typedefs
-// -----------------------------------------------------------------------------
+  /// @brief last collector result
+  int _collectorResult;
 
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief typedef key => document marker
-////////////////////////////////////////////////////////////////////////////////
-
-        typedef std::unordered_map<std::string, struct TRI_df_marker_s const*> DocumentOperationsType;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief typedef for structural operation (attributes, shapes) markers
-////////////////////////////////////////////////////////////////////////////////
-
-        typedef std::vector<struct TRI_df_marker_s const*> OperationsType;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief wait for the collector result
-////////////////////////////////////////////////////////////////////////////////
-
-        int waitForResult (uint64_t); 
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stops the collector thread
-////////////////////////////////////////////////////////////////////////////////
-
-        void stop ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief signal the thread that there is something to do
-////////////////////////////////////////////////////////////////////////////////
-
-        void signal ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief check whether there are queued operations left
-////////////////////////////////////////////////////////////////////////////////
-
-        bool hasQueuedOperations ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief check whether there are queued operations left for the given 
-/// collection
-////////////////////////////////////////////////////////////////////////////////
-
-        bool hasQueuedOperations (TRI_voc_cid_t);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    Thread methods
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief main loop
-////////////////////////////////////////////////////////////////////////////////
-
-        void run ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the number of queued operations
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t numQueuedOperations ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief step 1: perform collection of a logfile (if any)
-////////////////////////////////////////////////////////////////////////////////
-
-        int collectLogfiles (bool&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief step 2: process all still-queued collection operations
-////////////////////////////////////////////////////////////////////////////////
-
-        int processQueuedOperations (bool&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief process all operations for a single collection
-////////////////////////////////////////////////////////////////////////////////
-
-        int processCollectionOperations (CollectorCache*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collect one logfile
-////////////////////////////////////////////////////////////////////////////////
-
-        int collect (Logfile*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief transfer markers into a collection
-////////////////////////////////////////////////////////////////////////////////
-
-        int transferMarkers (triagens::wal::Logfile*,
-                             TRI_voc_cid_t,
-                             TRI_voc_tick_t,
-                             int64_t,
-                             OperationsType const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief transfer markers into a collection
-////////////////////////////////////////////////////////////////////////////////
-
-        int executeTransferMarkers (TRI_document_collection_t*,
-                                    CollectorCache*,
-                                    OperationsType const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief insert the collect operations into a per-collection queue
-////////////////////////////////////////////////////////////////////////////////
-
-        int queueOperations (triagens::wal::Logfile*,
-                             CollectorCache*&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief update a collection's datafile information
-////////////////////////////////////////////////////////////////////////////////
-
-        int updateDatafileStatistics (TRI_document_collection_t*,
-                                      CollectorCache*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sync the journals of a collection
-////////////////////////////////////////////////////////////////////////////////
-
-        int syncDatafileCollection (struct TRI_document_collection_t*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the next free position for a new marker of the specified size
-////////////////////////////////////////////////////////////////////////////////
-
-        char* nextFreeMarkerPosition (struct TRI_document_collection_t*,
-                                      TRI_voc_tick_t,
-                                      TRI_df_marker_type_e,
-                                      TRI_voc_size_t,
-                                      CollectorCache*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initialize a marker
-////////////////////////////////////////////////////////////////////////////////
-
-        void initMarker (struct TRI_df_marker_s*,
-                         TRI_df_marker_type_e,
-                         TRI_voc_size_t);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief set the tick of a marker and calculate its CRC value
-////////////////////////////////////////////////////////////////////////////////
-
-        void finishMarker (char const*,
-                           char*,
-                           struct TRI_document_collection_t*,
-                           TRI_voc_tick_t,
-                           CollectorCache*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the logfile manager
-////////////////////////////////////////////////////////////////////////////////
-
-        LogfileManager* _logfileManager;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief pointer to the server
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_server_t* _server;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief condition variable for the collector thread
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::ConditionVariable _condition;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief operations lock
-////////////////////////////////////////////////////////////////////////////////
-
-        triagens::basics::Mutex _operationsQueueLock;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief operations to collect later
-////////////////////////////////////////////////////////////////////////////////
-
-        std::unordered_map<TRI_voc_cid_t, std::vector<CollectorCache*>> _operationsQueue;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the queue is currently in use
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _operationsQueueInUse;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stop flag
-////////////////////////////////////////////////////////////////////////////////
-
-        volatile sig_atomic_t _stop;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of pending operations in collector queue
-////////////////////////////////////////////////////////////////////////////////
-
-        uint64_t _numPendingOperations;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief condition variable for the collector thread result
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::ConditionVariable _collectorResultCondition;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief last collector result
-////////////////////////////////////////////////////////////////////////////////
-
-        int _collectorResult;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief wait interval for the collector thread when idle
-////////////////////////////////////////////////////////////////////////////////
-
-        static uint64_t const Interval;
-
-    };
-
-  }
+  /// @brief wait interval for the collector thread when idle
+  static uint64_t const Interval;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Write-ahead logfile remover thread
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,121 +19,60 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RemoverThread.h"
 
-#include "Basics/logging.h"
+#include "Logger/Logger.h"
 #include "Basics/ConditionLocker.h"
 #include "Basics/Exceptions.h"
 #include "Wal/LogfileManager.h"
 
-using namespace triagens::wal;
+using namespace arangodb::wal;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                               class RemoverThread
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief wait interval for the remover thread when idle
-////////////////////////////////////////////////////////////////////////////////
+uint64_t const RemoverThread::Interval = 2000000;
 
-uint64_t const RemoverThread::Interval = 500000;
+RemoverThread::RemoverThread(LogfileManager* logfileManager)
+    : Thread("WalRemover"), _logfileManager(logfileManager), _condition() {}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+/// @brief begin shutdown sequence
+void RemoverThread::beginShutdown() {
+  Thread::beginShutdown();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the remover thread
-////////////////////////////////////////////////////////////////////////////////
-
-RemoverThread::RemoverThread (LogfileManager* logfileManager)
-  : Thread("WalRemover"),
-    _logfileManager(logfileManager),
-    _condition(),
-    _stop(0) {
-
-  allowAsynchronousCancelation();
+  CONDITION_LOCKER(guard, _condition);
+  guard.signal();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the remover thread
-////////////////////////////////////////////////////////////////////////////////
-
-RemoverThread::~RemoverThread () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stops the remover thread
-////////////////////////////////////////////////////////////////////////////////
-
-void RemoverThread::stop () {
-  if (_stop > 0) {
-    return;
-  }
-
-  _stop = 1;
-  _condition.signal();
-
-  while (_stop != 2) {
-    usleep(10000);
-  }
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    Thread methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief main loop
-////////////////////////////////////////////////////////////////////////////////
+void RemoverThread::run() {
+  int64_t iterations = 0;
 
-void RemoverThread::run () {
-  while (true) {
-    int stop = (int) _stop;
+  while (!isStopping()) {
     bool worked = false;
 
     try {
-      if (stop == 0) {
-        worked = _logfileManager->removeLogfiles();
+      worked = _logfileManager->removeLogfiles();
+
+      if (++iterations == 5) {
+        iterations = 0;
+        _logfileManager->collectLogfileBarriers();
       }
-    }
-    catch (triagens::basics::Exception const& ex) {
+    } catch (arangodb::basics::Exception const& ex) {
       int res = ex.code();
-      LOG_ERROR("got unexpected error in removerThread::run: %s", TRI_errno_string(res));
-    }
-    catch (...) {
-      LOG_ERROR("got unspecific error in removerThread::run");
+      LOG(ERR) << "got unexpected error in removerThread::run: "
+               << TRI_errno_string(res);
+    } catch (...) {
+      LOG(ERR) << "got unspecific error in removerThread::run";
     }
 
-    if (stop == 0 && ! worked) {
-      // sleep only if there was nothing to do
+    // sleep only if there was nothing to do
+    if (!worked) {
       CONDITION_LOCKER(guard, _condition);
 
-      guard.wait(Interval);
+      if (!isStopping()) {
+        guard.wait(Interval);
+      }
     }
-    else if (stop == 1) {
-      break;
-    }
-
-    // next iteration
   }
-
-  _stop = 2;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

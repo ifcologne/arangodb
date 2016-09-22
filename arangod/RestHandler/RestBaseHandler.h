@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief default handler for error handling and json in-/output
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,108 +19,60 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_ADMIN_REST_BASE_HANDLER_H
-#define ARANGODB_ADMIN_REST_BASE_HANDLER_H 1
+#ifndef ARANGOD_REST_HANDLER_REST_BASE_HANDLER_H
+#define ARANGOD_REST_HANDLER_REST_BASE_HANDLER_H 1
 
-#include "Basics/Common.h"
+#include "GeneralServer/RestHandler.h"
 
-#include "HttpServer/HttpHandler.h"
+#include "Rest/GeneralResponse.h"
 
-#include "Basics/json.h"
-#include "Rest/HttpResponse.h"
+namespace arangodb {
+class TransactionContext;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                             class RestBaseHandler
-// -----------------------------------------------------------------------------
+namespace velocypack {
+class Builder;
+struct Options;
+class Slice;
+}
 
-namespace triagens {
-  namespace admin {
+class RestBaseHandler : public rest::RestHandler {
+ public:
+  explicit RestBaseHandler(GeneralRequest*, GeneralResponse*);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief default handler for error handling and json in-/output
-////////////////////////////////////////////////////////////////////////////////
+  void handleError(basics::Exception const&) override;
 
-    class RestBaseHandler : public rest::HttpHandler {
+ public:
+  // generates a result from VelocyPack
+  template <typename Payload>
+  void generateResult(rest::ResponseCode, Payload&&);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+  // generates a result from VelocyPack
+  template <typename Payload>
+  void generateResult(rest::ResponseCode, Payload&&, VPackOptions const*);
 
-      public:
+  // generates a result from VelocyPack
+  template <typename Payload>
+  void generateResult(rest::ResponseCode, Payload&&,
+                      std::shared_ptr<arangodb::TransactionContext> context);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  // generates an error
+  void generateError(rest::ResponseCode, int);
 
-        RestBaseHandler (rest::HttpRequest* request);
+  // generates an error
+  void generateError(rest::ResponseCode, int, std::string const&);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
+  // generates a canceled message
+  void generateCanceled();
 
-      public:
+ protected:
+  /// @brief parses the body as VelocyPack
+  std::shared_ptr<arangodb::velocypack::Builder> parseVelocyPackBody(arangodb::velocypack::Options const*, bool&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        void handleError (basics::Exception const&);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates a result from JSON
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual void generateResult (TRI_json_t const* json);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates a result from JSON
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual void generateResult (rest::HttpResponse::HttpResponseCode,
-                                     TRI_json_t const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates a cancel message
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual void generateCanceled ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates an error
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual void generateError (rest::HttpResponse::HttpResponseCode,
-                                    int);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates an error
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual void generateError (rest::HttpResponse::HttpResponseCode,
-                                    int,
-                                    std::string const&);
-
-    };
-  }
+  template <typename Payload>
+  void writeResult(Payload&&, arangodb::velocypack::Options const& options);
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

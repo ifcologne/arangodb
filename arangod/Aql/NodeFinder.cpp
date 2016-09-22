@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, NodeFinder
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,55 +19,30 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Aql/NodeFinder.h"
 
-namespace triagens {
-  namespace aql {
+namespace arangodb {
+namespace aql {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief node finder for one node type
-////////////////////////////////////////////////////////////////////////////////
+template <>
+NodeFinder<ExecutionNode::NodeType>::NodeFinder(
+    ExecutionNode::NodeType lookingFor, SmallVector<ExecutionNode*>& out,
+    bool enterSubqueries)
+    : _lookingFor(lookingFor), _out(out), _enterSubqueries(enterSubqueries) {}
 
-template<>
-NodeFinder<ExecutionNode::NodeType>::NodeFinder (ExecutionNode::NodeType lookingFor,
-                                                 std::vector<ExecutionNode*>& out,
-                                                 bool enterSubqueries) 
- : _lookingFor(lookingFor), 
-   _out(out), 
-   _enterSubqueries(enterSubqueries) {
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief node finder for multiple types
-////////////////////////////////////////////////////////////////////////////////
-    
-template<>
-NodeFinder<std::vector<ExecutionNode::NodeType>>::NodeFinder (std::vector<ExecutionNode::NodeType> lookingFor,
-                                                              std::vector<ExecutionNode*>& out,
-                                                              bool enterSubqueries) 
-  : _lookingFor(lookingFor), 
-    _out(out), 
-    _enterSubqueries(enterSubqueries) {
-}
+template <>
+NodeFinder<std::vector<ExecutionNode::NodeType>>::NodeFinder(
+    std::vector<ExecutionNode::NodeType> lookingFor,
+    SmallVector<ExecutionNode*>& out, bool enterSubqueries)
+    : _lookingFor(lookingFor), _out(out), _enterSubqueries(enterSubqueries) {}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief before method for one node type
-////////////////////////////////////////////////////////////////////////////////
-
-template<>
-bool NodeFinder<ExecutionNode::NodeType>::before (ExecutionNode* en) {
+template <>
+bool NodeFinder<ExecutionNode::NodeType>::before(ExecutionNode* en) {
   if (en->getType() == _lookingFor) {
     _out.emplace_back(en);
   }
@@ -79,31 +50,39 @@ bool NodeFinder<ExecutionNode::NodeType>::before (ExecutionNode* en) {
   return false;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief before method for multiple node types
-////////////////////////////////////////////////////////////////////////////////
-    
-template<>
-bool NodeFinder<std::vector<ExecutionNode::NodeType>>::before (ExecutionNode* en) {
+template <>
+bool NodeFinder<std::vector<ExecutionNode::NodeType>>::before(
+    ExecutionNode* en) {
   auto const nodeType = en->getType();
 
   for (auto& type : _lookingFor) {
     if (type == nodeType) {
       _out.emplace_back(en);
-      break; 
+      break;
     }
   }
   return false;
 }
 
-  }  // namespace triagens::aql
-}  // namespace triagens
+/// @brief node finder for one node type
+EndNodeFinder::EndNodeFinder(SmallVector<ExecutionNode*>& out,
+                             bool enterSubqueries)
+    : _out(out), _found({false}), _enterSubqueries(enterSubqueries) {}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+/// @brief before method for one node type
+bool EndNodeFinder::before(ExecutionNode* en) {
+  TRI_ASSERT(!_found.empty());
+  if (!_found.back()) {
+    // no node found yet. note that we found one on this level
+    _out.emplace_back(en);
+    _found[_found.size() - 1] = true;
+  }
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+  // if we don't need to enter subqueries, we can stop after the first node that
+  // we found
+  return (!_enterSubqueries);
+}
+
+}  // namespace arangodb::aql
+}  // namespace arangodb

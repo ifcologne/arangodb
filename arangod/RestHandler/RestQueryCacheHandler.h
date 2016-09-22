@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief query cache request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014-2015 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,94 +19,42 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014-2015, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_REST_HANDLER_REST_QUERY_CACHE_HANDLER_H
-#define ARANGODB_REST_HANDLER_REST_QUERY_CACHE_HANDLER_H 1
+#ifndef ARANGOD_REST_HANDLER_REST_QUERY_CACHE_HANDLER_H
+#define ARANGOD_REST_HANDLER_REST_QUERY_CACHE_HANDLER_H 1
 
 #include "Basics/Common.h"
 #include "RestHandler/RestVocbaseBaseHandler.h"
 
-namespace triagens {
-  namespace arango {
+namespace arangodb {
+class RestQueryCacheHandler : public RestVocbaseBaseHandler {
+ public:
+  explicit RestQueryCacheHandler(GeneralRequest*, GeneralResponse*);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                       class RestQueryCacheHandler
-// -----------------------------------------------------------------------------
+ public:
+  bool isDirect() const override;
+  status execute() override;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief query request handler
-////////////////////////////////////////////////////////////////////////////////
+ protected:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the list of properties
+  //////////////////////////////////////////////////////////////////////////////
 
-    class RestQueryCacheHandler : public RestVocbaseBaseHandler {
+  bool readProperties();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief changes the properties
+  //////////////////////////////////////////////////////////////////////////////
 
-      public:
+  bool replaceProperties();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief clears the cache
+  //////////////////////////////////////////////////////////////////////////////
 
-        RestQueryCacheHandler (rest::HttpRequest*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isDirect () const override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        status_t execute () override;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the list of properties
-////////////////////////////////////////////////////////////////////////////////
-
-        bool readProperties ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief changes the properties
-////////////////////////////////////////////////////////////////////////////////
-
-        bool replaceProperties ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief clears the cache
-////////////////////////////////////////////////////////////////////////////////
-
-        bool clearCache ();
-
-    };
-  }
+  bool clearCache();
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

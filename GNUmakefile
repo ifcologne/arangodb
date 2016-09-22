@@ -4,83 +4,74 @@
 ## --SECTION--                                                  COMMON VARIABLES
 ## -----------------------------------------------------------------------------
 
--include Makefile
+SRC=$(shell pwd |sed "s;.*/;;")
 
-VERSION_MAJOR := $(wordlist 1,1,$(subst ., ,$(VERSION)))
-VERSION_MINOR := $(wordlist 2,2,$(subst ., ,$(VERSION)))
-VERSION_PATCH := $(wordlist 3,3,$(subst ., ,$(VERSION)))
+.PHONY: warning help
 
-VERSION_PATCH := $(wordlist 1,1,$(subst -, ,$(VERSION_PATCH)))
+warning:
+	@echo "ArangoDB has switched to CMAKE. In order to compile, use:"
+	@echo ""
+	@echo "  mkdir -p build"
+	@echo "  cd build"
+	@echo "  cmake .. -DCMAKE_BUILD_TYPE=Release"
+	@echo "  make"
+	@echo ""
+	@echo "MacOS users:"
+	@echo "  Please use OPENSSL from homebrew and use"
+	@echo ""
+	@echo "    cmake .. -DOPENSSL_ROOT_DIR=/usr/local/opt/openssl -DCMAKE_BUILD_TYPE=Release"
+	@echo ""
+	@echo "  Note that some versions of Apple's clang have severe performance"
+	@echo "  issues. Use GCC5 from homebrew in this case."
+	@echo ""
+	@echo "Use 'make help' to see more options."
 
-## -----------------------------------------------------------------------------
-## --SECTION--                                                   SPECIAL TARGETS
-## -----------------------------------------------------------------------------
+help:
+	@echo "The most common -D<options> are"
+	@echo ""
+	@echo "  -DCMAKE_CXX_COMPILER=/usr/local/bin/g++-5"
+	@echo "    sets the C++ compiler"
+	@echo "  -DCMAKE_C_COMPILER=/usr/local/bin/gcc-5"
+	@echo "    sets the C compiler"
+	@echo ""
+	@echo "ArangoDB supports:"
+	@echo ""
+	@echo "  -DUSE_BACKTRACE=off"
+	@echo "    if ON, enables backtraces in fatal errors"
+	@echo "  -DUSE_FAILURE_TESTS=off"
+	@echo "    if ON, add failure functions for testing"
+	@echo "  -DUSE_MAINTAINER_MODE=off"
+	@echo "    if ON, enable maintainer features"
+	@echo ""
+	@echo "BOOST supports:"
+	@echo ""
+	@echo "  -DUSE_BOOST_SYSTEM_LIBS=off"
+	@echo "    if ON, use the operating system Boost installation"
+	@echo "  -DUSE_BOOST_UNITTESTS=on"
+	@echo "    if ON, use Boost unittest framework if this available"
+	@echo ""
+	@echo "OPENSSL supports:"
+	@echo "  -DOPENSSL_ROOT_DIR=/usr/local/opt/openssl"
+	@echo "    sets the location of the openssl includes and libraries"
+	@echo ""
+	@echo "JEMALLOC supports:"
+	@echo "  -DUSE_JEMALLOC=on"
+	@echo "    if ON, link against JEMALLOC"
+	@echo ""
+	@echo "TCMALLOC supports:"
+	@echo "  -DUSE_TCMALLOC=on"
+	@echo "    if ON, link against TCMALLOC"
+	@echo ""
+	@echo "V8 supports:"
+	@echo "  -DUSE_PRECOMPILED_V8=off"
+	@echo "    if ON, use precompiled V8 libraries"
+	@echo ""
+	@echo "ZLIB supports:"
+	@echo "  -DASM686=on"
+	@echo "    if ON, enables building i686 assembly implementation"
+	@echo "  -DAMD64=on"
+	@echo "    if ON, enables building amd64 assembly implementation"
 
-################################################################################
-### @brief setup
-################################################################################
-
-.PHONY: setup
-
-setup:
-	@echo ACLOCAL
-	@aclocal -I m4
-	@echo AUTOMAKE
-	@automake --add-missing --force-missing --copy
-	@echo AUTOCONF
-	@autoconf -I m4
-	@echo auto system configured, proceed with configure
-
-################################################################################
-### @brief add maintainer files
-################################################################################
-
-MAINTAINER = \
-	README \
-	arangod/Aql/tokens.cpp \
-	arangod/Aql/grammar.cpp \
-	arangod/Aql/grammar.h \
-	lib/JsonParser/json-parser.cpp \
-	lib/V8/v8-json.cpp \
-	lib/Basics/voc-errors.h \
-	lib/Basics/voc-errors.cpp \
-	js/common/bootstrap/errors.js
-
-AUTOMAGIC = \
-	Makefile.in \
-	aclocal.m4 \
-	configure \
-	config/compile \
-	config/config.guess \
-	config/config.sub \
-	config/depcomp \
-	config/install-sh \
-	config/missing
-
-.PHONY: add-maintainer add-automagic
-
-add-maintainer:
-	@echo adding generated files to GIT
-	git add -f $(MAINTAINER)
-
-remove-maintainer:
-	@echo removing generated files from GIT
-	git rm -f $(MAINTAINER)
-
-add-automagic:
-	@echo adding automagic files to GIT
-	git add -f $(AUTOMAGIC)
-
-remove-automagic:
-	@echo removing automagic files from GIT
-	git rm -f $(AUTOMAGIC)
-
-################################################################################
-### @brief make love
-################################################################################
-
-love:
-	@echo ArangoDB loves you
 
 ## -----------------------------------------------------------------------------
 ## --SECTION--                                                     CMAKE & CPACK
@@ -96,42 +87,18 @@ DMG_NAME := ArangoDB-CLI.app
 
 pack-dmg:
 	rm -rf Build && mkdir Build
-
-	./configure \
-		--prefix=/opt/arangodb
-
 	${MAKE} pack-dmg-cmake
 
 pack-dmg-cmake:
 	cd Build && cmake \
-		-D "ARANGODB_VERSION=${VERSION}" \
-		-D "BUILD_PACKAGE=dmg-cli" \
-		-D "CMAKE_INSTALL_PREFIX=${prefix}" \
-		-D "CPACK_PACKAGE_VERSION_MAJOR=${VERSION_MAJOR}" \
-		-D "CPACK_PACKAGE_VERSION_MINOR=${VERSION_MINOR}" \
-		-D "CPACK_PACKAGE_VERSION_PATCH=${VERSION_PATCH}" \
-		-D "LIBEV_VERSION=${LIBEV_VERSION}" \
-		-D "READLINE_VERSION=${READLINE_VERSION}" \
-		-D "READLINE_INCLUDE=${READLINE_INCLUDE}" \
-		-D "READLINE_LIB_PATH=${READLINE_LIB_PATH}" \
-                -D "READLINE_LIBS=/usr/local/opt/readline/lib/libreadline.a;/usr/local/opt/readline/lib/libhistory.a;ncurses" \
-		-D "V8_VERSION=${V8_VERSION}" \
-		-D "ZLIB_VERSION=${ZLIB_VERSION}" \
+		-D "USE_OPTIMIZE_FOR_ARCHITECTURE=Off" \
+		-D "CMAKE_BUILD_TYPE=RelWithDebInfo" \
+		-D "CMAKE_OSX_DEPLOYMENT_TARGET=10.10" \
+		-D "CMAKE_INSTALL_PREFIX=/opt/arangodb" \
+		-D "OPENSSL_ROOT_DIR=`brew --prefix`/opt/openssl" \
 		..
 
-	${MAKE} .libev-build-64
-	${MAKE} .zlib-build-64
-	${MAKE} .v8-build-64
-
-	${MAKE} ${BUILT_SOURCES}
-
-	test -d bin || mkdir bin
-	make bin/etcd-arango
-
-	rm -f ./.file-list-js
 	cd Build && ${MAKE}
-
-	./Installation/file-copy-js.sh . Build
 
 	cd Build && cpack \
 		-G Bundle \
@@ -147,33 +114,18 @@ PACK_DESTDIR ?= .
 
 pack-macosxcode:
 	rm -rf Build && mkdir Build
-
-	./configure \
-		--prefix=/opt/arangodb
-
 	${MAKE} -f GNUMakefile pack-macosxcode-cmake MOREOPTS='$(MOREOPTS)'
 
 pack-macosxcode-cmake:
-	rm -f ./.file-list-js
 	cd Build && cmake \
-		-D "ARANGODB_VERSION=${VERSION}" \
-		-D "BUILD_PACKAGE=dmg-cli" \
-		-D "CMAKE_INSTALL_PREFIX=${prefix}" \
-		-D "CPACK_PACKAGE_VERSION_MAJOR=${VERSION_MAJOR}" \
-		-D "CPACK_PACKAGE_VERSION_MINOR=${VERSION_MINOR}" \
-		-D "CPACK_PACKAGE_VERSION_PATCH=${VERSION_PATCH}" \
-		-D "LIBEV_VERSION=${LIBEV_VERSION}" \
-		-D "READLINE_VERSION=${READLINE_VERSION}" \
-		-D "READLINE_INCLUDE=${READLINE_INCLUDE}" \
-		-D "READLINE_LIB_PATH=${READLINE_LIB_PATH}" \
-                -D "READLINE_LIBS=/usr/local/opt/readline/lib/libreadline.a;/usr/local/opt/readline/lib/libhistory.a;ncurses" \
-		-D "V8_VERSION=${V8_VERSION}" \
-		-D "ZLIB_VERSION=${ZLIB_VERSION}" \
+		-D "USE_OPTIMIZE_FOR_ARCHITECTURE=Off" \
+		-D "CMAKE_BUILD_TYPE=RelWithDebInfo" \
+		-D "CMAKE_OSX_DEPLOYMENT_TARGET=10.10" \
+		-D "CMAKE_INSTALL_PREFIX=/opt/arangodb" \
+		-D "OPENSSL_ROOT_DIR=`brew --prefix`/opt/openssl" \
 		-G Xcode \
 		$(MOREOPTS) \
 		..
-
-	./Installation/file-copy-js.sh . Build
 
 
 ################################################################################
@@ -187,42 +139,21 @@ PACK_DESTDIR ?= .
 pack-macosx:
 	rm -rf Build && mkdir Build
 
-	./configure \
-		--prefix=/opt/arangodb
-
 	${MAKE} pack-macosx-cmake MOREOPTS='$(MOREOPTS)'
 
 pack-macosx-cmake:
 	cd Build && cmake \
-		-D "ARANGODB_VERSION=${VERSION}" \
 		-D "BUILD_PACKAGE=dmg-cli" \
 		-D "CMAKE_INSTALL_PREFIX=${prefix}" \
-		-D "CPACK_PACKAGE_VERSION_MAJOR=${VERSION_MAJOR}" \
-		-D "CPACK_PACKAGE_VERSION_MINOR=${VERSION_MINOR}" \
-		-D "CPACK_PACKAGE_VERSION_PATCH=${VERSION_PATCH}" \
-		-D "LIBEV_VERSION=${LIBEV_VERSION}" \
-		-D "READLINE_VERSION=${READLINE_VERSION}" \
-		-D "READLINE_INCLUDE=${READLINE_INCLUDE}" \
-		-D "READLINE_LIB_PATH=${READLINE_LIB_PATH}" \
-                -D "READLINE_LIBS=/usr/local/opt/readline/lib/libreadline.a;/usr/local/opt/readline/lib/libhistory.a;ncurses" \
-		-D "V8_VERSION=${V8_VERSION}" \
-		-D "ZLIB_VERSION=${ZLIB_VERSION}" \
+		-D "OPENSSL_INCLUDE=`brew --prefix`/opt/openssl/include" \
+		-D "OPENSSL_LIB_PATH=`brew --prefix`/opt/openssl/lib" \
+		-D "OPENSSL_LIBS=`brew --prefix`/opt/openssl/lib/libssl.a;`brew --prefix`/opt/openssl/lib/libcrypto.a" \
 		$(MOREOPTS) \
 		..
-
-	${MAKE} .libev-build-64
-	${MAKE} .zlib-build-64
-	${MAKE} .v8-build-64
 
 	${MAKE} ${BUILT_SOURCES}
 
 	test -d bin || mkdir bin
-	make bin/etcd-arango
-
-	rm -f ./.file-list-js
-	cd Build && ${MAKE}
-
-	./Installation/file-copy-js.sh . Build
 
 	cd Build && ${MAKE} install DESTDIR=${PACK_DESTDIR}
 
@@ -235,42 +166,20 @@ pack-macosx-cmake:
 pack-arm:
 	rm -rf Build && mkdir Build
 
-	./configure \
-		--prefix=/usr \
-		--sysconfdir=/etc \
-		--localstatedir=/var
-
-	touch .libev-build-32
-	touch .v8-build-32
-	touch .zlib-build-32
-
 	${MAKE} pack-arm-cmake
 
 pack-arm-cmake:
 	cd Build && cmake \
-		-D "ARANGODB_VERSION=${VERSION}" \
 		-D "BUILD_PACKAGE=raspbian" \
 		-D "CMAKE_CXX_FLAGS_RELEASE:STRING=-O2 -DNDEBUG" \
 		-D "CMAKE_C_FLAGS_RELEASE:STRING=-O2 -DNDEBUG" \
 		-D "CMAKE_INSTALL_PREFIX=${prefix}" \
-		-D "CPACK_PACKAGE_VERSION_MAJOR=${VERSION_MAJOR}" \
-		-D "CPACK_PACKAGE_VERSION_MINOR=${VERSION_MINOR}" \
-		-D "CPACK_PACKAGE_VERSION_PATCH=${VERSION_PATCH}" \
 		-D "ETCDIR=${sysconfdir}" \
-		-D "LIBEV_VERSION=${LIBEV_VERSION}" \
-		-D "READLINE_VERSION=${READLINE_VERSION}" \
-		-D "V8_VERSION=${V8_VERSION}" \
 		-D "VARDIR=${localstatedir}" \
-		-D "ZLIB_VERSION=${ZLIB_VERSION}" \
 		$(MOREOPTS) \
 		..
 
 	${MAKE} ${BUILT_SOURCES}
-
-	rm -f ./.file-list-js
-	cd Build && ${MAKE}
-
-	./Installation/file-copy-js.sh . Build
 
 	cd Build && cpack -G DEB
 
@@ -278,28 +187,17 @@ pack-arm-cmake:
 pack-deb-cmake:
 	mkdir Build
 	cd Build && cmake \
-		-D "ARANGODB_VERSION=${VERSION}" \
 		-D "CMAKE_CXX_FLAGS_RELEASE:STRING=-O2 -DNDEBUG" \
 		-D "CMAKE_C_FLAGS_RELEASE:STRING=-O2 -DNDEBUG" \
 		-D "CMAKE_INSTALL_PREFIX=${prefix}" \
-		-D "CPACK_PACKAGE_VERSION_MAJOR=${VERSION_MAJOR}" \
-		-D "CPACK_PACKAGE_VERSION_MINOR=${VERSION_MINOR}" \
-		-D "CPACK_PACKAGE_VERSION_PATCH=${VERSION_PATCH}" \
 		-D "ETCDIR=${sysconfdir}" \
-		-D "LIBEV_VERSION=${LIBEV_VERSION}" \
-		-D "READLINE_VERSION=${READLINE_VERSION}" \
-		-D "V8_VERSION=${V8_VERSION}" \
 		-D "VARDIR=${localstatedir}" \
-		-D "ZLIB_VERSION=${ZLIB_VERSION}" \
 		$(MOREOPTS) \
 		..
 
 	${MAKE} ${BUILT_SOURCES}
 
-	rm -f ./.file-list-js
 	cd Build && ${MAKE}
-
-	./Installation/file-copy-js.sh . Build
 
 	cd Build && cpack -G DEB
 
@@ -310,98 +208,52 @@ pack-deb-cmake:
 .PHONY: pack-win32 pack-winXX winXX-cmake win64-relative win64-relative-debug
 
 pack-win32: 
-	$(MAKE) pack-winXX BITS=32 TARGET="Visual Studio 12"
+	$(MAKE) pack-winXX BITS=32 TARGET="Visual Studio 14" MOREOPTS='-D "V8_TARGET_ARCHS=Release"'
 
 pack-win64:
-	$(MAKE) pack-winXX BITS=64 TARGET="Visual Studio 12 Win64"
+	$(MAKE) pack-winXX BITS=64 TARGET="Visual Studio 14 Win64" MOREOPTS='-D "V8_TARGET_ARCHS=Release"'
 
 pack-win32-relative:
-	$(MAKE) pack-winXX BITS=32 TARGET="Visual Studio 12" MOREOPTS='-D "USE_RELATIVE=ON" -D "USE_MAINTAINER_MODE=ON" -D "USE_BACKTRACE=ON"'
+	$(MAKE) pack-winXX BITS=32 TARGET="Visual Studio 14" MOREOPTS='-D "USE_MAINTAINER_MODE=ON" -D "USE_BACKTRACE=ON" -D "V8_TARGET_ARCHS=Debug"'
 
 pack-win64-relative:
-	$(MAKE) pack-winXX BITS=64 TARGET="Visual Studio 12 Win64" MOREOPTS='-D "USE_RELATIVE=ON" -D "USE_MAINTAINER_MODE=ON" -D "USE_BACKTRACE=ON"'
+	$(MAKE) pack-winXX BITS=64 TARGET="Visual Studio 14 Win64" MOREOPTS='-D "USE_MAINTAINER_MODE=ON" -D "USE_BACKTRACE=ON" -D "V8_TARGET_ARCHS=Debug"' 
 
 win64-relative:
-	$(MAKE) winXX-cmake BITS=64 TARGET="Visual Studio 12 Win64" MOREOPTS='-D "USE_RELATIVE=ON"'
+	$(MAKE) winXX-cmake BITS=64 TARGET="Visual Studio 14 Win64" MOREOPTS='-D "V8_TARGET_ARCHS=Debug"'
 	$(MAKE) winXX-build BITS=64 BUILD_TARGET=RelWithDebInfo
 
 win64-relative-debug:
-	$(MAKE) winXX-cmake BITS=64 TARGET="Visual Studio 12 Win64" MOREOPTS='-D "USE_RELATIVE=ON" -D "USE_MAINTAINER_MODE=ON" -D "USE_BACKTRACE=ON"'
+	$(MAKE) winXX-cmake BITS=64 TARGET="Visual Studio 14 Win64" MOREOPTS=' -D "USE_MAINTAINER_MODE=ON" -D "USE_BACKTRACE=ON" -D "V8_TARGET_ARCHS=Debug"' 
 	$(MAKE) winXX-build BITS=64 BUILD_TARGET=Debug
 
 pack-winXX:
-	rm -rf Build$(BITS) && mkdir Build$(BITS)
+	rm -rf ../b && mkdir ../b
 
-	${MAKE} winXX-cmake BITS="$(BITS)" TARGET="$(TARGET)" VERSION="`awk '{print substr($$3,2,length($$3)-2);}' build.h`"
+	${MAKE} winXX-cmake BITS="$(BITS)" TARGET="$(TARGET)" BUILD_TARGET=RelWithDebInfo
 	${MAKE} winXX-build BITS="$(BITS)" TARGET="$(TARGET)" BUILD_TARGET=RelWithDebInfo
-	${MAKE} packXX BITS="$(BITS)"
+	${MAKE} packXX BITS="$(BITS)" BUILD_TARGET=RelWithDebInfo
 
 pack-winXX-MOREOPTS:
-	rm -rf Build$(BITS) && mkdir Build$(BITS)
+	rm -rf ../b && mkdir ../b
 
-	${MAKE} winXX-cmake BITS="$(BITS)" TARGET="$(TARGET)" VERSION="`awk '{print substr($$3,2,length($$3)-2);}' build.h`" MOREOPTS=$(MOREOPTS)
+	${MAKE} winXX-cmake BITS="$(BITS)" TARGET="$(TARGET)" MOREOPTS=$(MOREOPTS)
 	${MAKE} winXX-build BITS="$(BITS)" TARGET="$(TARGET)" BUILD_TARGET=Debug
 	${MAKE} packXX BITS="$(BITS)" TARGET="$(TARGET)" BUILD_TARGET=Debug
 
-winXX-cmake: checkcmake
-	rm -f ./.file-list-js
-	cd Build$(BITS) && cmake \
+winXX-cmake:
+	cd ../b && cmake \
 		-G "$(TARGET)" \
-		-D "ARANGODB_VERSION=${VERSION}" \
 		-D "CMAKE_BUILD_TYPE=RelWithDebInfo" \
 		-D "BUILD_TYPE=RelWithDebInfo" \
-		-D "CPACK_PACKAGE_VERSION_MAJOR=${VERSION_MAJOR}" \
-		-D "CPACK_PACKAGE_VERSION_MINOR=${VERSION_MINOR}" \
-		-D "CPACK_PACKAGE_VERSION_PATCH=${VERSION_PATCH}" \
-		-D "LIBEV_VERSION=4.11" \
-		-D "V8_VERSION=4.3.61" \
-		-D "ZLIB_VERSION=1.2.7" \
 		-D "BUILD_ID=${BUILD_ID}" \
 		$(MOREOPTS) \
-		..
+		../$(SRC)/
 
 winXX-build:
-	cp Installation/Windows/Icons/arangodb.ico Build$(BITS) 
-	cd Build$(BITS) && cmake --build . --config $(BUILD_TARGET)
+	cp Installation/Windows/Icons/arangodb.ico ../b
+	cd ../b && cmake --build . --config $(BUILD_TARGET)
 
 packXX:
-	./Installation/file-copy-js.sh . Build$(BITS)
-
-	cd Build$(BITS) && cp -a bin/RelWithDebInfo bin/Release
-	cd Build$(BITS) && cpack -G NSIS -D "BUILD_TYPE=RelWithDebInfo"
-	cd Build$(BITS) && cpack -G ZIP -D "BUILD_TARGET=RelWithDebInfo"
-
-	./Installation/Windows/installer-generator.sh $(BITS) $(shell pwd)
-
-checkcmake:
-	if test -z "`cmake --help |grep -i visual`"; then \
-		echo "Your cmake is not sufficient; it lacks support for visual studio." ; \
-		exit 1; \
-	fi
-
-
-################################################################################
-### @brief generates a tar archive
-################################################################################
-
-.PHONY: pack-tar pack-tar-config
-
-pack-tar-config:
-	./configure \
-		--prefix=/usr \
-		--sysconfdir=/etc \
-		--localstatedir=/var
-
-pack-tar:
-	rm -rf /tmp/pack-arangodb
-	make install-strip DESTDIR=/tmp/pack-arangodb
-	tar -c -v -z -f arangodb-$(VERSION).tar.gz -C /tmp/pack-arangodb .
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                       END-OF-FILE
-## -----------------------------------------------------------------------------
-
-## Local Variables:
-## mode: outline-minor
-## outline-regexp: "### @brief\\|## --SECTION--\\|# -\\*-"
-## End:
+	cd ../b && cpack -G NSIS64 -C $(BUILD_TARGET)
+	cd ../b && cpack -G ZIP  -C $(BUILD_TARGET)

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Write-ahead log synchronizer thread
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,167 +19,128 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "SynchronizerThread.h"
 
-#include "Basics/logging.h"
+#include "Basics/memory-map.h"
+#include "Logger/Logger.h"
 #include "Basics/ConditionLocker.h"
 #include "Basics/Exceptions.h"
-#include "VocBase/server.h"
+#include "VocBase/ticks.h"
 #include "Wal/LogfileManager.h"
 #include "Wal/Slots.h"
 #include "Wal/SyncRegion.h"
 
-using namespace triagens::wal;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                          class SynchronizerThread
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the synchronizer thread
-////////////////////////////////////////////////////////////////////////////////
-
-SynchronizerThread::SynchronizerThread (LogfileManager* logfileManager,
-                                        uint64_t syncInterval)
-  : Thread("WalSynchronizer"),
-    _logfileManager(logfileManager),
-    _condition(),
-    _waiting(0),
-    _stop(0),
-    _syncInterval(syncInterval),
-    _logfileCache({ 0, -1 }) {
-
-  allowAsynchronousCancelation();
+using namespace arangodb::wal;
+  
+/// @brief returns the bitmask for the synchronous waiters
+/// for use in _waiters only
+static constexpr inline uint64_t syncWaitersMask() {
+  return static_cast<uint64_t>(0xffffffffULL); 
 }
+  
+/// @brief returns the numbers of bits to shift to get the
+/// number of asynchronous waiters 
+/// for use in _waiters only
+static constexpr inline int asyncWaitersBits() { return 32; }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the synchronizer thread
-////////////////////////////////////////////////////////////////////////////////
+SynchronizerThread::SynchronizerThread(LogfileManager* logfileManager,
+                                       uint64_t syncInterval)
+    : Thread("WalSynchronizer"),
+      _logfileManager(logfileManager),
+      _condition(),
+      _syncInterval(syncInterval),
+      _logfileCache({0, -1}),
+      _waiting(0) {}
 
-SynchronizerThread::~SynchronizerThread () {
-}
+/// @brief begin shutdown sequence
+void SynchronizerThread::beginShutdown() {
+  Thread::beginShutdown();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stops the synchronizer thread
-////////////////////////////////////////////////////////////////////////////////
-
-void SynchronizerThread::stop () {
-  if (_stop > 0) {
-    return;
-  }
-
-  _stop = 1;
-  _condition.signal();
-
-  while (_stop != 2) {
-    usleep(10000);
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief signal that we need a sync
-////////////////////////////////////////////////////////////////////////////////
-
-void SynchronizerThread::signalSync () {
   CONDITION_LOCKER(guard, _condition);
-  ++_waiting;
-  _condition.signal();
+  guard.signal();
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    Thread methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief main loop
-////////////////////////////////////////////////////////////////////////////////
-
-void SynchronizerThread::run () {
-  uint64_t iterations = 0;
-  uint32_t waiting;
-    
-  {
-    // fetch initial value for waiting
-    CONDITION_LOCKER(guard, _condition);
-    waiting = _waiting;
+/// @brief signal that we need a sync
+void SynchronizerThread::signalSync(bool waitForSync) {
+  if (waitForSync) {
+    uint64_t previous = _waiting.fetch_add(1);
+    if ((previous & syncWaitersMask()) == 0) {
+      // only signal once, but don't care if we signal a bit too often
+      CONDITION_LOCKER(guard, _condition);
+      _condition.signal();
+    }
+  } else {
+    uint64_t updateValue = 1ULL << asyncWaitersBits();
+    _waiting.fetch_add(updateValue);
   }
+}
 
-  // go on without the lock
+/// @brief main loop
+void SynchronizerThread::run() {
+  // fetch initial value for waiting
+  uint64_t waitingValue = _waiting;
+  uint64_t waitingWithoutSync = waitingValue >> asyncWaitersBits();
+  uint64_t waitingWithSync = (waitingValue & syncWaitersMask());
 
+  uint64_t iterations = 0;
   while (true) {
-    int stop = (int) _stop;
-
-    if (waiting > 0 || ++iterations == 10) {
+    if (waitingWithoutSync > 0 || waitingWithSync > 0 || ++iterations == 10) {
       iterations = 0;
 
       try {
         // sync as much as we can in this loop
         bool checkMore = false;
+
         while (true) {
           int res = doSync(checkMore);
 
-          if (res != TRI_ERROR_NO_ERROR || ! checkMore) {
+          if (res != TRI_ERROR_NO_ERROR || !checkMore) {
             break;
           }
         }
-      }
-      catch (triagens::basics::Exception const& ex) {
+      } catch (arangodb::basics::Exception const& ex) {
         int res = ex.code();
-        LOG_ERROR("got unexpected error in synchronizerThread: %s", TRI_errno_string(res));
+        LOG(ERR) << "got unexpected error in synchronizerThread: "
+                 << TRI_errno_string(res);
+      } catch (...) {
+        LOG(ERR) << "got unspecific error in synchronizerThread";
       }
-      catch (...) {
-        LOG_ERROR("got unspecific error in synchronizerThread");
-      }
-    }
-
-    // now wait until we are woken up or there is something to do
-    CONDITION_LOCKER(guard, _condition);
-
-    if (waiting > 0) {
-      TRI_ASSERT(_waiting >= waiting);
-      _waiting -= waiting;
     }
 
     // update value of waiting
-    waiting = _waiting;
+    uint64_t updateValue = waitingWithSync + (waitingWithoutSync << asyncWaitersBits());
 
-    if (waiting == 0) {
-      if (stop > 0) {
+    if (updateValue > 0) {
+      // subtract and fetch previous value in one atomic operation
+      waitingValue = _waiting.fetch_sub(updateValue);
+      waitingValue -= updateValue; // subtract from previous value
+    } else {
+      // re-fetch current value
+      waitingValue = _waiting;
+    }
+
+    waitingWithoutSync = waitingValue >> asyncWaitersBits();
+    waitingWithSync = (waitingValue & syncWaitersMask());
+
+    // now wait until we are woken up or there is something to do
+
+    if (waitingWithSync == 0) {
+      if (isStopping()) {
         // stop requested and all synced, we can exit
         break;
       }
 
       // sleep if nothing to do
+      CONDITION_LOCKER(guard, _condition);
       guard.wait(_syncInterval);
     }
-
-    // next iteration
   }
-
-  _stop = 2;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief synchronize an unsynchronized region
-////////////////////////////////////////////////////////////////////////////////
-
-int SynchronizerThread::doSync (bool& checkMore) {
+int SynchronizerThread::doSync(bool& checkMore) {
   checkMore = false;
 
   // get region to sync
@@ -197,7 +154,8 @@ int SynchronizerThread::doSync (bool& checkMore) {
 
   // now perform the actual syncing
   auto status = region.logfileStatus;
-  TRI_ASSERT(status == Logfile::StatusType::OPEN || status == Logfile::StatusType::SEAL_REQUESTED);
+  TRI_ASSERT(status == Logfile::StatusType::OPEN ||
+             status == Logfile::StatusType::SEAL_REQUESTED);
 
   // get the logfile's file descriptor
   int fd = getLogfileDescriptor(region.logfileId);
@@ -205,15 +163,12 @@ int SynchronizerThread::doSync (bool& checkMore) {
 
   bool result = TRI_MSync(fd, region.mem, region.mem + region.size);
 
-  LOG_TRACE("syncing logfile %llu, region %p - %p, length: %lu, wfs: %s",
-            (unsigned long long) id,
-            region.mem,
-            region.mem + region.size,
-            (unsigned long) region.size,
-            region.waitForSync ? "true" : "false");
+  LOG(TRACE) << "syncing logfile " << id << ", region " << (void*) region.mem << " - "
+             << (void*)(region.mem + region.size) << ", length: " << region.size
+             << ", wfs: " << (region.waitForSync ? "true" : "false");
 
-  if (! result) {
-    LOG_ERROR("unable to sync wal logfile region");
+  if (!result) {
+    LOG(ERR) << "unable to sync wal logfile region";
 
     return TRI_ERROR_ARANGO_MSYNC_FAILED;
   }
@@ -237,7 +192,7 @@ int SynchronizerThread::doSync (bool& checkMore) {
     //   // some thread now requests flushing logs. this will produce a
     //   // sync region from slot 1..slot 1.
     //   logfileManager->flush(false, false, false);
-    // 
+    //
     //   // if we now return slot2, it would produce a sync region from
     //   // slot2..slot3. this is fine but won't work if the logfile is
     //   // already sealed.
@@ -248,33 +203,19 @@ int SynchronizerThread::doSync (bool& checkMore) {
       _logfileManager->setLogfileSealed(id);
     }
   }
-  
+
   checkMore = region.checkMore;
 
   _logfileManager->slots()->returnSyncRegion(region);
   return TRI_ERROR_NO_ERROR;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief get a logfile descriptor (it caches the descriptor for performance)
-////////////////////////////////////////////////////////////////////////////////
-
-int SynchronizerThread::getLogfileDescriptor (Logfile::IdType id) {
-  if (id != _logfileCache.id ||
-      _logfileCache.id == 0) {
-
+int SynchronizerThread::getLogfileDescriptor(Logfile::IdType id) {
+  if (id != _logfileCache.id || _logfileCache.id == 0) {
     _logfileCache.id = id;
     _logfileCache.fd = _logfileManager->getLogfileDescriptor(id);
   }
 
   return _logfileCache.fd;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

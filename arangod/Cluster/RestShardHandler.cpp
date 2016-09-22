@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief shard control request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,99 +19,48 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestShardHandler.h"
-#include "Basics/ConditionLocker.h"
+#include "Basics/StaticStrings.h"
 #include "Cluster/ServerState.h"
 #include "Cluster/ClusterComm.h"
 #include "Dispatcher/Dispatcher.h"
-#include "HttpServer/HttpServer.h"
-#include "HttpServer/HttpHandlerFactory.h"
 #include "Rest/HttpRequest.h"
 #include "Rest/HttpResponse.h"
 
-using namespace std;
-using namespace triagens::arango;
-using namespace triagens::rest;
+using namespace arangodb;
+using namespace arangodb::rest;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+RestShardHandler::RestShardHandler(GeneralRequest* request,
+                                   GeneralResponse* response)
+    : RestBaseHandler(request, response) {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+bool RestShardHandler::isDirect() const { return true; }
 
-RestShardHandler::RestShardHandler (triagens::rest::HttpRequest* request,
-                                    Dispatcher* data)
-  : RestBaseHandler(request),
-    _dispatcher(data) {
-  TRI_ASSERT(_dispatcher != nullptr);
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-bool RestShardHandler::isDirect () const {
-  return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-triagens::rest::HttpHandler::status_t RestShardHandler::execute () {
-  // Deactivated to allow for asynchronous cluster internal communication 
-  // between two DBservers. 30.7.2014 Max.
-#if 0
-  ServerState::RoleEnum role = ServerState::instance()->getRole();
-  if (role != ServerState::ROLE_COORDINATOR) {
-    generateError(triagens::rest::HttpResponse::BAD,
-                  (int) triagens::rest::HttpResponse::BAD,
-                  "this API is meant to be called on a coordinator node");
-    return status_t(HANDLER_DONE);
-  }
-#endif
-
+RestHandler::status RestShardHandler::execute() {
   bool found;
-  char const* _coordinator = _request->header("x-arango-coordinator", found);
+  std::string const& _coordinator =
+      _request->header(StaticStrings::Coordinator, found);
 
-  if (! found) {
-    generateError(triagens::rest::HttpResponse::BAD,
-                  (int) triagens::rest::HttpResponse::BAD,
+  if (!found) {
+    generateError(arangodb::rest::ResponseCode::BAD,
+                  (int)arangodb::rest::ResponseCode::BAD,
                   "header 'X-Arango-Coordinator' is missing");
-    return status_t(HANDLER_DONE);
+    return status::DONE;
   }
 
-  string coordinatorHeader = _coordinator;
-  string result = ClusterComm::instance()->processAnswer(coordinatorHeader,
-                                                         stealRequest());
+  std::string coordinatorHeader = _coordinator;
+  std::string result =
+      ClusterComm::instance()->processAnswer(coordinatorHeader, stealRequest());
 
   if (result == "") {
-    _response = createResponse(triagens::rest::HttpResponse::ACCEPTED);
-  }
-  else {
-    generateError(triagens::rest::HttpResponse::BAD,
-                  (int) triagens::rest::HttpResponse::BAD,
+    resetResponse(arangodb::rest::ResponseCode::ACCEPTED);
+  } else {
+    generateError(arangodb::rest::ResponseCode::BAD,
+                  (int)arangodb::rest::ResponseCode::BAD,
                   result.c_str());
   }
 
-  return status_t(HANDLER_DONE);
+  return status::DONE;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

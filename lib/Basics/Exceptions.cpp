@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief basic exceptions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,18 +19,12 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2009-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Exceptions.h"
+#include "Logger/Logger.h"
 
-using namespace std;
-using namespace triagens::basics;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
+using namespace arangodb::basics;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief controls if backtraces are printed with exceptions
@@ -42,63 +32,23 @@ using namespace triagens::basics;
 
 static bool WithBackTrace = false;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   class Exception
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief controls whether a backtrace is created for each exception
 ////////////////////////////////////////////////////////////////////////////////
 
-void Exception::SetVerbose (bool verbose) {
-  WithBackTrace = verbose;
-}
+void Exception::SetVerbose(bool verbose) { WithBackTrace = verbose; }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructor, without format string
 ////////////////////////////////////////////////////////////////////////////////
 
-Exception::Exception (int code,
-                      char const* file,
-                      int line)
-  : _errorMessage(TRI_errno_string(code)),
-    _file(file),
-    _line(line),
-    _code(code) {
+Exception::Exception(int code, char const* file, int line)
+    : _errorMessage(TRI_errno_string(code)),
+      _file(file),
+      _line(line),
+      _code(code) {
 
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-#if HAVE_BACKTRACE
-  if (WithBackTrace) {
-    _errorMessage += std::string("\n\n");
-    TRI_GetBacktrace(_errorMessage);
-    _errorMessage += std::string("\n\n");
-  }
-#endif
-#endif
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the error message
-////////////////////////////////////////////////////////////////////////////////
-
-string Exception::message () const throw () {
-  return _errorMessage;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the error code
-////////////////////////////////////////////////////////////////////////////////
-
-int Exception::code () const throw () {
-  return _code;
-}
-        
-////////////////////////////////////////////////////////////////////////////////
-/// @brief adds to the message
-////////////////////////////////////////////////////////////////////////////////
-
-void Exception::addToMessage (string More) {
-  _errorMessage += More;
+  appendLocation();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -106,17 +56,62 @@ void Exception::addToMessage (string More) {
 /// error message (normally based on error templates containing %s, %d etc.)
 ////////////////////////////////////////////////////////////////////////////////
 
-Exception::Exception (int code,
-                      string const& errorMessage,
-                      char const* file,
-                      int line)
-  : _errorMessage(errorMessage),
-    _file(file),
-    _line(line),
-    _code(code) {
+Exception::Exception(int code, std::string const& errorMessage,
+                     char const* file, int line)
+    : _errorMessage(errorMessage), _file(file), _line(line), _code(code) {
 
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-#if HAVE_BACKTRACE
+  appendLocation();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief constructor, for creating an exception with an already created
+/// error message (normally based on error templates containing %s, %d etc.)
+////////////////////////////////////////////////////////////////////////////////
+
+Exception::Exception(int code, char const* errorMessage, char const* file,
+                     int line)
+    : _errorMessage(errorMessage), _file(file), _line(line), _code(code) {
+
+  appendLocation();
+}
+
+Exception::~Exception() throw() {}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief returns the error message
+////////////////////////////////////////////////////////////////////////////////
+
+std::string Exception::message() const throw() { return _errorMessage; }
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief returns the error code
+////////////////////////////////////////////////////////////////////////////////
+
+int Exception::code() const throw() { return _code; }
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief adds to the message
+////////////////////////////////////////////////////////////////////////////////
+
+void Exception::addToMessage(std::string const& more) { _errorMessage += more; }
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief return exception message
+////////////////////////////////////////////////////////////////////////////////
+
+char const* Exception::what() const throw() { return _errorMessage.c_str(); }
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief append original error location to message
+////////////////////////////////////////////////////////////////////////////////
+
+void Exception::appendLocation () {
+  if (_code == TRI_ERROR_INTERNAL) {
+    _errorMessage += std::string(" (exception location: ") + _file + ":" + std::to_string(_line) + "). Please report this error to arangodb.com";
+  }
+
+#ifdef ARANGODB_ENABLE_MAINTAINER_MODE
+#if ARANGODB_ENABLE_BACKTRACE
   if (WithBackTrace) {
     _errorMessage += std::string("\n\n");
     TRI_GetBacktrace(_errorMessage);
@@ -127,29 +122,14 @@ Exception::Exception (int code,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-Exception::~Exception () throw () {
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return exception message
-////////////////////////////////////////////////////////////////////////////////
-
-const char* Exception::what () const throw () {
-  return _errorMessage.c_str();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief construct an error message from a template string
 ////////////////////////////////////////////////////////////////////////////////
-        
-std::string Exception::FillExceptionString (int code, ...) {
+
+std::string Exception::FillExceptionString(int code, ...) {
   char const* format = TRI_errno_string(code);
   TRI_ASSERT(format != nullptr);
 
-#ifdef TRI_ENABLE_MAINTAINER_MODE
+#ifdef ARANGODB_ENABLE_MAINTAINER_MODE
   // Obviously the formatstring of the error code has to support parameters.
   TRI_ASSERT(strchr(format, '%') != nullptr);
 #endif
@@ -159,7 +139,7 @@ std::string Exception::FillExceptionString (int code, ...) {
   va_start(ap, code);
   vsnprintf(buffer, sizeof(buffer) - 1, format, ap);
   va_end(ap);
-  buffer[sizeof(buffer) - 1] = '\0'; // Windows
+  buffer[sizeof(buffer) - 1] = '\0';  // Windows
 
   return std::string(buffer);
 }
@@ -167,11 +147,11 @@ std::string Exception::FillExceptionString (int code, ...) {
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief construct an error message from a template string
 ////////////////////////////////////////////////////////////////////////////////
-        
-std::string Exception::FillFormatExceptionString (char const* format, ...) {
+
+std::string Exception::FillFormatExceptionString(char const* format, ...) {
   TRI_ASSERT(format != nullptr);
 
-#ifdef TRI_ENABLE_MAINTAINER_MODE
+#ifdef ARANGODB_ENABLE_MAINTAINER_MODE
   // Format #1 should come from the macro...
   TRI_ASSERT(strchr(format, '%') != nullptr);
   // Obviously the user has to give us a format string.
@@ -183,17 +163,7 @@ std::string Exception::FillFormatExceptionString (char const* format, ...) {
   va_start(ap, format);
   vsnprintf(buffer, sizeof(buffer) - 1, format, ap);
   va_end(ap);
-  buffer[sizeof(buffer) - 1] = '\0'; // Windows
+  buffer[sizeof(buffer) - 1] = '\0';  // Windows
 
   return std::string(buffer);
 }
-
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

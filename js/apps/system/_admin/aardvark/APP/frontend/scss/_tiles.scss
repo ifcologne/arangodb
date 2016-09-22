@@ -1,7 +1,11 @@
 .tileList {
   @extend %clear-float;
-  margin-left: -6px;
-  margin-right: -6px;
+  //margin-left: -6px;
+  //margin-right: -6px;
+  left: 10px;
+  padding-top: 5px;
+  position: absolute;
+  right: 10px;
 
   legend {
     padding-left: 5px;
@@ -24,26 +28,77 @@ $iconsize: 50px;
   @extend %pull-left;
   @include box-shadow(none);
 
-  background-color: $c-white;
-  border: 1px solid $c-lightgreen-2-bg;
-  border-radius: 3px;
+  //background-color: $c-white;
+  //border: 1px solid $c-lightgreen-2-bg;
+  border-radius: 2px;
   font-size: 14px;
   list-style: none;
   margin: {
     bottom: 13px;
-    left: 6px;
-    right: 6px;
+    //left: 6px;
+    //right: 6px;
   }
   position: relative;
   text-align: center;
+
+  z-index: 1;
+
+  progress[value] {
+    color: $c-progress-bar;
+  }
+
+  progress::-webkit-progress-bar-value {
+    background: $c-progress-bar;
+  }
+
+  progress::-webkit-progress-value {
+    background: $c-progress-bar;
+  }
+
+  progress::-moz-progress-bar {
+    background: $c-progress-bar;
+  }
+
+  progress {
+    -webkit-appearance: none;
+    border-radius: 0;
+    height: 2px;
+    margin-top: 16px;
+    position: relative;
+    width: 100%;
+    z-index: 10;
+  }
 
   &:hover {
     cursor: pointer;
   }
 
+  &.locked {
+    cursor: not-allowed;
+
+    .iconSet,
+    .borderBox,
+    .collection-type-icon,
+    .collectionName {
+      opacity: .5;
+    }
+
+    .iconSet {
+      span:hover {
+        background-color: $c-white !important;
+        color: $c-black;
+        cursor: not-allowed !important;
+      }
+    }
+
+    .iconSet:hover {
+      cursor: not-allowed !important;
+    }
+  }
+
   .warning-icons {
     background-color: $c-negative;
-    border-radius: 3px;
+    border-radius: 2px;
     color: $c-white;
     font-size: 11px;
     height: 17px;
@@ -66,7 +121,9 @@ $iconsize: 50px;
   .collection-type-icon {
     color: $c-darker-grey;
     font-size: 30pt;
-    margin-top: 12pt;
+    margin-left: -18px;
+    position: absolute;
+    top: 15px;
   }
 
   .collection-type-icon:hover {
@@ -78,6 +135,7 @@ $iconsize: 50px;
 
     &.icon {
       height: $iconsize;
+      margin-top: -110px;
       width: $iconsize;
     }
 
@@ -92,13 +150,11 @@ $iconsize: 50px;
 
       &.add-Icon {
         @extend %pull-left;
-        font-size: 22px;
+        font-size: 20px;
         margin-left: 22px;
         margin-right: 10px;
-        margin-top: -5px;
         position: relative;
-        right: 4px;
-        top: 2px;
+        top: 0;
       }
 
       &.icon {
@@ -121,8 +177,10 @@ $iconsize: 50px;
     cursor: pointer;
     fill: $c-icon-grey;
     height: $iconsize;
-    margin-left: 90px;
-    margin-top: 10px;
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: -63px;
+    position: relative;
     width: $iconsize;
   }
 
@@ -130,26 +188,41 @@ $iconsize: 50px;
     color: $c-icon-grey;
     font-size: $iconsize;
     line-height: 1.2;
+    margin-left: -50px;
+    top: 10px;
+  }
+
+  .icon_arangodb_edge5-2,
+  .tile-icon {
+    position: absolute;
+    top: 15px;
   }
 
   .icon_arangodb_edge5-2 {
     display: inline-block;
-    position: relative;
-    top: 15px;
+    margin-left: 5px;
+    position: absolute;
+    top: 0;
     -moz-transform: rotate(80deg);
     -o-transform: rotate(80deg);
     -webkit-transform: rotate(80deg);
   }
 
   h5 {
-    background: $c-new-grey;
+    background: $c-bluegrey-light;
     color: $c-white;
     font-size: 12px;
     margin: 0;
+    margin-left: 5px;
+    margin-right: 5px;
     overflow: hidden !important;
     padding: 4px 8px;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
+
+    &.inProgress {
+      color: $c-progress-bar;
+    }
   }
 
   .tileSelects {
@@ -167,19 +240,40 @@ $iconsize: 50px;
   }
 
   .fullBorderBox {
+    background-color: $c-white;
     border: 1px solid $c-tile-border;
-    border-radius: 3px;
+    border-radius: 2px;
+    box-sizing: border-box;
     height: 100%;
-    position: absolute;
-    width: 100%;
+    margin-left: 5px;
+    margin-right: 5px;
+    position: relative;
+    width: auto;
+
+    .add {
+      color: $c-bluegrey-dark;
+
+      span {
+        color: $c-positive;
+      }
+    }
+  }
+
+  .paddingBox {
+    box-sizing: border-box;
+    padding-left: 5px;
+    padding-right: 5px;
   }
 
   .borderBox {
-    border: 1px solid $c-tile-border;
-    border-radius: 3px;
+    background-color: $c-white;
+    border: 1px solid $c-bluegrey-border;
+    border-bottom: 0;
+    border-radius: 2px;
+    box-sizing: border-box;
     height: 75px;
-    position: absolute;
-    width: 224px;
+    position: relative;
+    width: 100%;
   }
 
   .iconSet {
@@ -190,13 +284,14 @@ $iconsize: 50px;
     span {
       @extend %clickable;
       @extend %pull-right;
-      border-radius: 3px;
+      border-radius: 2px;
       color: $c-darker-grey;
       font-size: 18px;
       padding-bottom: 2px;
       padding-left: 3px;
       padding-right: 3px;
       padding-top: 2px;
+      z-index: 2;
 
       &:hover {
         background-color: $c-positive;
@@ -224,7 +319,6 @@ $iconsize: 50px;
   .unloaded div {
     border-bottom: 16px solid $c-unloaded;
   }
-
 
   .deleted div {
     border-bottom: 16px solid $c-state-critical;
@@ -256,11 +350,11 @@ $iconsize: 50px;
           }
           left: 5px solid $c-transp;
         }
-        border-radius: 3px;
+        border-radius: 2px;
         color: $c-white;
         height: 0;
         margin-bottom: 4px;
-        margin-right: 5px;
+        margin-right: 10px;
         padding-left: 1px;
         padding-right: 6px;
 
@@ -270,6 +364,14 @@ $iconsize: 50px;
 
         &.loaded {
           border-bottom-color: $c-positive;
+        }
+
+        &.corrupted {
+          border-bottom-color: $c-negative;
+        }
+
+        &.inProgress {
+          border-bottom-color: $c-progress-bar;
         }
 
         &.unloaded {
@@ -289,10 +391,16 @@ div {
   .tile {
     @extend %tile;
     height: 100px;
-    width: $tile-width - 14px;
+    //width: $tile-width - 14px;
   }
 
   .tile-graph {
+
+    h5 {
+      margin-left: 5px;
+      margin-right: 5px;
+    }
+
     .tile-icon:hover {
       cursor: pointer;
     }
@@ -315,8 +423,8 @@ div {
 }
 
 .collectionName {
-  border-bottom-left-radius: 3px;
-  border-bottom-right-radius: 3px;
+  border-bottom-left-radius: 2px;
+  border-bottom-right-radius: 2px;
   bottom: 0;
   font-weight: 300;
   left: 0;
@@ -325,3 +433,14 @@ div {
   text-align: left;
 }
 
+#userManagementThumbnailsIn {
+  .tile {
+    .paddingBox {
+      img {
+        border-radius: 58px;
+        margin-top: -99px;
+        padding: 0;
+      }
+    }
+  }
+}

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief shell colors
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,18 +19,10 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_BASICS_C_SHELL__COLORS_H
-#define ARANGODB_BASICS_C_SHELL__COLORS_H 1
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public constants
-// -----------------------------------------------------------------------------
-
-#ifndef _WIN32
+#ifndef ARANGODB_BASICS_SHELL__COLORS_H
+#define ARANGODB_BASICS_SHELL__COLORS_H 1
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief color red
@@ -106,7 +94,7 @@
 /// @brief color bold black
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_SHELL_COLOR_BOLD_BLACK "\x1b[1;39m"
+#define TRI_SHELL_COLOR_BOLD_BLACK "\x1b[1;30m"
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief color cyan
@@ -150,40 +138,4 @@
 
 #define TRI_SHELL_COLOR_RESET "\x1b[0m"
 
-#else
-  // .............................................................................
-  // Quick hack for windows
-  // .............................................................................
-
-#define TRI_SHELL_COLOR_RED ""
-#define TRI_SHELL_COLOR_BOLD_RED ""
-#define TRI_SHELL_COLOR_GREEN ""
-#define TRI_SHELL_COLOR_BOLD_GREEN ""
-#define TRI_SHELL_COLOR_BLUE ""
-#define TRI_SHELL_COLOR_BOLD_BLUE ""
-#define TRI_SHELL_COLOR_YELLOW ""
-#define TRI_SHELL_COLOR_BOLD_YELLOW ""
-#define TRI_SHELL_COLOR_WHITE ""
-#define TRI_SHELL_COLOR_BOLD_WHITE ""
-#define TRI_SHELL_COLOR_CYAN ""
-#define TRI_SHELL_COLOR_BOLD_CYAN ""
-#define TRI_SHELL_COLOR_MAGENTA ""
-#define TRI_SHELL_COLOR_BOLD_MAGENTA ""
-#define TRI_SHELL_COLOR_BLACK ""
-#define TRI_SHELL_COLOR_BOLD_BLACK ""
-#define TRI_SHELL_COLOR_BLINK ""
-#define TRI_SHELL_COLOR_BRIGHT ""
-#define TRI_SHELL_COLOR_RESET ""
-
 #endif
-
-#endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

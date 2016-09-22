@@ -1,991 +1,912 @@
 # -*- mode: CMAKE; -*-
 
-## -----------------------------------------------------------------------------
-## --SECTION--                                                    COMMON DEFINES
-## -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# General
+# ------------------------------------------------------------------------------
 
-################################################################################
-### @brief required cmake version
-################################################################################
+cmake_minimum_required(VERSION 2.8)
 
-cmake_minimum_required(VERSION 2.6)
+if (POLICY CMP0037)
+  cmake_policy(SET CMP0037 NEW)
+endif ()
 
-################################################################################
-### @brief cmake build types
-################################################################################
+if (POLICY CMP0017)
+  cmake_policy(SET CMP0017 NEW)
+endif ()
 
 if (NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE string "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." FORCE)
+  set(CMAKE_BUILD_TYPE Release CACHE string "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." FORCE)
+endif ()
+
+if (NOT (CMAKE_BUILD_TYPE STREQUAL "Debug"
+      OR CMAKE_BUILD_TYPE STREQUAL "Release"
+      OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"
+      OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"
+      OR CMAKE_BUILD_TYPE STREQUAL "None"))
+  message(FATAL_ERROR "expecting CMAKE_BUILD_TYPE: None Debug Release RelWithDebInfo MinSizeRel, got ${CMAKE_BUILD_TYPE}.")
+endif ()
+
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.11" CACHE STRING "deployment target for MacOSX; adjust to your sysem")
+
+if (WIN32)
+  project(arangodb3 CXX C)
+else ()
+  project(arangodb3 CXX C ASM)
+endif ()
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# where to find CMAKE modules
+set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+
+# be verbose about flags used
+option(VERBOSE OFF)
+
+# enable timer for development
+option(USE_DEV_TIMERS OFF)
+
+if (USE_DEV_TIMERS)
+  add_definitions("-DUSE_DEV_TIMERS=1")
+endif ()
+
+# enable enterprise features
+set(ENTERPRISE_INCLUDE_DIR "enterprise")
+option(USE_ENTERPRISE OFF)
+
+if (USE_ENTERPRISE)
+  add_definitions("-DUSE_ENTERPRISE=1")
+  include_directories(${ENTERPRISE_INCLUDE_DIR})
+  add_subdirectory(enterprise)
 endif ()
 
 ################################################################################
-### @brief arangodb project
+## ARANGODB
 ################################################################################
 
-project(arangodb)
+set(ARANGODB_VERSION_MAJOR      "3")
+set(ARANGODB_VERSION_MINOR      "0")
+set(ARANGODB_VERSION_REVISION   "devel")
+set(ARANGODB_PACKAGE_REVISION   "1")
 
+set(ARANGODB_VERSION
+    "${ARANGODB_VERSION_MAJOR}.${ARANGODB_VERSION_MINOR}.${ARANGODB_VERSION_REVISION}")
+
+# for the packages
+set(ARANGODB_PACKAGE_VENDOR  "ArangoDB GmbH")
+set(ARANGODB_PACKAGE_CONTACT "info@arangodb.com")
+set(ARANGODB_DISPLAY_NAME       "ArangoDB")
+set(ARANGODB_URL_INFO_ABOUT     "https://www.arangodb.com")
+set(ARANGODB_HELP_LINK          "https://docs.arangodb.com/${ARANGODB_VERSION_MAJOR}.${ARANGODB_VERSION_MINOR}/")
+set(ARANGODB_CONTACT            "hackers@arangodb.com")
+set(ARANGODB_FRIENDLY_STRING    "ArangoDB - the multi-model database")
+
+# MSVC
+set(ARANGO_BENCH_FRIENDLY_STRING   "arangobench - stress test program")
+set(ARANGO_DUMP_FRIENDLY_STRING    "arangodump - export")
+set(ARANGO_RESTORE_FRIENDLY_STRING "arangrestore - importer")
+set(ARANGO_IMP_FRIENDLY_STRING     "arangoimp - TSV/CSV/JSON importer")
+set(ARANGOSH_FRIENDLY_STRING       "arangosh - commandline client")
+set(ARANGO_VPACK_FRIENDLY_STRING   "arangovpack - vpack printer")
+
+# libraries
 set(LIB_ARANGO        arango)
-set(LIB_ARANGO_CLIENT arango_client)
 set(LIB_ARANGO_V8     arango_v8)
 
-set(BIN_ARANGOB       arangob)
+# binaries
+set(BIN_ARANGOBENCH   arangobench)
 set(BIN_ARANGOD       arangod)
 set(BIN_ARANGODUMP    arangodump)
 set(BIN_ARANGOIMP     arangoimp)
 set(BIN_ARANGORESTORE arangorestore)
 set(BIN_ARANGOSH      arangosh)
+set(BIN_ARANGOVPACK   arangovpack)
 
+# test binaries
 set(TEST_BASICS_SUITE basics_suite)
 set(TEST_GEO_SUITE    geo_suite)
-
-set(V8_VERSION        4.3.61)
-
-set(ARANGODB_DISPLAY_NAME       "ArangoDB")
-set(ARANGODB_URL_INFO_ABOUT     "http://www.arangodb.org")
-set(ARANGODB_CONTACT            "hackers@arangodb.org")
-
-set(ARANGODB_FRIENDLY_STRING    "ArangoDB - the multi-purpose database")
-set(ARANGOB_FRIENDLY_STRING     "ArangoBench - stresstester")
-set(ARANGO_DUMP_FRIENDLY_STRING "arangodump - export whole databases from ArangoDB to JSON")
-set(ARANGO_IMP_FRIENDLY_STRING  "arangoimp - import CSV files into ArangoDB")
-set(ARANGO_RESTORE_HELP_LINK    "arangrestore - import dumpfiles created with arangodump into ArangoDB")
-set(ARANGOSH_HELP_LINK          "arangosh - commandline client of ArangoDB")
-
-
+set(PACKAGES_LIST)
 ################################################################################
-### @brief BUILD_PACKAGE
-###
-### Posible options are:
-### - dmg-cli: Mac OS X shell client application
-### - debian: debian package
-### - raspbian: raspberry debian package
+## VERSION FILES
 ################################################################################
 
-set(BUILD_PACKAGE "unknown" CACHE path "Package type to build")
-
-################################################################################
-### @brief GNU C/C++ compiler
-################################################################################
-
-if (CMAKE_COMPILER_IS_GNUCC)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu89 -g")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -g")
+if (${CMAKE_MAJOR_VERSION} EQUAL 2)
+  set(ARANGODB_BUILD_DATE "YYYY-MM-DD HH:MM:SS")
+else ()
+  string(TIMESTAMP ARANGODB_BUILD_DATE "%Y-%m-%d %H:%M:%S")
 endif ()
 
-if (CMAKE_COMPILER_IS_GNUCXX)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -g")
-endif ()
+configure_file (
+  "${CMAKE_CURRENT_SOURCE_DIR}/lib/Basics/build.h.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/lib/Basics/build.h"
+  NEWLINE_STYLE UNIX
+)
 
-if (APPLE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -g")
-  add_definitions("-Wno-deprecated-declarations")
-endif ()
+configure_file (
+  "${CMAKE_CURRENT_SOURCE_DIR}/lib/Basics/build-date.h.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/lib/Basics/build-date.h"
+  NEWLINE_STYLE UNIX
+)
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/lib/Basics/VERSION.in"
+  "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+  NEWLINE_STYLE UNIX
+)
+
 
 ################################################################################
-### @brief Visual Studio Compiler
-################################################################################
+## Find the git revision
+find_program (GIT_EXE git)
+if (DEFINED GIT_EXE AND IS_DIRECTORY "${CMAKE_SOURCE_DIR}/.git")
+  execute_process(
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    
+    COMMAND ${GIT_EXE} describe --all --tags --long --dirty=-dirty
+    OUTPUT_VARIABLE GIT_OUTPUT)
 
-if (MSVC)
-  add_definitions("-D_CRT_SECURE_NO_WARNINGS=1")
-  add_definitions("-DFD_SETSIZE=2048")
-  add_definitions("-DUSE_REGEX_STATIC=1")
-  add_definitions("-DU_STATIC_IMPLEMENTATION=1")
-
-  foreach (flag_var
-	   CMAKE_C_FLAGS
-	   CMAKE_C_FLAGS_DEBUG
-	   CMAKE_C_FLAGS_RELEASE
-	   CMAKE_C_FLAGS_MINSIZEREL
-	   CMAKE_C_FLAGS_RELWITHDEBINFO
-           CMAKE_CXX_FLAGS
-           CMAKE_CXX_FLAGS_DEBUG
-           CMAKE_CXX_FLAGS_RELEASE
-           CMAKE_CXX_FLAGS_MINSIZEREL
-           CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-    if (${flag_var} MATCHES "/MD")
-      string(REGEX REPLACE "/MDd?" "" ${flag_var} "${${flag_var}}")
+  # this may fail on shallow clones that only knows about a limited number of commits.
+  # if there is an older merged revision the head, it may not be available to git.
+  if (NOT GIT_OUTPUT)
+      set(ARANGODB_BUILD_REPOSITORY "GIT FAILED TO RETRIEVE THE VERSION - SHALLOW CLONE?")
+      set(HAVE_ARANGODB_BUILD_REPOSITORY "1")
+    else()
+      string(STRIP ${GIT_OUTPUT} REPOSITORY_VERSION)
+      set(ARANGODB_BUILD_REPOSITORY ${REPOSITORY_VERSION})
+      set(HAVE_ARANGODB_BUILD_REPOSITORY "1")
     endif()
+else ()
+  set(ARANGODB_BUILD_REPOSITORY "")
+  set(HAVE_ARANGODB_BUILD_REPOSITORY "0")
+endif()
 
-    if (flag_var MATCHES "DEBUG")
-      set(${flag_var} "${${flag_var}} /MTd")
-    else ()
-      set(${flag_var} "${${flag_var}} /MT")
-    endif ()
-  endforeach()
+configure_file (
+  "${CMAKE_CURRENT_SOURCE_DIR}/lib/Basics/build-repository.h.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/lib/Basics/build-repository.h"
+  NEWLINE_STYLE UNIX
+)
 
-  set(MSVC_LIBS crypt32.lib;WINMM.LIB;Ws2_32.lib;getopt;regex)
-
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:CONSOLE /LTCG /SAFESEH:NO /ignore:4099")
+if (VERBOSE)
+  message(STATUS "ARANGODB_BUILD_REPOSITORY=\"${ARANGODB_BUILD_REPOSITORY}\"")
 endif ()
 
 ################################################################################
-### @brief TRI_BITS
+## OPERATION SYSTEM
 ################################################################################
+
+option(HOMEBREW
+  "whether to install for homebrew"
+  Off
+)
+
+if (WIN32)
+  set(WINDOWS TRUE)
+  set(MSBUILD TRUE)
+elseif (UNIX AND NOT APPLE)
+  if(CMAKE_SYSTEM_NAME MATCHES ".*Linux")
+    set(LINUX TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "kFreeBSD.*")
+    set(FREEBSD TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "kNetBSD.*|NetBSD.*")
+    set(NETBSD TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "kOpenBSD.*|OpenBSD.*")
+    set(OPENBSD TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES ".*GNU.*")
+    set(GNU TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES ".*BSDI.*")
+    set(BSDI TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "DragonFly.*|FreeBSD")
+    set(FREEBSD TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "SYSV5.*")
+    set(SYSV5 TRUE)
+  elseif ((CMAKE_SYSTEM_NAME MATCHES "Solaris.*") OR (CMAKE_SYSTEM_NAME MATCHES "SunOS.*"))
+    set(SOLARIS TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "HP-UX.*")
+    set(HPUX TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "AIX.*")
+    set(AIX TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES "Minix.*")
+    set(MINIX TRUE)
+  endif ()
+elseif (APPLE)
+  if (CMAKE_SYSTEM_NAME MATCHES ".*Darwin.*")
+    set(DARWIN TRUE)
+  elseif (CMAKE_SYSTEM_NAME MATCHES ".*MacOS.*")
+    set(MACOSX TRUE)
+  endif ()
+endif ()
+
+################################################################################
+## ROCKSDB
+################################################################################
+
+option(USE_ROCKSDB
+  "whether RocksDB is enabled"
+  ON
+)
+
+if (USE_ROCKSDB)
+  add_definitions("-DARANGODB_ENABLE_ROCKSDB=1")
+  add_definitions(-DARANGODB_ROCKSDB_VERSION=\"${ROCKSDB_VERSION}\")
+  include_directories(${ROCKSDB_INCLUDE_DIR})
+else ()
+  set(ROCKSDB_LIBS "")
+endif ()
+
+################################################################################
+## EXTERNAL PROGRAMS
+################################################################################
+
+if (SOLARIS)
+  set(MAKE gmake)
+else ()
+  set(MAKE make)
+endif ()
+
+find_package(PythonInterp 2 EXACT REQUIRED)
+get_filename_component(PYTHON_EXECUTABLE "${PYTHON_EXECUTABLE}" REALPATH)
+
+################################################################################
+## ARCHITECTURE
+################################################################################
+
+if (SOLARIS OR NOT CMAKE_SIZEOF_VOID_P)
+  set(CMAKE_SIZEOF_VOID_P 8)
+  set(CMAKE_CXX_SIZEOF_DATA_PTR 8)
+endif ()
 
 math(EXPR BITS "8*${CMAKE_SIZEOF_VOID_P}")
-add_definitions("-DTRI_BITS=${BITS}")
-
+add_definitions("-DARANGODB_BITS=${BITS}")
+        
 ################################################################################
-### @brief raspberry pi
+## COMPILER FEATURES
 ################################################################################
 
-if (BUILD_PACKAGE STREQUAL "raspbian")
-  add_definitions("-DTRI_FORCE_ARMV6")
-  option(RASPBIAN "Building for Raspberry PI" ON)
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  set(CMAKE_COMPILER_IS_CLANG 1)
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+  set(CMAKE_COMPILER_IS_CLANG 1)
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "Intel")
+  set(CMAKE_COMPILER_IS_INTEL 1)
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+  set(CMAKE_COMPILER_IS_INTEL 1)
+endif ()
+
+if (WINDOWS)
+  set(BASE_FLAGS     "/D WIN32 /D _WINDOWS /W3 /MP"      CACHE STRING "base flags")
+  set(BASE_C_FLAGS   ""                         	 CACHE STRING "base C flags")
+  set(BASE_CXX_FLAGS "/GR /EHsc"                	 CACHE STRING "base C++flags")
 else ()
-  option(RASPBIAN "Building for Raspberry PI" OFF)
+  set(BASE_FLAGS     ""                                  CACHE STRING "base flags")
+  set(BASE_C_FLAGS   "${CMAKE_C_FLAGS}   $ENV{CFLAGS}"   CACHE STRING "base C flags")
+  set(BASE_CXX_FLAGS "${CMAKE_CXX_FLAGS} $ENV{CXXFLAGS}" CACHE STRING "base C++ flags")
+  set(BASE_LD_FLAGS                     "$ENV{LDFLAGS}"  CACHE STRING "base linker flags")
+  set(BASE_LIBS                         "$ENV{LIBS}"     CACHE STRING "base libraries")
 endif ()
 
-################################################################################
-### @brief darwin
-################################################################################
+if (SOLARIS)
+  set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
 
-if (BUILD_PACKAGE STREQUAL "dmg-cli")
-  option(DARWIN "Building for MacOS" ON)
+  set(CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES
+    /lib;/lib64;/lib64;/usr/lib;/usr/lib64;/usr/lib64
+  )
+
+  list(APPEND SYSTEM_LIBRARIES nsl socket)
+
+  # force 64bit compile
+  set(BASE_FLAGS "-I /opt/csw/include -D_REENTRANT -m64 ${BASE_FLAGS}")
+endif ()
+
+if (CMAKE_COMPILER_IS_GNUCC)
+  set(BASE_C_FLAGS "${BASE_C_FLAGS} -std=gnu89")
+endif ()
+
+if (CMAKE_COMPILER_IS_GNUCC OR APPLE)
+  set(BASE_CXX_FLAGS "${BASE_CXX_FLAGS} -std=c++11")
+endif ()
+
+if (CMAKE_COMPILER_IS_CLANG)
+  if (APPLE)
+    set(BASE_CXX_FLAGS "${BASE_CXX_FLAGS} -stdlib=libc++")
+    add_definitions("-Wno-deprecated-declarations")
+  else ()
+    list(APPEND BASE_LIBS atomic)
+  endif ()
+endif ()
+
+# need c++11
+set(CMAKE_CXX_STANDARD 11)
+include(CheckCXX11Features)
+
+# need threads
+find_package(Threads REQUIRED)
+
+if (MSVC)
+  configure_file("Installation/Windows/vcproj.user/arangod.vcxproj.user" ${CMAKE_BINARY_DIR})
+  add_definitions("-D_CRT_SECURE_NO_WARNINGS=1")
+  add_definitions("-DFD_SETSIZE=8192")
+  add_definitions("-DU_STATIC_IMPLEMENTATION=1")
+  
+  # https://blogs.msdn.microsoft.com/vcblog/2016/04/14/stl-fixes-in-vs-2015-update-2/
+  # https://connect.microsoft.com/VisualStudio/feedback/details/1892487
+  #http://lists.boost.org/boost-users/2016/04/85968.php
+  add_definitions("-D_ENABLE_ATOMIC_ALIGNMENT_FIX")
+  
+  set(MSVC_LIBS Shlwapi.lib;crypt32.lib;WINMM.LIB;Ws2_32.lib)
+
+  set(CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:CONSOLE /SAFESEH:NO /MACHINE:x64 /ignore:4099 ${BASE_LD_FLAGS}"
+  )
 else ()
-  option(DARWIN "Building for MacOS" OFF)
+  set(CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} ${BASE_LD_FLAGS}"
+  )
 endif ()
 
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                           OPTIONS
-## -----------------------------------------------------------------------------
-
 ################################################################################
-### @brief ARANGODB_VERSION
+## INCLUDE DIRECTORIES
 ################################################################################
 
-set(ARANGODB_VERSION "1.x.y-rc1" CACHE path "ArangoDB version")
+include_directories(${PROJECT_SOURCE_DIR}/3rdParty/linenoise-ng/include)
+include_directories(${PROJECT_SOURCE_DIR}/3rdParty/linenoise-ng/src)
+include_directories(${PROJECT_SOURCE_DIR}/3rdParty/velocypack/include)
+include_directories(${PROJECT_SOURCE_DIR}/3rdParty/rocksdb/rocksdb/include)
 
-################################################################################
-### @brief VISTA LOCKS
-################################################################################
+include_directories(${PROJECT_BINARY_DIR})
+include_directories(${PROJECT_BINARY_DIR}/lib)
 
-option(USE_VISTA_LOCKS "Do you want to use Windows Vista R/W locks" OFF)
+include_directories(${PROJECT_SOURCE_DIR})
+include_directories(${PROJECT_SOURCE_DIR}/arangod)
+include_directories(${PROJECT_SOURCE_DIR}/arangosh)
+include_directories(${PROJECT_SOURCE_DIR}/lib)
 
-if (USE_VISTA_LOCKS)
-  add_definitions("-DTRI_WINDOWS_VISTA_LOCKS=1")
+if (CUSTOM_INCLUDES)
+  include_directories(${CUSTOM_INCLUDES})
 endif ()
 
-## -----------------------------------------------------------------------------
-## --SECTION--                                                       DIRECTORIES
-## -----------------------------------------------------------------------------
-
 ################################################################################
-### @brief Enable Backtrace
+## TARGET ARCHITECTURE
 ################################################################################
 
-option(USE_BACKTRACE "whether we should try to generate c-level stacktraces" OFF)
+if (WINDOWS)
+  add_definitions("-DNO_SSE42")
+else ()
+  include(TargetArch)
+
+  target_architecture(CMAKE_TARGET_ARCHITECTURES)
+  list(LENGTH CMAKE_TARGET_ARCHITECTURES cmake_target_arch_len)
+
+  if (NOT "${cmake_target_arch_len}" EQUAL "1")
+    set(CMAKE_TARGET_ARCHITECTURE_UNIVERSAL TRUE)
+    set(CMAKE_TARGET_ARCHITECTURE_CODE "universal")
+  else ()
+    set(CMAKE_TARGET_ARCHITECTURE_UNIVERSAL FALSE)
+    set(CMAKE_TARGET_ARCHITECTURE_CODE "${CMAKE_TARGET_ARCHITECTURES}")
+  endif ()
+
+  include(VcMacros)
+
+  option(USE_OPTIMIZE_FOR_ARCHITECTURE "try to determine CPU architecture" ON)
+
+  if (USE_OPTIMIZE_FOR_ARCHITECTURE)
+    # mop: core2 (merom) is our absolute minimum!
+    # SET(TARGET_ARCHITECTURE "merom")
+    include(OptimizeForArchitecture)
+    OptimizeForArchitecture()
+  endif ()
+
+  set(BASE_FLAGS "${Vc_ARCHITECTURE_FLAGS} ${BASE_FLAGS}")
+endif ()
+
+################################################################################
+## BACKTRACE
+################################################################################
+
+option(USE_BACKTRACE
+  "whether we should try to generate c-level stacktraces"
+  OFF
+)
+
 if (USE_BACKTRACE)
   if (MSVC)
     set(BT_LIBS "Dbghelp" CACHE path "Debug Helper libraries")
   else ()
     set(BT_LIBS "" CACHE path "Debug Helper libraries")
-  endif()
-  add_definitions("-DHAVE_BACKTRACE=1")
-else()
+  endif ()
+
+  add_definitions("-DARANGODB_ENABLE_BACKTRACE=1")
+else ()
   set(BT_LIBS "" CACHE path "Debug Helper libraries")
-endif()
+endif ()
 
 ################################################################################
-### @brief Enable Backtrace
+## ASSEMBLER OPTIMIZATIONS
 ################################################################################
 
-option(USE_MAINTAINER_MODE "whether we want to have assertions and other development features" OFF)
+# Allow to prohibit assembler optimization code explicitly
+if (MSVC)
+  SET(ASM_OPTIMIZATIONS_DEFAULT OFF)
+else (MSVC)
+  SET(ASM_OPTIMIZATIONS_DEFAULT ON)
+endif (MSVC)
+
+option(ASM_OPTIMIZATIONS "whether hand-optimized assembler code should be used"
+  ${ASM_OPTIMIZATIONS_DEFAULT})
+
+if (ASM_OPTIMIZATIONS)
+  add_definitions("-DASM_OPTIMIZATIONS=1")
+else (ASM_OPTIMIZATIONS)
+  add_definitions("-DASM_OPTIMIZATIONS=0")
+endif (ASM_OPTIMIZATIONS)
+
+################################################################################
+## MAINTAINER MODE
+################################################################################
+
+option(USE_MAINTAINER_MODE
+  "whether we want to have assertions and other development features"
+  OFF
+)
+
 if (USE_MAINTAINER_MODE)
-  add_definitions("-DTRI_ENABLE_MAINTAINER_MODE=1")
+  add_definitions("-DARANGODB_ENABLE_MAINTAINER_MODE=1")
+
+  find_package(FLEX)
+  find_package(BISON)
+endif ()
+
+################################################################################
+## FAILURE TESTS
+################################################################################
+
+option(USE_FAILURE_TESTS
+  "whether we want to have failure tests compiled in"
+  OFF
+)
+
+if (USE_FAILURE_TESTS)
+  add_definitions("-DARANGODB_ENABLE_FAILURE_TESTS=1")
+endif ()
+
+################################################################################
+## JEMALLOC
+################################################################################
+
+find_package(jemalloc)
+set(JEMALLOC_DEFAULT_VALUE ${JEMALLOC_FOUND})
+
+if (WINDOWS OR SOLARIS OR USE_TCMALLOC)
+  set(JEMALLOC_DEFAULT_VALUE OFF)
+endif ()
+
+option(USE_JEMALLOC
+  "use JEMALLOC if the library is available"
+  ${JEMALLOC_DEFAULT_VALUE}
+)
+
+set(FORCE_JEMALLOC_LIB "" CACHE STRING "force this library command to link jemalloc")
+
+if (USE_JEMALLOC)
+  if (NOT JEMALLOC_FOUND)
+    message(FATAL_ERROR "jemalloc build was requested but jemalloc not found")
+  endif ()
+  add_definitions("-DARANGODB_HAVE_JEMALLOC=1")
+
+  if (FORCE_JEMALLOC_LIB STREQUAL "")
+    set(SYS_LIBS ${SYS_LIBS} ${JEMALLOC_jemalloc_LIBRARY})
+  else ()
+    set(SYS_LIBS ${SYS_LIBS} ${FORCE_JEMALLOC_LIB})
+  endif ()
+endif ()
+
+################################################################################
+## TCMALLOC
+################################################################################
+
+option(USE_TCMALLOC
+  "use TCMALLOC if the library is available"
+  OFF
+)
+
+if (USE_TCMALLOC)
+  find_package(tcmalloc)
+
+  if (TCMALLOC_FOUND)
+    add_definitions("-DARANGODB_HAVE_TCMALLOC=1")
+    set(SYS_LIBS ${SYS_LIBS} ${TCMALLOC_tcmalloc_LIBRARY})
+    message(STATUS "Found TCMALLOC")
+  else ()
+    message(STATUS "Missing TCMALLOC")
+  endif ()
+endif ()
+
+if (${USE_JEMALLOC} AND ${USE_TCMALLOC})
+  MESSAGE(FATAL_ERROR " you mustn't demand for tcmalloc and jemalloc at the same time!")
 endif()
 
 ################################################################################
-### @brief Enable Relative
+## LIBRARY RESOLV
 ################################################################################
 
-option(USE_RELATIVE "Do you want to have all path are relative to the binary" OFF)
+if (NOT WINDOWS)
+  set(SYS_LIBS ${SYS_LIBS} resolv)
 
-if (USE_RELATIVE)
-
-  ################################################################################
-  ### @brief SYSTEM CONFIGURATION DIRECTORY (/etc)
-  ################################################################################
-
-  set(ETCDIR_NATIVE "./etc/relative")
-  set(ETCDIR_INSTALL "etc/relative")
-
-  file(TO_NATIVE_PATH "${ETCDIR_NATIVE}" ETCDIR_NATIVE)
-  STRING(REGEX REPLACE "\\\\" "\\\\\\\\" ETCDIR_ESCAPED "${ETCDIR_NATIVE}")
-
-  add_definitions("-D_SYSCONFDIR_=\"${ETCDIR_ESCAPED}\"")
-
-  ################################################################################
-  ### @brief DATA DIRECTORY (/var)
-  ################################################################################
-
-  set(VARDIR "" CACHE path "System configuration directory (defaults to prefix/var/arangodb)")
-
-  if (VARDIR STREQUAL "")
-    set(VARDIR_NATIVE "${CMAKE_INSTALL_PREFIX}/var")
-    set(VARDIR_INSTALL "var")
-  else ()
-    set(VARDIR_NATIVE "${VARDIR}")
-    set(VARDIR_INSTALL "${VARDIR}")
+  if (NOT DARWIN)
+    set(SYS_LIBS ${SYS_LIBS} rt)
   endif ()
-
-  file(TO_NATIVE_PATH "${VARDIR_NATIVE}" VARDIR_NATIVE)
-
-  ################################################################################
-  ### @brief database directory
-  ################################################################################
-
-  FILE(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/var/lib/arangodb")
-
-  ################################################################################
-  ### @brief apps directory
-  ################################################################################
-
-  FILE(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/var/lib/arangodb-apps")
-
-  ################################################################################
-  ### @brief log directory
-  ################################################################################
-
-  FILE(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/var/log/arangodb")
-
-  ################################################################################
-  ### @brief TRI_PKGDATADIR
-  ################################################################################
-
-  set(TRI_PKGDATADIR "${CMAKE_INSTALL_PREFIX}/share/arangodb")
-
-  ################################################################################
-  ### @brief TRI_RESOURCEDIR
-  ################################################################################
-
-  set(TRI_RESOURCEDIR "resources")
-
-  ################################################################################
-  ### @brief TRI_BINDIR
-  ################################################################################
-
-  set(TRI_BINDIR_INSTALL "bin")
-  set(TRI_BINDIR "${CMAKE_INSTALL_PREFIX}/bin")
-
-  ################################################################################
-  ### @brief TRI_SBINDIR
-  ################################################################################
-
-  if (MSVC)
-    set(TRI_SBINDIR_INSTALL "bin")
-    set(TRI_SBINDIR "${CMAKE_INSTALL_PREFIX}/bin")
-  else ()
-    set(TRI_SBINDIR_INSTALL "sbin")
-    set(TRI_SBINDIR "${CMAKE_INSTALL_PREFIX}/sbin")
-  endif ()
-
-else() # USE_RELATIVE
-
-  ################################################################################
-  ### @brief SYSTEM CONFIGURATION DIRECTORY (/etc)
-  ################################################################################
-
-  set(ETCDIR "" CACHE path "System configuration directory (defaults to prefix/etc)")
-
-  if (ETCDIR STREQUAL "")
-    set(ETCDIR_NATIVE "${CMAKE_INSTALL_PREFIX}/etc/arangodb")
-    set(ETCDIR_INSTALL "etc/arangodb")
-  else ()
-    set(ETCDIR_NATIVE "${ETCDIR}/arangodb")
-    set(ETCDIR_INSTALL "${ETCDIR}/arangodb")
-  endif ()
-
-
-  if (MSVC)
-    file(TO_NATIVE_PATH "${ETCDIR_INSTALL}" ETCDIR_INSTALL)
-    STRING(REGEX REPLACE "\\\\" "\\\\\\\\" ETCDIR_ESCAPED "${ETCDIR_INSTALL}")
-  else ()
-    file(TO_NATIVE_PATH "${ETCDIR_NATIVE}" ETCDIR_NATIVE)
-    STRING(REGEX REPLACE "\\\\" "\\\\\\\\" ETCDIR_ESCAPED "${ETCDIR_NATIVE}")
-  endif()
-
-  add_definitions("-D_SYSCONFDIR_=\"${ETCDIR_ESCAPED}\"")
-
-  ################################################################################
-  ### @brief DATA DIRECTORY (/var)
-  ################################################################################
-
-  set(VARDIR "" CACHE path "System configuration directory (defaults to prefix/var/arangodb)")
-
-  if (VARDIR STREQUAL "")
-    set(VARDIR_NATIVE "${CMAKE_INSTALL_PREFIX}/var")
-    set(VARDIR_INSTALL "var")
-  else ()
-    set(VARDIR_NATIVE "${VARDIR}")
-    set(VARDIR_INSTALL "${VARDIR}")
-  endif ()
-
-  file(TO_NATIVE_PATH "${VARDIR_NATIVE}" VARDIR_NATIVE)
-
-
-  ################################################################################
-  ### @brief database directory
-  ################################################################################
-
-  FILE(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/var/lib/arangodb")
-
-  ################################################################################
-  ### @brief apps directory
-  ################################################################################
-
-  FILE(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/var/lib/arangodb-apps")
-
-  ################################################################################
-  ### @brief log directory
-  ################################################################################
-
-  FILE(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/var/log/arangodb")
-
-  ################################################################################
-  ### @brief TRI_PKGDATADIR
-  ################################################################################
-
-  set(TRI_PKGDATADIR "${CMAKE_INSTALL_PREFIX}/share/arangodb")
-
-  ################################################################################
-  ### @brief TRI_RESOURCEDIR
-  ################################################################################
-
-  set(TRI_RESOURCEDIR "resources")
-
-  ################################################################################
-  ### @brief TRI_BINDIR
-  ################################################################################
-
-  if (MSVC)
-    set(TRI_BINDIR_INSTALL "bin")
-    set(TRI_BINDIR "${CMAKE_INSTALL_PREFIX}/bin")
-  else ()
-    set(TRI_BINDIR_INSTALL "bin")
-    set(TRI_BINDIR "${CMAKE_INSTALL_PREFIX}/bin")
-  endif ()
-
-  ################################################################################
-  ### @brief TRI_SBINDIR
-  ################################################################################
-
-  if (MSVC)
-    set(TRI_SBINDIR_INSTALL "bin")
-    set(TRI_SBINDIR "${CMAKE_INSTALL_PREFIX}/bin")
-  else ()
-    set(TRI_SBINDIR_INSTALL "sbin")
-    set(TRI_SBINDIR "${CMAKE_INSTALL_PREFIX}/sbin")
-  endif ()
-
-endif () # USE_RELATIVE
-
-if (MSVC)
-  ################################################################################
-  ### @brief icon paths for windows
-  ################################################################################
-  file(TO_NATIVE_PATH "${TRI_RESOURCEDIR}/Icons/arangodb.ico" RELATIVE_ARANGO_ICON)
-  file(TO_NATIVE_PATH "${PROJECT_SOURCE_DIR}/Installation/Windows/Icons/arangodb.bmp" ARANGO_IMG)
-  file(TO_NATIVE_PATH "${PROJECT_SOURCE_DIR}/Installation/Windows/Icons/arangodb.ico" ARANGO_ICON)
-
-  STRING(REGEX REPLACE "\\\\" "\\\\\\\\" ARANGO_IMG "${ARANGO_IMG}")
-  STRING(REGEX REPLACE "\\\\" "\\\\\\\\" ARANGO_ICON "${ARANGO_ICON}")
-  STRING(REGEX REPLACE "\\\\" "\\\\\\\\" RELATIVE_ARANGO_ICON "${RELATIVE_ARANGO_ICON}")
-
-
-  ################################################################################
-  ### @brief Versioning for windows
-  ################################################################################
-
-  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/Installation/Windows/version)
-  include("${PROJECT_SOURCE_DIR}/Installation/Windows/version/generate_product_version.cmake")
-
-endif ()
-
-
-################################################################################
-### @brief etcd
-################################################################################
-
-if (DARWIN)
-  install(PROGRAMS ${PROJECT_SOURCE_DIR}/bin/etcd-arango
-          DESTINATION ${TRI_BINDIR_INSTALL})
-endif ()
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                   COMMON INCLUDES
-## -----------------------------------------------------------------------------
-
-################################################################################
-### @brief project source
-################################################################################
-
-include_directories(${PROJECT_SOURCE_DIR})
-
-if (CUSTOM_INCLUDES)
-  include_directories(${CUSTOM_INCLUDES})
-endif()
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                     COMMON MACROS
-## -----------------------------------------------------------------------------
-
-################################################################################
-### @brief generates config file using ROOTDIR
-################################################################################
-
-macro (generate_root_config name)
-  FILE(READ ${PROJECT_SOURCE_DIR}/etc/arangodb/${name}.conf.in FileContent)
-
-  STRING(REPLACE "@PKGDATADIR@" "@ROOTDIR@/share/arangodb" 
-         FileContent "${FileContent}")
-
-  STRING(REPLACE "@LOCALSTATEDIR@" "@ROOTDIR@/var"
-         FileContent "${FileContent}")
-
-  STRING(REPLACE "@SBINDIR@" "@ROOTDIR@/bin"
-         FileContent "${FileContent}")
-
-  STRING(REPLACE "@LIBEXECDIR@/arangodb" "@ROOTDIR@/bin"
-         FileContent "${FileContent}")
-
-  STRING(REPLACE "@SYSCONFDIR@" "@ROOTDIR@/etc/arangodb"
-         FileContent "${FileContent}")
-
-  if (MSVC)
-    STRING(REPLACE "@PROGRAM_SUFFIX@" ".exe"
-           FileContent "${FileContent}")
-
-    STRING(REGEX REPLACE "[\r\n]file =" "\n# file =" 
-           FileContent "${FileContent}")
-  endif ()
-
-  FILE(WRITE ${PROJECT_BINARY_DIR}/etc/arangodb/${name}.conf "${FileContent}")
-endmacro ()
-
-################################################################################
-### @brief generates config file using the configured paths
-################################################################################
-
-macro (generate_path_config name)
-  FILE(READ ${PROJECT_SOURCE_DIR}/etc/arangodb/${name}.conf.in FileContent)
-
-  STRING(REPLACE "@PKGDATADIR@" "${TRI_PKGDATADIR}" 
-         FileContent "${FileContent}")
-
-  STRING(REPLACE "@LOCALSTATEDIR@" "${VARDIR_NATIVE}" 
-         FileContent "${FileContent}")
-
-  if ((${name} STREQUAL "arangod") AND RASPBIAN)
-    STRING(REGEX REPLACE "[\r\n]threads =[^\r\n]*" "\nthreads = 1" 
-           FileContent "${FileContent}")
-
-    STRING(REGEX REPLACE "[\r\n]v8-contexts =[^\r\n]*" "\n8-contexts = 1" 
-           FileContent "${FileContent}")
-  endif ()
-
-  FILE(WRITE ${PROJECT_BINARY_DIR}/etc/arangodb/${name}.conf "${FileContent}")
-endmacro ()
-
-################################################################################
-### @brief installs a config file
-################################################################################
-
-macro (install_config name)
-  if (MSVC OR DARWIN)
-    generate_root_config(${name})
-  else ()
-    generate_path_config(${name})
-  endif ()
-
-  install(
-    FILES ${PROJECT_BINARY_DIR}/etc/arangodb/${name}.conf
-    DESTINATION ${ETCDIR_INSTALL})
-endmacro ()
-
-################################################################################
-### @brief installs a readme file converting EOL
-################################################################################
-
-macro (install_readme input where output)
-  FILE(READ ${PROJECT_SOURCE_DIR}/${input} FileContent)
-
-  STRING(REPLACE "\r" "" FileContent "${FileContent}")
-
-  if (MSVC)
-    STRING(REPLACE "\n" "\r\n" FileContent "${FileContent}")
-  endif ()
-
-  FILE(WRITE ${PROJECT_BINARY_DIR}/${output} "${FileContent}")
-
-  install(
-    FILES ${PROJECT_BINARY_DIR}/${output}
-    DESTINATION ${where})
-endmacro ()
-
-################################################################################
-### @brief installs a link to an executable
-################################################################################
-
-macro (install_command_alias name where alias)
-  if (MSVC)
-
-  add_custom_command(
-    TARGET ${name}
-    POST_BUILD
-      COMMAND 
-	${CMAKE_COMMAND} -E copy
-	  $<TARGET_FILE:${name}>
-	  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${alias}.exe)
-
-    install(
-      PROGRAMS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${alias}.exe
-      DESTINATION ${where})
-
-  else ()
-
-  add_custom_command(
-    TARGET ${name}
-    POST_BUILD
-      COMMAND 
-	${CMAKE_COMMAND} -E create_symlink
-	  ${name}
-	  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${alias})
-
-    install(
-      PROGRAMS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${alias}
-      DESTINATION ${where})
-
-  endif ()
-endmacro ()
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                EXTERNAL LIBRARIES
-## -----------------------------------------------------------------------------
-
-################################################################################
-### @brief threads
-################################################################################
-
-find_package(Threads)
-
-################################################################################
-### @brief windows
-################################################################################
-
-if (MSVC)
-  set(MSVC_INCLUDE ${PROJECT_SOURCE_DIR}/WindowsLibraries/${BITS}/include CACHE path "MSVC 3rd party include path")
-  set(MSVC_LIB_PATH ${PROJECT_SOURCE_DIR}/WindowsLibraries/${BITS}/lib CACHE path "MSVC 3rd party library path")
-endif ()
-
-if (MSVC_INCLUDE)
-  include_directories(${MSVC_INCLUDE})
-endif ()
-
-if (MSVC_LIB_PATH)
-  link_directories(${MSVC_LIB_PATH})
 endif ()
 
 ################################################################################
-### @brief raspberry pi
+## FLAGS
 ################################################################################
 
-if (RASPBIAN)
-  set(ARM_INCLUDE ${PROJECT_SOURCE_DIR}/ArmLibraries/include CACHE path "ARM 3rd party include path")
-  set(ARM_LIB_PATH ${PROJECT_SOURCE_DIR}/ArmLibraries/lib CACHE path "ARM 3rd party library path")
+if (VERBOSE)
+  message(STATUS)
 endif ()
 
-if (ARM_INCLUDE)
-  include_directories(${ARM_INCLUDE})
-endif ()
+# compiler options
+if (CMAKE_COMPILER_IS_GNUCC)
+  if (VERBOSE)
+    message(STATUS "Compiler type GNU: ${CMAKE_CXX_COMPILER}")
+  endif ()
 
-if (ARM_LIB_PATH)
-  link_directories(${ARM_LIB_PATH})
-endif ()
+  set(BASE_FLAGS "-Wall -Wextra -Wno-unused-parameter ${BASE_FLAGS}")
 
-################################################################################
-### @brief ICU
-################################################################################
+  set(CMAKE_C_FLAGS                "-g"                             CACHE INTERNAL "default C compiler flags")
+  set(CMAKE_C_FLAGS_DEBUG          "-O0 -g"                         CACHE INTERNAL "C debug flags")
+  set(CMAKE_C_FLAGS_MINSIZEREL     "-Os"                            CACHE INTERNAL "C minimal size flags")
+  set(CMAKE_C_FLAGS_RELEASE        "-O3 -fomit-frame-pointer"       CACHE INTERNAL "C release flags")
+  set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g -fno-omit-frame-pointer" CACHE INTERNAL "C release with debug info flags")
 
-if (MSVC)
-  set(ICU_LIBS "icui18n;icuuc" CACHE path "ICU libraries")
+  set(CMAKE_CXX_FLAGS                "-g"                             CACHE INTERNAL "default C++ compiler flags")
+  set(CMAKE_CXX_FLAGS_DEBUG          "-O0 -g"                         CACHE INTERNAL "C++ debug flags")
+  set(CMAKE_CXX_FLAGS_MINSIZEREL     "-Os"                            CACHE INTERNAL "C++ minimal size flags")
+  set(CMAKE_CXX_FLAGS_RELEASE        "-O3 -fomit-frame-pointer"       CACHE INTERNAL "C++ release flags")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -fno-omit-frame-pointer" CACHE INTERNAL "C++ release with debug info flags")
 
-  add_definitions("-DU_STATIC_IMPLEMENTATION=1")
-elseif (RASPBIAN)
-  set(ICU_LIBS icui18n;icuuc;icudata;pthread;dl;m CACHE path "ICU libraries")
-elseif (DARWIN)
-  set(ICU_INCLUDE ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/third_party/icu/source/common;${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/third_party/icu/source/i18n;${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/third_party/icu/source/io CACHE path "ICU include path")
-  set(ICU_LIB_PATH ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/out/x64.release CACHE path "ICU library path")
-  set(ICU_LIBS icui18n;icuuc;icudata;pthread;dl;m CACHE path "ICU libraries")
+elseif (CMAKE_COMPILER_IS_CLANG)
+  if (VERBOSE)
+    message(STATUS "Compiler type CLANG: ${CMAKE_CXX_COMPILER}")
+  endif ()
+
+  set(BASE_FLAGS "-Wall -Wextra -Wno-unused-parameter ${BASE_FLAGS}")
+
+  set(CMAKE_C_FLAGS                "-g"                             CACHE INTERNAL "default C compiler flags")
+  set(CMAKE_C_FLAGS_DEBUG          "-O0 -g"                         CACHE INTERNAL "C debug flags")
+  set(CMAKE_C_FLAGS_MINSIZEREL     "-Os"                            CACHE INTERNAL "C minimal size flags")
+  set(CMAKE_C_FLAGS_RELEASE        "-O3 -fomit-frame-pointer"       CACHE INTERNAL "C release flags")
+  set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g -fno-omit-frame-pointer" CACHE INTERNAL "C release with debug info flags")
+
+  set(CMAKE_CXX_FLAGS                "-g"                             CACHE INTERNAL "default C++ compiler flags")
+  set(CMAKE_CXX_FLAGS_DEBUG          "-O0 -g"                         CACHE INTERNAL "C++ debug flags")
+  set(CMAKE_CXX_FLAGS_MINSIZEREL     "-Os"                            CACHE INTERNAL "C++ minimal size flags")
+  set(CMAKE_CXX_FLAGS_RELEASE        "-O3 -fomit-frame-pointer"       CACHE INTERNAL "C++ release flags")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -fno-omit-frame-pointer" CACHE INTERNAL "C++ release with debug info flags")
+
+elseif (MSVC)
+  if (VERBOSE)
+    message(STATUS "Compiler type MSVC: ${CMAKE_CXX_COMPILER}")
+  endif ()
+
+  set(CMAKE_C_FLAGS                "/MTd"                              CACHE INTERNAL "default C++ compiler flags")
+  set(CMAKE_C_FLAGS_DEBUG          "/D _DEBUG /MTd /Zi /Ob0 /Od /RTC1" CACHE INTERNAL "C++ debug flags")
+  set(CMAKE_C_FLAGS_MINSIZEREL     "/MT /O1 /Ob1 /D NDEBUG"            CACHE INTERNAL "C++ minimal size flags")
+  set(CMAKE_C_FLAGS_RELEASE        "/MT /O2 /Ob2 /D NDEBUG"            CACHE INTERNAL "C++ release flags")
+  set(CMAKE_C_FLAGS_RELWITHDEBINFO "/MT /Zi /O2 /Ob1 /D NDEBUG"        CACHE INTERNAL "C++ release with debug info flags")
+
+  set(CMAKE_CXX_FLAGS                "/MTd"                              CACHE INTERNAL "default C++ compiler flags")
+  set(CMAKE_CXX_FLAGS_DEBUG          "/D _DEBUG /MTd /Zi /Ob0 /Od /RTC1" CACHE INTERNAL "C++ debug flags")
+  set(CMAKE_CXX_FLAGS_MINSIZEREL     "/MT /O1 /Ob1 /D NDEBUG"            CACHE INTERNAL "C++ minimal size flags")
+  set(CMAKE_CXX_FLAGS_RELEASE        "/MT /O2 /Ob2 /D NDEBUG"            CACHE INTERNAL "C++ release flags")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "/MT /Zi /O2 /Ob1 /D NDEBUG"        CACHE INTERNAL "C++ release with debug info flags")
+
 else ()
-  set(ICU_INCLUDE ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/third_party/icu/source/common;${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/third_party/icu/source/i18n;${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/third_party/icu/source/io CACHE path "ICU include path")
-  set(ICU_LIB_PATH ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/out/x64.release/obj.target/third_party/icu/ CACHE path "ICU library path")
-  set(ICU_LIBS icui18n;icuuc;icudata;pthread;dl;m CACHE path "ICU libraries")
+  # unknown compiler
+  message(STATUS "Compiler type UNKNOWN: ${CMAKE_CXX_COMPILER}")
+
+  set(BASE_FLAGS "-Wall ${BASE_FLAGS}")
+
+  set(CMAKE_C_FLAGS                "-g"                             CACHE INTERNAL "default C compiler flags")
+  set(CMAKE_C_FLAGS_DEBUG          "-O0 -g"                         CACHE INTERNAL "C debug flags")
+  set(CMAKE_C_FLAGS_MINSIZEREL     "-Os"                            CACHE INTERNAL "C minimal size flags")
+  set(CMAKE_C_FLAGS_RELEASE        "-O3 -fomit-frame-pointer"       CACHE INTERNAL "C release flags")
+  set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g -fno-omit-frame-pointer" CACHE INTERNAL "C release with debug info flags")
+
+  set(CMAKE_CXX_FLAGS                "-g"                             CACHE INTERNAL "default C++ compiler flags")
+  set(CMAKE_CXX_FLAGS_DEBUG          "-O0 -g"                         CACHE INTERNAL "C++ debug flags")
+  set(CMAKE_CXX_FLAGS_MINSIZEREL     "-Os"                            CACHE INTERNAL "C++ minimal size flags")
+  set(CMAKE_CXX_FLAGS_RELEASE        "-O3 -fomit-frame-pointer"       CACHE INTERNAL "C++ release flags")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -fno-omit-frame-pointer" CACHE INTERNAL "C++ release with debug info flags")
 endif ()
 
-if (ICU_INCLUDE)
-  include_directories(${ICU_INCLUDE})
+set(CMAKE_C_FLAGS                "${CMAKE_C_FLAGS}                ${BASE_FLAGS} ${BASE_C_FLAGS}")
+set(CMAKE_C_FLAGS_DEBUG          "${CMAKE_C_FLAGS_DEBUG}          ${BASE_FLAGS} ${BASE_C_FLAGS}")
+set(CMAKE_C_FLAGS_RELEASE        "${CMAKE_C_FLAGS_RELEASE}        ${BASE_FLAGS} ${BASE_C_FLAGS}")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} ${BASE_FLAGS} ${BASE_C_FLAGS}")
+set(CMAKE_C_FLAGS_MINSIZEREL     "${CMAKE_C_FLAGS_MINSIZEREL}     ${BASE_FLAGS} ${BASE_C_FLAGS}")
+
+set(CMAKE_CXX_FLAGS                "${CMAKE_CXX_FLAGS}                ${BASE_FLAGS} ${BASE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG          "${CMAKE_CXX_FLAGS_DEBUG}          ${BASE_FLAGS} ${BASE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELEASE        "${CMAKE_CXX_FLAGS_RELEASE}        ${BASE_FLAGS} ${BASE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${BASE_FLAGS} ${BASE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS_MINSIZEREL     "${CMAKE_CXX_FLAGS_MINSIZEREL}     ${BASE_FLAGS} ${BASE_CXX_FLAGS}")
+
+if (VERBOSE)
+  message(STATUS "Info BASE_FLAGS:     ${BASE_FLAGS}")
+  message(STATUS "Info BASE_C_FLAGS:   ${BASE_C_FLAGS}")
+  message(STATUS "Info BASE_CXX_FLAGS: ${BASE_CXX_FLAGS}")
+  message(STATUS "Info BASE_LD_FLAGS:  ${BASE_LD_FLAGS}")
+  message(STATUS "Info BASE_LIBS:      ${BASE_LIBS}")
+  message(STATUS)
+
+  if (CMAKE_BUILD_TYPE STREQUAL "None")
+    message(STATUS "Info CMAKE_C_FLAGS:   ${CMAKE_C_FLAGS}")
+    message(STATUS "Info CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+  endif ()
+
+  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Info CMAKE_C_FLAGS_DEBUG:   ${CMAKE_C_FLAGS_DEBUG}")
+    message(STATUS "Info CMAKE_CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
+  endif ()
+
+  if (CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(STATUS "Info CMAKE_C_FLAGS_RELEASE:   ${CMAKE_C_FLAGS_RELEASE}")
+    message(STATUS "Info CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
+  endif ()
+
+  if (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    message(STATUS "Info CMAKE_C_FLAGS_RELWITHDEBINFO:   ${CMAKE_C_FLAGS_RELWITHDEBINFO}")
+    message(STATUS "Info CMAKE_CXX_FLAGS_RELWITHDEBINFO: ${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+  endif ()
+
+  if (CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    message(STATUS "Info CMAKE_C_FLAGS_MINSIZEREL:   ${CMAKE_C_FLAGS_MINSIZEREL}")
+    message(STATUS "Info CMAKE_CXX_FLAGS_MINSIZEREL: ${CMAKE_CXX_FLAGS_MINSIZEREL}")
+  endif ()
+
+  message(STATUS "Info CMAKE_EXE_LINKER_FLAGS: ${CMAKE_EXE_LINKER_FLAGS}")
+  message(STATUS)
 endif ()
 
-if (ICU_LIB_PATH)
-  link_directories(${ICU_LIB_PATH})
+
+################################################################################
+## 3RD PARTY
+################################################################################
+
+# 3rdParty exports:
+#
+# V8_VERSION
+# V8_LIBS
+# V8_INCLUDE_DIR
+#
+# ICU_VERSION
+# ICU_LIBS
+# ICU_INCLUDE_DIR
+#
+# LIBEV_VERSION
+# LIBEV_LIBS
+# LIBEV_INCLUDE_DIR
+#
+# ZLIB_VERSION
+# ZLIB_LIBS
+# ZLIB_INCLUDE_DIR
+
+add_subdirectory(3rdParty)
+
+################################################################################
+## VELOCYPACK
+################################################################################
+
+add_definitions("-DVELOCYPACK_XXHASH=1")
+
+foreach (LINK_DIR ${LINK_DIRECTORIES})
+  link_directories("${LINK_DIR}")
+endforeach()
+
+################################################################################
+## BOOST
+################################################################################
+
+message(STATUS "using 3rdParty BOOST")
+option(USE_BOOST_UNITTESTS "use boost unit-tests" ON)
+
+set(Boost_VERSION "1.61.0")
+set(Boost_INCLUDE_DIR
+  "${PROJECT_SOURCE_DIR}/3rdParty/boost/${Boost_VERSION}"
+)
+
+if (NOT USE_BOOST_UNITTESTS)
+  message(STATUS "BOOST unit-tests are disabled")
+endif ()
+
+include_directories(SYSTEM ${Boost_INCLUDE_DIR})
+add_definitions(-DARANGODB_BOOST_VERSION=\"${Boost_VERSION}\")
+
+################################################################################
+## ICU
+################################################################################
+
+include_directories(${ICU_INCLUDE_DIR})
+
+################################################################################
+## LIBEV
+################################################################################
+
+include_directories(${LIBEV_INCLUDE_DIR})
+add_definitions("-DARANGODB_LIBEV_VERSION=\"${LIBEV_VERSION}\"")
+
+################################################################################
+## OPENSSL
+################################################################################
+
+find_package(OpenSSL REQUIRED)
+
+include_directories(${OPENSSL_INCLUDE_DIR})
+add_definitions(-DARANGODB_OPENSSL_VERSION=\"${OPENSSL_VERSION}\")
+
+if (OPENSSL_VERSION)
+  string(REPLACE "." ";" OPENSSL_VERSION_LIST ${OPENSSL_VERSION})
+  list(GET OPENSSL_VERSION_LIST 0 OPENSSL_VERSION_MAJOR)
+  list(GET OPENSSL_VERSION_LIST 1 OPENSSL_VERSION_MINOR)
+  if ("${OPENSSL_VERSION_MAJOR}" GREATER 0 AND "${OPENSSL_VERSION_MINOR}" GREATER 0)
+    option(USE_OPENSSL_NO_SSL2
+      "do not use OPENSSL_NO_SSL2"
+      ON
+    )
+  else ()
+    option(USE_OPENSSL_NO_SSL2
+      "do not use OPENSSL_NO_SSL2"
+      OFF
+    )
+  endif ()
+endif ()
+
+if (USE_OPENSSL_NO_SSL2)
+  add_definitions(-DOPENSSL_NO_SSL2)
 endif ()
 
 ################################################################################
-### @brief BOOST
+## V8
 ################################################################################
 
-set(BOOST_VERSION "1.58.0" CACHE string "BOOST version")
-
-set(BOOST_INCLUDE ${PROJECT_SOURCE_DIR}/3rdParty/boost/${BOOST_VERSION} CACHE path "BOOST include path")
-
-if (BOOST_INCLUDE)
-  include_directories(${BOOST_INCLUDE})
-endif ()
+include_directories(${V8_INCLUDE_DIR})
+add_definitions("-DARANGODB_V8_VERSION=\"${V8_VERSION}\"")
 
 ################################################################################
-### @brief LIBEV
+## ZLIB
 ################################################################################
 
-set(LIBEV_VERSION "unknown" CACHE string "LIBEV version")
-
-if (MSVC OR RASPBIAN) 
-  set(LIBEV_LIBS ev CACHE string "LIBEV libraries")
-else ()
-  set(LIBEV_INCLUDE ${PROJECT_SOURCE_DIR}/3rdParty/libev CACHE path "LIBEV include path")
-  set(LIBEV_LIB_PATH ${PROJECT_SOURCE_DIR}/3rdParty/libev/BUILD/.libs CACHE path "LIBEV library path")
-  set(LIBEV_LIBS ev CACHE string "LIBEV libraries")
-endif ()
-
-if (LIBEV_INCLUDE)
-  include_directories(${LIBEV_INCLUDE})
-endif ()
-
-if (LIBEV_LIB_PATH)
-  link_directories(${LIBEV_LIB_PATH})
-endif ()
-
-add_definitions("-DTRI_LIBEV_VERSION=\"${LIBEV_VERSION}\"")
+include_directories(${ZLIB_INCLUDE_DIR})
+add_definitions("-DARANGODB_ZLIB_VERSION=\"${ZLIB_VERSION}\"")
 
 ################################################################################
-### @brief OPENSSL
+## PATHS, installation, packages
 ################################################################################
 
-if (MSVC)
-  set(OPENSSL_LIBS ssleay;libeay CACHE string "OPENSSL libraries")
-elseif (RASPBIAN)
-  set(OPENSSL_LIBS ssl;crypto CACHE string "OPENSSL libraries")
-else ()
-  set(OPENSSL_INCLUDE "" CACHE path "OPENSSL include path")
-  set(OPENSSL_LIB_PATH "" CACHE path "OPENSSL library path")
-  set(OPENSSL_LIBS ssl;crypto CACHE string "OPENSSL libraries")
-endif ()
+include(ArangoDBInstall)
 
-if (OPENSSL_INCLUDE)
-  include_directories(${OPENSSL_INCLUDE})
-endif ()
+include(packages/packages)
+################################################################################
+## ERRORS FILE
+################################################################################
 
-if (OPENSSL_LIB_PATH)
-  link_directories(${OPENSSL_LIB_PATH})
+if (USE_MAINTAINER_MODE)
+  set(ERROR_FILES
+    lib/Basics/voc-errors.h
+    lib/Basics/voc-errors.cpp
+    js/common/bootstrap/errors.js
+  )
+
+  set(ERROR_FILES_GEN)
+  set(ERRORS_DAT lib/Basics/errors.dat)
+
+  foreach (m IN LISTS ERROR_FILES)
+    add_custom_command(
+      OUTPUT
+        ${CMAKE_SOURCE_DIR}/${m}
+      COMMAND
+        PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE} ./utils/generateErrorfile.sh ./${ERRORS_DAT} ./${m}
+      DEPENDS
+        ${CMAKE_SOURCE_DIR}/${ERRORS_DAT}
+      WORKING_DIRECTORY
+        ${CMAKE_SOURCE_DIR}
+      COMMENT
+        "Building errors files ${m}"
+      VERBATIM
+    )
+
+    list(APPEND ERROR_FILES_GEN ${CMAKE_SOURCE_DIR}/${m})
+  endforeach ()
+
+  add_custom_target(errorfiles ALL DEPENDS ${ERROR_FILES_GEN})
 endif ()
 
 ################################################################################
-### @brief READLINE or LINENOISE
+## MIMETYPES FILE
 ################################################################################
 
-if (MSVC)
-  set(READLINE_LIBS linenoise CACHE string "LINENOISE libraries")
-  set(READLINE_VERSION "linenoise" CACHE string "LINENOISE version")
-else ()
-  set(READLINE_INCLUDE "" CACHE path "READLINE include path")
-  set(READLINE_LIB_PATH "" CACHE path "READLINE library path")
-  set(READLINE_LIBS readline CACHE string "READLINE libraries")
-  set(READLINE_VERSION "unknown" CACHE string "READLINE version")
-endif ()
+if (USE_MAINTAINER_MODE)
+  set(MIMETYPES_FILES
+    lib/Basics/voc-mimetypes.h
+    lib/Basics/voc-mimetypes.cpp
+  )
 
-if (READLINE_INCLUDE)
-  include_directories(${READLINE_INCLUDE})
-endif ()
+  set(MIMETYPES_FILES_GEN)
+  set(MIMETYPES_DAT lib/Basics/mimetypes.dat)
 
-if (READLINE_LIB_PATH)
-  link_directories(${READLINE_LIB_PATH})
-endif ()
+  foreach (m IN LISTS MIMETYPES_FILES)
+    add_custom_command(
+      OUTPUT
+        ${CMAKE_SOURCE_DIR}/${m}
+      COMMAND
+        PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE} ./utils/generateMimetypes.sh ./${MIMETYPES_DAT} ./${m}
+      DEPENDS
+        ${CMAKE_SOURCE_DIR}/${MIMETYPES_DAT}
+      WORKING_DIRECTORY
+        ${CMAKE_SOURCE_DIR}
+      COMMENT
+        "Building mimetypes files ${m}"
+      VERBATIM
+    )
 
-add_definitions("-DTRI_READLINE_VERSION=\"${READLINE_VERSION}\"")
+    list(APPEND MIMETYPES_FILES_GEN ${CMAKE_SOURCE_DIR}/${m})
+  endforeach ()
+
+  add_custom_target(mimetypes ALL DEPENDS ${MIMETYPES_FILES_GEN})
+endif ()
 
 ################################################################################
-### @brief V8
+## SUB-PROJECTS
 ################################################################################
 
-set(V8_VERSION "unknown" CACHE string "V8 version")
-
-if (MSVC OR RASPBIAN)
-  set(V8_LIBS v8_base;v8_libbase;v8_libplatform;v8_nosnapshot CACHE string "V8 libraries")
-elseif (DARWIN)
-  set(V8_INCLUDE ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/include CACHE path "V8 include path")
-  set(V8_LIB_PATH ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/out/x64.release CACHE path "V8 library path")
-  set(V8_LIBS v8_base;v8_libbase;v8_libplatform;v8_nosnapshot CACHE string "V8 libraries")
-else ()
-  set(V8_INCLUDE ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/include CACHE path "V8 include path")
-  set(V8_LIB_PATH ${PROJECT_SOURCE_DIR}/3rdParty/V8-${V8_VERSION}/out/x64.release/obj.target/tools/gyp CACHE path "V8 library path")
-  set(V8_LIBS v8_base;v8_libbase;v8_libplatform;v8_nosnapshot CACHE string "V8 libraries")
-endif ()
-
-if (V8_INCLUDE)
-  include_directories(${V8_INCLUDE})
-endif ()
-
-if (V8_LIB_PATH)
-  link_directories(${V8_LIB_PATH})
-endif ()
-
-add_definitions("-DTRI_V8_VERSION=\"${V8_VERSION}\"")
-
-################################################################################
-### @brief ZLIB
-################################################################################
-
-set(ZLIB_VERSION "unknown" CACHE string "ZLIB version")
-
-if (MSVC OR RASPBIAN)
-  set(ZLIB_LIBS z CACHE string "ZLIB libraries")
-else ()
-  set(ZLIB_INCLUDE ${PROJECT_SOURCE_DIR}/3rdParty/zlib-1.2.7 CACHE path "ZLIB include path")
-  set(ZLIB_LIB_PATH ${PROJECT_SOURCE_DIR}/3rdParty/zlib-1.2.7 CACHE path "ZLIB library path")
-  set(ZLIB_LIBS z CACHE string "ZLIB libraries")
-endif ()
-
-if (ZLIB_INCLUDE)
-  include_directories(${ZLIB_INCLUDE})
-endif ()
-
-if (ZLIB_LIB_PATH)
-  link_directories(${ZLIB_LIB_PATH})
-endif ()
-
-add_definitions("-DTRI_ZLIB_VERSION=\"${ZLIB_VERSION}\"")
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                      SUB-PROJECTS
-## -----------------------------------------------------------------------------
-
-################################################################################
-### @brief lib
-################################################################################
+list(INSERT SYSTEM_LIBRARIES 0
+  ${BT_LIBS}
+  ${ZLIB_LIBS}
+  ${ICU_LIBS}
+  ${OPENSSL_LIBRARIES}
+  ${BASE_LIBS}
+  ${CMAKE_DL_LIBS}
+  ${SYS_LIBS}
+  ${CMAKE_THREAD_LIBS_INIT}
+)
 
 add_subdirectory(lib)
-
-################################################################################
-### @brief arangosh
-################################################################################
-
 add_subdirectory(arangosh)
-
-################################################################################
-### @brief arangod
-################################################################################
-
 add_subdirectory(arangod)
+if (USE_BOOST_UNITTESTS)
+  add_subdirectory(UnitTests)
+endif()
+add_subdirectory(Documentation)
 
-## -----------------------------------------------------------------------------
-## --SECTION--                                                    DOCUMENTATIONS
-## -----------------------------------------------------------------------------
+add_dependencies(arangobench   zlibstatic)
+add_dependencies(arangod       ev zlibstatic)
+add_dependencies(arangodump    zlibstatic)
+add_dependencies(arangoimp     zlibstatic)
+add_dependencies(arangorestore zlibstatic)
+add_dependencies(arangosh      zlibstatic)
 
-################################################################################
-### @brief install manual
-################################################################################
-
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/Documentation/man/
-        DESTINATION share/man)
-
-################################################################################
-### @brief install arangod readme
-################################################################################
-
-if (MSVC)
-  install_readme(README . README.txt)
-  install_readme(README.md . README.md)
-  install_readme(README.windows . README.windows.txt)
+if (NOT USE_PRECOMPILED_V8)
+  # all binaries depend on v8_build because it contains ICU as well
+  add_dependencies(arangobench   v8_build)
+  add_dependencies(arangod       v8_build)
+  add_dependencies(arangodump    v8_build)
+  add_dependencies(arangoimp     v8_build)
+  add_dependencies(arangorestore v8_build)
+  add_dependencies(arangosh      v8_build)
 endif ()
 
-################################################################################
-### @brief install arangod license
-################################################################################
 
-if (MSVC)
-  install_readme(LICENSE . LICENSE.txt)
-endif ()
+#copy compile commands to source dir
+if( EXISTS "${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json" )
+    message(STATUS "copy compile_commands.json")
+    EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+    )
+endif()
 
-## -----------------------------------------------------------------------------
-## --SECTION--                                                             TESTS
-## -----------------------------------------------------------------------------
 
-################################################################################
-### @brief enable testing
-################################################################################
+add_custom_target(packages
+  DEPENDS ${PACKAGES_LIST}
+  )
 
-enable_testing()
-
-################################################################################
-### @brief load test definition
-################################################################################
-
-add_subdirectory(UnitTests)
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                          PACKAGES
-## -----------------------------------------------------------------------------
-
-################################################################################
-### @brief general information
-################################################################################
-
-if (MSVC)
-else ()
-  set(CPACK_SET_DESTDIR ON)
-endif ()
-
-set(CPACK_PACKAGE_VENDOR  "ArangoDB GmbH")
-set(CPACK_PACKAGE_CONTACT "info@arangodb.org")
-set(CPACK_PACKAGE_VERSION "${ARANGODB_VERSION}")
-
-set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
-
-set(CPACK_STRIP_FILES "ON")
-
-if (DARWIN)
-  set(CPACK_PACKAGE_NAME "ArangoDB-CLI")
-elseif (RASPBIAN)
-  set(CPACK_PACKAGE_NAME "arangodb")
-elseif (BUILD_PACKAGE STREQUAL "debian")
-  set(CPACK_PACKAGE_NAME "arangodb")
-elseif (MSVC)
-  set(CPACK_PACKAGE_NAME "ArangoDB")
-endif ()
-
-################################################################################
-### @brief debian package
-################################################################################
-
-if ((BUILD_PACKAGE STREQUAL "debian") OR RASPBIAN)
-  if (RASPBIAN)
-    set(CPACK_SYSTEM_NAME "raspbian")
-  endif ()
-
-  set(CPACK_DEBIAN_PACKAGE_SECTION "database")
-  set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA 
-    "${PROJECT_SOURCE_DIR}/Installation/ARM/postinst;${PROJECT_SOURCE_DIR}/Installation/ARM/preinst;${PROJECT_SOURCE_DIR}/Installation/ARM/postrm;${PROJECT_SOURCE_DIR}/Installation/ARM/prerm;")
-
-  install(
-    FILES ${PROJECT_SOURCE_DIR}/Installation/ARM/rc.arangodb
-    PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-    DESTINATION /etc/init.d
-    RENAME arangodb)
-
-  install(
-    CODE
-      "EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E make_directory \$ENV{DESTDIR}/${CMAKE_INSTALL_PREFIX}/share/arangodb/js/apps)")
-
-  install(
-    CODE
-      "EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E create_symlink /var/lib/arangodb-apps \$ENV{DESTDIR}/${CMAKE_INSTALL_PREFIX}/share/arangodb/js/apps/databases)")
-endif ()
-
-################################################################################
-### @brief MacOSX bundle
-################################################################################
-
-if (DARWIN)
-  set(CPACK_BUNDLE_NAME            "${CPACK_PACKAGE_NAME}")
-  set(CPACK_BUNDLE_PLIST           "${PROJECT_SOURCE_DIR}/Installation/MacOSX/Bundle/Info.plist")
-  set(CPACK_BUNDLE_ICON            "${PROJECT_SOURCE_DIR}/Installation/MacOSX/Bundle/icon.icns")
-  set(CPACK_BUNDLE_STARTUP_COMMAND "${PROJECT_SOURCE_DIR}/Installation/MacOSX/Bundle/arangodb-cli.sh")
-endif ()
-
-################################################################################
-### @brief Micrsoft Installer
-################################################################################
-
-if (MSVC)
-
-  ##############################################################################
-  ## Initializing variables
-  ## to be substituted into Installation/Windows/Templates/NSIS.template.in
-  ##############################################################################
-
-  set(CPACK_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Installation/Windows/Templates")
-  set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL 1)
-  set(BITS 64)
-
-  if(CMAKE_CL_64)
-    SET(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
-    SET(BITS 64)
-  else()
-    SET(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES")
-    SET(BITS 32)
-  endif()
-
-  
-
-  message(STATUS "ARANGO_IMG:  ${ARANGO_IMG}")
-  message(STATUS "ARANGO_ICON: ${ARANGO_ICON}")
-  message(STATUS "RELATIVE_ARANGO_ICON: ${RELATIVE_ARANGO_ICON}")
-
-  install(
-    DIRECTORY "${PROJECT_SOURCE_DIR}/Installation/Windows/Icons"
-    DESTINATION ${TRI_RESOURCEDIR})
-
-  set(CPACK_NSIS_DEFINES "
-    !define BITS ${BITS}
-    !define TRI_FRIENDLY_SVC_NAME '${ARANGODB_FRIENDLY_STRING}'
-    !define TRI_AARDVARK_URL 'http://127.0.0.1:8529'
-    ")
-
-  set(CPACK_PACKAGE_ICON             ${ARANGO_ICON})
-
-  set(CPACK_NSIS_MODIFY_PATH         ON)
-  set(CPACK_NSIS_MUI_ICON            ${ARANGO_ICON})
-  set(CPACK_NSIS_MUI_UNIICON         ${ARANGO_ICON})
-  set(CPACK_NSIS_INSTALLED_ICON_NAME ${RELATIVE_ARANGO_ICON})
-  set(CPACK_NSIS_DISPLAY_NAME,       ${ARANGODB_DISPLAY_NAME})
-  set(CPACK_NSIS_HELP_LINK           ${ARANGODB_HELP_LINK})
-  set(CPACK_NSIS_URL_INFO_ABOUT      ${ARANGODB_URL_INFO_ABOUT})
-  set(CPACK_NSIS_CONTACT             ${ARANGODB_CONTACT})
-
-  ##############################################################################
-  ## etcd
-  ##############################################################################
-
-  if(CMAKE_CL_64)
-    install(PROGRAMS WindowsLibraries/64/bin/etcd-arango.exe
-            DESTINATION ${TRI_SBINDIR_INSTALL})
-
-    install(FILES WindowsLibraries/64/icudtl.dat
-            DESTINATION share/arangodb
-            RENAME icudt54l.dat)
-  else()
-    install(PROGRAMS WindowsLibraries/32/bin/etcd-arango.exe
-            DESTINATION ${TRI_SBINDIR_INSTALL})
-
-    install(FILES WindowsLibraries/32/icudtl.dat
-            DESTINATION share/arangodb
-            RENAME icudt54l.dat)
-  endif()
-
-endif ()
-
-################################################################################
-### @brief use CPack
-################################################################################
-
-include(CPack)
-
-## -----------------------------------------------------------------------------
-## --SECTION--                                                       END-OF-FILE
-## -----------------------------------------------------------------------------
-
-## Local Variables:
-## mode: outline-minor
-## outline-regexp: "### @brief\\|## --SECTION--\\|# -\\*- "
-## End:
+message(INFO " Building for git revision: ${ARANGODB_BUILD_REPOSITORY}")

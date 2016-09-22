@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Class to get and cache information about the cluster state
-///
-/// @file ClusterInfo.h
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,1177 +20,675 @@
 ///
 /// @author Max Neunhoeffer
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2013, triagens GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_CLUSTER_CLUSTER_INFO_H
-#define ARANGODB_CLUSTER_CLUSTER_INFO_H 1
+#ifndef ARANGOD_CLUSTER_CLUSTER_INFO_H
+#define ARANGOD_CLUSTER_CLUSTER_INFO_H 1
 
 #include "Basics/Common.h"
-#include "Basics/JsonHelper.h"
+#include "Basics/StaticStrings.h"
+#include "Basics/VelocyPackHelper.h"
 #include "Basics/Mutex.h"
 #include "Basics/ReadWriteLock.h"
 #include "Cluster/AgencyComm.h"
-#include "VocBase/collection.h"
+#include "Cluster/AgencyCallbackRegistry.h"
 #include "VocBase/voc-types.h"
 #include "VocBase/vocbase.h"
 
-struct TRI_json_t;
-struct TRI_memory_zone_s;
-
-namespace triagens {
-  namespace arango {
-    class ClusterInfo;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                       some types for ClusterInfo
-// -----------------------------------------------------------------------------
-
-    typedef std::string ServerID;              // ID of a server
-    typedef std::string DatabaseID;            // ID/name of a database
-    typedef std::string CollectionID;          // ID of a collection
-    typedef std::string ShardID;               // ID of a shard
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class CollectionInfo
-// -----------------------------------------------------------------------------
-
-    class CollectionInfo {
-      friend class ClusterInfo;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-        CollectionInfo ();
-
-        CollectionInfo (struct TRI_json_t*);
-
-        CollectionInfo (CollectionInfo const&);
-
-        CollectionInfo& operator= (CollectionInfo const&);
-
-        ~CollectionInfo ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks whether there is no info contained
-////////////////////////////////////////////////////////////////////////////////
-
-        bool empty () const {
-          return (nullptr == _json); //|| (id() == 0);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection id
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_voc_cid_t id () const {
-          return triagens::basics::JsonHelper::stringUInt64(_json, "id");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection id as a string
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string id_as_string () const {
-          return triagens::basics::JsonHelper::getStringValue(_json, "id", "");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection name
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string name () const {
-          return triagens::basics::JsonHelper::getStringValue(_json, "name", "");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection type
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_col_type_e type () const {
-          return (TRI_col_type_e) triagens::basics::JsonHelper::getNumericValue<int>(_json, "type", (int) TRI_COL_TYPE_UNKNOWN);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection status
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_vocbase_col_status_e status () const {
-          return (TRI_vocbase_col_status_e) triagens::basics::JsonHelper::getNumericValue<int>(_json, "status", (int) TRI_VOC_COL_STATUS_CORRUPTED);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection status as a string
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string statusString () const {
-          return TRI_GetStatusStringCollectionVocBase(status());
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the deleted flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool deleted () const {
-          return triagens::basics::JsonHelper::getBooleanValue(_json, "deleted", false);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the docompact flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool doCompact () const {
-          return triagens::basics::JsonHelper::getBooleanValue(_json, "doCompact", false);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the issystem flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isSystem () const {
-          return triagens::basics::JsonHelper::getBooleanValue(_json, "isSystem", false);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the isvolatile flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isVolatile () const {
-          return triagens::basics::JsonHelper::getBooleanValue(_json, "isVolatile", false);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the indexes
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t const* getIndexes () const {
-          return triagens::basics::JsonHelper::getObjectElement(_json, "indexes");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns a copy of the key options
-/// the caller is responsible for freeing it
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t* keyOptions () const {
-          TRI_json_t const* keyOptions = triagens::basics::JsonHelper::getObjectElement(_json, "keyOptions");
-
-          if (keyOptions != nullptr) {
-            return TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, keyOptions);
-          }
-
-          return nullptr;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not a collection allows user-defined keys
-////////////////////////////////////////////////////////////////////////////////
-
-        bool allowUserKeys () const {
-          TRI_json_t const* keyOptions = triagens::basics::JsonHelper::getObjectElement(_json, "keyOptions");
-
-          if (keyOptions != nullptr) {
-            return triagens::basics::JsonHelper::getBooleanValue(keyOptions, "allowUserKeys", true);
-          }
-
-          return true; // the default value
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the waitforsync flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool waitForSync () const {
-          return triagens::basics::JsonHelper::getBooleanValue(_json, "waitForSync", false);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the maximal journal size
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_voc_size_t journalSize () const {
-          return triagens::basics::JsonHelper::getNumericValue<TRI_voc_size_t>(_json, "journalSize", 0);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the number of buckets for indexes
-////////////////////////////////////////////////////////////////////////////////
-
-        uint32_t indexBuckets () const {
-          return triagens::basics::JsonHelper::getNumericValue<uint32_t>(_json, "indexBuckets", 1);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the shard keys
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<std::string> shardKeys () const {
-          TRI_json_t* const node = triagens::basics::JsonHelper::getObjectElement(_json, "shardKeys");
-          return triagens::basics::JsonHelper::stringArray(node);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the shard ids
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<std::string, std::string> shardIds () const {
-          TRI_json_t* const node = triagens::basics::JsonHelper::getObjectElement(_json, "shards");
-          return triagens::basics::JsonHelper::stringObject(node);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the number of shards
-////////////////////////////////////////////////////////////////////////////////
-
-        int numberOfShards () const {
-          TRI_json_t* const node = triagens::basics::JsonHelper::getObjectElement(_json, "shards");
-
-          if (TRI_IsObjectJson(node)) {
-            return (int) (TRI_LengthVector(&node->_value._objects) / 2);
-          }
-          return 0;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the json
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t const* getJson () const {
-          return _json;
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-        TRI_json_t*                        _json;
-    };
-
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                       class CollectionInfoCurrent
-// -----------------------------------------------------------------------------
-
-    class CollectionInfoCurrent {
-      friend class ClusterInfo;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-        CollectionInfoCurrent ();
-
-        CollectionInfoCurrent (ShardID const&, struct TRI_json_t*);
-
-        CollectionInfoCurrent (CollectionInfoCurrent const&);
-
-        CollectionInfoCurrent& operator= (CollectionInfoCurrent const&);
-
-        ~CollectionInfoCurrent ();
-
-      private:
-
-        void freeAllJsons ();
-
-        void copyAllJsons ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief add a new shardID and JSON pair, returns true if OK and false
-/// if the shardID already exists. In the latter case nothing happens.
-/// The CollectionInfoCurrent object takes ownership of the TRI_json_t*.
-////////////////////////////////////////////////////////////////////////////////
-
-        bool add (ShardID const& shardID, TRI_json_t* json) {
-          std::map<ShardID, TRI_json_t*>::iterator it = _jsons.find(shardID);
-          if (it == _jsons.end()) {
-            _jsons.insert(make_pair(shardID, json));
-            return true;
-          }
-          return false;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection id
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_voc_cid_t id () const {
-          // The id will always be the same in every shard
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.begin();
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = it->second;
-            return triagens::basics::JsonHelper::stringUInt64(_json, "id");
-          }
-          else {
-            return 0;
+#include <velocypack/Slice.h>
+#include <velocypack/Iterator.h>
+#include <velocypack/velocypack-aliases.h>
+
+namespace arangodb {
+namespace velocypack {
+class Slice;
+}
+class ClusterInfo;
+class LogicalCollection;
+
+typedef std::string ServerID;      // ID of a server
+typedef std::string DatabaseID;    // ID/name of a database
+typedef std::string CollectionID;  // ID of a collection
+typedef std::string ShardID;       // ID of a shard
+
+class CollectionInfoCurrent {
+  friend class ClusterInfo;
+
+ public:
+  CollectionInfoCurrent();
+
+  CollectionInfoCurrent(ShardID const&, VPackSlice);
+
+  CollectionInfoCurrent(CollectionInfoCurrent const&);
+
+  CollectionInfoCurrent(CollectionInfoCurrent&&);
+
+  CollectionInfoCurrent& operator=(CollectionInfoCurrent const&);
+
+  CollectionInfoCurrent& operator=(CollectionInfoCurrent&&);
+
+  ~CollectionInfoCurrent();
+
+ private:
+  void copyAllVPacks();
+
+ public:
+  bool add(ShardID const& shardID, VPackSlice slice) {
+    auto it = _vpacks.find(shardID);
+    if (it == _vpacks.end()) {
+      auto builder = std::make_shared<VPackBuilder>();
+      builder->add(slice);
+      _vpacks.insert(std::make_pair(shardID, builder));
+      return true;
+    }
+    return false;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the indexes
+  //////////////////////////////////////////////////////////////////////////////
+
+  VPackSlice const getIndexes(ShardID const& shardID) const {
+    auto it = _vpacks.find(shardID);
+    if (it != _vpacks.end()) {
+      VPackSlice slice = it->second->slice();
+      return slice.get("indexes");
+    }
+    return VPackSlice::noneSlice();
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the error flag for a shardID
+  //////////////////////////////////////////////////////////////////////////////
+
+  bool error(ShardID const& shardID) const { return getFlag("error", shardID); }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the error flag for all shardIDs
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::unordered_map<ShardID, bool> error() const { return getFlag("error"); }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the errorNum for one shardID
+  //////////////////////////////////////////////////////////////////////////////
+
+  int errorNum(ShardID const& shardID) const {
+    auto it = _vpacks.find(shardID);
+    if (it != _vpacks.end()) {
+      VPackSlice slice = it->second->slice();
+      return arangodb::basics::VelocyPackHelper::getNumericValue<int>(slice,
+                                                                "errorNum", 0);
+    }
+    return 0;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the errorNum for all shardIDs
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::unordered_map<ShardID, int> errorNum() const {
+    std::unordered_map<ShardID, int> m;
+    TRI_voc_size_t s;
+
+    for (auto const& it: _vpacks) {
+      s = arangodb::basics::VelocyPackHelper::getNumericValue<int>(it.second->slice(), "errorNum",
+                                                             0);
+      m.insert(std::make_pair(it.first, s));
+    }
+    return m;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the current leader and followers for a shard
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::vector<ServerID> servers(ShardID const& shardID) const {
+    std::vector<ServerID> v;
+
+    auto it = _vpacks.find(shardID);
+    if (it != _vpacks.end()) {
+      VPackSlice slice = it->second->slice();
+
+      VPackSlice servers = slice.get("servers");
+      if (servers.isArray()) {
+        for (auto const& server: VPackArrayIterator(servers)) {
+          if (server.isString()) {
+            v.push_back(server.copyString());
           }
         }
+      }
+    }
+    return v;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief returns the errorMessage entry for one shardID
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::string errorMessage(ShardID const& shardID) const {
+    auto it = _vpacks.find(shardID);
+    if (it != _vpacks.end()) {
+      VPackSlice slice = it->second->slice();
+      if (slice.isObject() && slice.hasKey("errorMessage")) {
+        return slice.get("errorMessage").copyString();
+      }
+    }
+    return std::string();
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief local helper to return boolean flags
+  //////////////////////////////////////////////////////////////////////////////
+
+ private:
+  bool getFlag(char const* name, ShardID const& shardID) const {
+    auto it = _vpacks.find(shardID);
+    if (it != _vpacks.end()) {
+      return arangodb::basics::VelocyPackHelper::getBooleanValue(it->second->slice(), "errorMessage",
+                                                          "");
+    }
+    return false;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief local helper to return a map to boolean
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::unordered_map<ShardID, bool> getFlag(char const* name) const {
+    std::unordered_map<ShardID, bool> m;
+    for (auto const& it: _vpacks) {
+      auto vpack = it.second;
+      bool b = arangodb::basics::VelocyPackHelper::getBooleanValue(vpack->slice(), name, false);
+      m.insert(std::make_pair(it.first, b));
+    }
+    return m;
+  }
+
+ private:
+  std::unordered_map<ShardID, std::shared_ptr<VPackBuilder>> _vpacks;
+};
+
+class ClusterInfo {
+ private:
+
+  typedef std::unordered_map<CollectionID, std::shared_ptr<LogicalCollection>>
+      DatabaseCollections;
+  typedef std::unordered_map<DatabaseID, DatabaseCollections> AllCollections;
+  typedef std::unordered_map<CollectionID,
+                             std::shared_ptr<CollectionInfoCurrent>>
+      DatabaseCollectionsCurrent;
+  typedef std::unordered_map<DatabaseID, DatabaseCollectionsCurrent>
+      AllCollectionsCurrent;
+
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief initializes library
+  /// We are a singleton class, therefore nobody is allowed to create
+  /// new instances or copy them, except we ourselves.
+  //////////////////////////////////////////////////////////////////////////////
+
+  ClusterInfo(ClusterInfo const&) = delete;             // not implemented
+  ClusterInfo& operator=(ClusterInfo const&) = delete;  // not implemented
+
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief creates library
+  //////////////////////////////////////////////////////////////////////////////
+
+  explicit ClusterInfo(AgencyCallbackRegistry*);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief shuts down library
+  //////////////////////////////////////////////////////////////////////////////
+
+  ~ClusterInfo();
+
+ public:
+  static void createInstance(AgencyCallbackRegistry*);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get the unique instance
+  //////////////////////////////////////////////////////////////////////////////
+
+  static ClusterInfo* instance();
+
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get a number of cluster-wide unique IDs, returns the first
+  /// one and guarantees that <number> are reserved for the caller.
+  //////////////////////////////////////////////////////////////////////////////
+
+  uint64_t uniqid(uint64_t = 1);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection type
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_col_type_e type () const {
-          // The type will always be the same in every shard
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.begin();
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = it->second;
-            return (TRI_col_type_e) triagens::basics::JsonHelper::getNumericValue<int>
-                                      (_json, "type", (int) TRI_COL_TYPE_UNKNOWN);
-          }
-          else {
-            return TRI_COL_TYPE_UNKNOWN;
-          }
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection status for one shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_vocbase_col_status_e status (ShardID const& shardID) const {
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.find(shardID);
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = _jsons.begin()->second;
-            return (TRI_vocbase_col_status_e) triagens::basics::JsonHelper::getNumericValue
-                               <int>
-                               (_json, "status", (int) TRI_VOC_COL_STATUS_CORRUPTED);
-          }
-          return TRI_VOC_COL_STATUS_CORRUPTED;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the collection status for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, TRI_vocbase_col_status_e> status () const {
-          std::map<ShardID, TRI_vocbase_col_status_e> m;
-          std::map<ShardID, TRI_json_t*>::const_iterator it;
-          TRI_vocbase_col_status_e s;
-          for (it = _jsons.begin(); it != _jsons.end(); ++it) {
-            TRI_json_t* _json = it->second;
-            s = (TRI_vocbase_col_status_e) triagens::basics::JsonHelper::getNumericValue
-                          <int>
-                          (_json, "status", (int) TRI_VOC_COL_STATUS_CORRUPTED);
-            m.insert(make_pair(it->first,s));
-          }
-          return m;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief local helper to return boolean flags
-////////////////////////////////////////////////////////////////////////////////
-
-      private:
-
-        bool getFlag (char const* name, ShardID const& shardID) const {
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.find(shardID);
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = _jsons.begin()->second;
-            return triagens::basics::JsonHelper::getBooleanValue(_json,
-                                                                 name, false);
-          }
-          return false;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief local helper to return a map to boolean
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, bool> getFlag (char const* name ) const {
-          std::map<ShardID, bool> m;
-          std::map<ShardID, TRI_json_t*>::const_iterator it;
-          bool b;
-          for (it = _jsons.begin(); it != _jsons.end(); ++it) {
-            TRI_json_t* _json = it->second;
-            b = triagens::basics::JsonHelper::getBooleanValue(_json,
-                                                              name, false);
-            m.insert(make_pair(it->first, b));
-          }
-          return m;
-        }
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the deleted flag for a shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        bool deleted (ShardID const& shardID) const {
-          return getFlag("deleted", shardID);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the deleted flag for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, bool> deleted () const {
-          return getFlag("deleted");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the doCompact flag for a shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        bool doCompact (ShardID const& shardID) const {
-          return getFlag("doCompact", shardID);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the doCompact flag for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, bool> doCompact () const {
-          return getFlag("doCompact");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the isSystem flag for a shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isSystem (ShardID const& shardID) const {
-          return getFlag("isSystem", shardID);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the isSystem flag for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, bool> isSystem () const {
-          return getFlag("isSystem");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the isVolatile flag for a shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isVolatile (ShardID const& shardID) const {
-          return getFlag("isVolatile", shardID);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the isVolatile flag for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, bool> isVolatile () const {
-          return getFlag("isVolatile");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the error flag for a shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        bool error (ShardID const& shardID) const {
-          return getFlag("error", shardID);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the error flag for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, bool> error () const {
-          return getFlag("error");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the waitForSync flag for a shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        bool waitForSync (ShardID const& shardID) const {
-          return getFlag("waitForSync", shardID);
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the waitForSync flag for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, bool> waitForSync () const {
-          return getFlag("waitForSync");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns a copy of the key options
-/// the caller is responsible for freeing it
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t* keyOptions () const {
-          // The id will always be the same in every shard
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.begin();
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = it->second;
-            TRI_json_t const* keyOptions
-                 = triagens::basics::JsonHelper::getObjectElement
-                                        (_json, "keyOptions");
-
-            if (keyOptions != nullptr) {
-              return TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, keyOptions);
-            }
-          }
-
-          return nullptr;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the maximal journal size for one shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_voc_size_t journalSize (ShardID const& shardID) const {
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.find(shardID);
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = _jsons.begin()->second;
-            return triagens::basics::JsonHelper::getNumericValue
-                               <TRI_voc_size_t> (_json, "journalSize", 0);
-          }
-          return 0;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the maximal journal size for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, TRI_voc_size_t> journalSize () const {
-          std::map<ShardID, TRI_voc_size_t> m;
-          std::map<ShardID, TRI_json_t*>::const_iterator it;
-          TRI_voc_size_t s;
-          for (it = _jsons.begin(); it != _jsons.end(); ++it) {
-            TRI_json_t* _json = it->second;
-            s = triagens::basics::JsonHelper::getNumericValue
-                          <TRI_voc_size_t> (_json, "journalSize", 0);
-            m.insert(make_pair(it->first, s));
-          }
-          return m;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the errorNum for one shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        int errorNum (ShardID const& shardID) const {
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.find(shardID);
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = _jsons.begin()->second;
-            return triagens::basics::JsonHelper::getNumericValue
-                               <int> (_json, "errorNum", 0);
-          }
-          return 0;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the errorNum for all shardIDs
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<ShardID, int> errorNum () const {
-          std::map<ShardID, int> m;
-          std::map<ShardID, TRI_json_t*>::const_iterator it;
-          TRI_voc_size_t s;
-          for (it = _jsons.begin(); it != _jsons.end(); ++it) {
-            TRI_json_t* _json = it->second;
-            s = triagens::basics::JsonHelper::getNumericValue
-                          <int> (_json, "errorNum", 0);
-            m.insert(make_pair(it->first,s));
-          }
-          return m;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the shard keys
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<std::string> shardKeys () const {
-          // The shardKeys will always be the same in every shard
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.begin();
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = it->second;
-            TRI_json_t* const node
-              = triagens::basics::JsonHelper::getObjectElement
-                                  (_json, "shardKeys");
-            return triagens::basics::JsonHelper::stringArray(node);
-          }
-          else {
-            std::vector<std::string> result;
-            return result;
-          }
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the shard ids that are currently in the collection
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<ShardID> shardIDs () const {
-          std::vector<ShardID> v;
-          std::map<ShardID, TRI_json_t*>::const_iterator it;
-          for (it = _jsons.begin(); it != _jsons.end(); ++it) {
-            v.push_back(it->first);
-          }
-          return v;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the responsible server for one shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string responsibleServer (ShardID const& shardID) const {
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.find(shardID);
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = _jsons.begin()->second;
-            return triagens::basics::JsonHelper::getStringValue
-                               (_json, "DBServer", "");
-          }
-          return std::string("");
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the errorMessage entry for one shardID
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string errorMessage (ShardID const& shardID) const {
-          std::map<ShardID, TRI_json_t*>::const_iterator it = _jsons.find(shardID);
-          if (it != _jsons.end()) {
-            TRI_json_t* _json = _jsons.begin()->second;
-            return triagens::basics::JsonHelper::getStringValue
-                               (_json, "errorMessage", "");
-          }
-          return std::string("");
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-        std::map<ShardID, TRI_json_t*> _jsons;
-    };
-
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 class ClusterInfo
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                          typedefs
-// -----------------------------------------------------------------------------
-
-    class ClusterInfo {
-      private:
-
-        typedef std::unordered_map<CollectionID,
-                                   std::shared_ptr<CollectionInfo> >
-                DatabaseCollections;
-        typedef std::unordered_map<DatabaseID, DatabaseCollections>
-                AllCollections;
-        typedef std::unordered_map<CollectionID,
-                                   std::shared_ptr<CollectionInfoCurrent> >
-                DatabaseCollectionsCurrent;
-        typedef std::unordered_map<DatabaseID, DatabaseCollectionsCurrent>
-                AllCollectionsCurrent;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initializes library
-/// We are a singleton class, therefore nobody is allowed to create
-/// new instances or copy them, except we ourselves.
-////////////////////////////////////////////////////////////////////////////////
-
-        ClusterInfo (ClusterInfo const&)  = delete;    // not implemented
-        ClusterInfo& operator= (ClusterInfo const&) = delete;  // not implemented
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creates library
-////////////////////////////////////////////////////////////////////////////////
-        
-        ClusterInfo ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief shuts down library
-////////////////////////////////////////////////////////////////////////////////
-
-        ~ClusterInfo ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                             public static methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the unique instance
-////////////////////////////////////////////////////////////////////////////////
-
-        static ClusterInfo* instance ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get a number of cluster-wide unique IDs, returns the first
-/// one and guarantees that <number> are reserved for the caller.
-////////////////////////////////////////////////////////////////////////////////
-
-        uint64_t uniqid (uint64_t = 1);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief flush the caches (used for testing only)
-////////////////////////////////////////////////////////////////////////////////
-
-        void flush ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief ask whether a cluster database exists
-////////////////////////////////////////////////////////////////////////////////
-
-        bool doesDatabaseExist (DatabaseID const&,
-                                bool = false);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get list of databases in the cluster
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<DatabaseID> listDatabases (bool = false);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief (re-)load the information about planned collections from the agency
-/// Usually one does not have to call this directly.
-////////////////////////////////////////////////////////////////////////////////
-
-        void loadPlannedCollections (bool = true);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief (re-)load the information about planned databases
-/// Usually one does not have to call this directly.
-////////////////////////////////////////////////////////////////////////////////
-
-        void loadPlannedDatabases ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief (re-)load the information about current databases
-/// Usually one does not have to call this directly.
-////////////////////////////////////////////////////////////////////////////////
-
-        void loadCurrentDatabases ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief ask about a collection
-/// If it is not found in the cache, the cache is reloaded once. The second
-/// argument can be a collection ID or a collection name (both cluster-wide).
-////////////////////////////////////////////////////////////////////////////////
-
-        std::shared_ptr<CollectionInfo> getCollection (DatabaseID const&,
-                                                       CollectionID const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get properties of a collection
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_col_info_t getCollectionProperties (CollectionInfo const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get properties of a collection
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_col_info_t getCollectionProperties (DatabaseID const&,
-                                                CollectionID const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief ask about all collections
-////////////////////////////////////////////////////////////////////////////////
-
-        const std::vector<std::shared_ptr<CollectionInfo>> getCollections
-                                                           (DatabaseID const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief (re-)load the information about current collections from the agency
-/// Usually one does not have to call this directly. Note that this is
-/// necessarily complicated, since here we have to consider information
-/// about all shards of a collection.
-////////////////////////////////////////////////////////////////////////////////
-
-        void loadCurrentCollections (bool = true);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief ask about a collection in current. This returns information about
-/// all shards in the collection.
-/// If it is not found in the cache, the cache is reloaded once.
-////////////////////////////////////////////////////////////////////////////////
-
-        std::shared_ptr<CollectionInfoCurrent> getCollectionCurrent (
-                                                    DatabaseID const&,
-                                                    CollectionID const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create database in coordinator
-////////////////////////////////////////////////////////////////////////////////
-
-        int createDatabaseCoordinator (std::string const& name,
-                                       TRI_json_t const* json,
-                                       std::string& errorMsg, double timeout);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief drop database in coordinator
-////////////////////////////////////////////////////////////////////////////////
-
-        int dropDatabaseCoordinator (std::string const& name,
-                                     std::string& errorMsg,
-                                     double timeout);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create collection in coordinator
-////////////////////////////////////////////////////////////////////////////////
-
-        int createCollectionCoordinator (std::string const& databaseName,
-                                         std::string const& collectionID,
-                                         uint64_t numberOfShards,
-                                         TRI_json_t const* json,
-                                         std::string& errorMsg,
-                                         double timeout);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief drop collection in coordinator
-////////////////////////////////////////////////////////////////////////////////
-
-        int dropCollectionCoordinator (std::string const& databaseName,
-                                       std::string const& collectionID,
-                                       std::string& errorMsg,
-                                       double timeout);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief set collection properties in coordinator
-////////////////////////////////////////////////////////////////////////////////
-
-        int setCollectionPropertiesCoordinator (std::string const& databaseName,
-                                                std::string const& collectionID,
-                                                TRI_col_info_t const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief set collection status in coordinator
-////////////////////////////////////////////////////////////////////////////////
-
-        int setCollectionStatusCoordinator (std::string const& databaseName,
-                                            std::string const& collectionID,
-                                            TRI_vocbase_col_status_e status);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief ensure an index in coordinator.
-////////////////////////////////////////////////////////////////////////////////
-
-        int ensureIndexCoordinator (std::string const& databaseName,
-                                    std::string const& collectionID,
-                                    TRI_json_t const* json,
-                                    bool create,
-                                    bool (*compare)(TRI_json_t const*, TRI_json_t const*),
-                                    TRI_json_t*& resultJson,
-                                    std::string& errorMsg,
-                                    double timeout);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief drop an index in coordinator.
-////////////////////////////////////////////////////////////////////////////////
-
-        int dropIndexCoordinator (std::string const& databaseName,
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief flush the caches (used for testing only)
+  //////////////////////////////////////////////////////////////////////////////
+
+  void flush();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief ask whether a cluster database exists
+  //////////////////////////////////////////////////////////////////////////////
+
+  bool doesDatabaseExist(DatabaseID const&, bool = false);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get list of databases in the cluster
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::vector<DatabaseID> databases(bool = false);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief (re-)load the information about our plan
+  /// Usually one does not have to call this directly.
+  //////////////////////////////////////////////////////////////////////////////
+
+  void loadPlan();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief (re-)load the information about current state
+  /// Usually one does not have to call this directly.
+  //////////////////////////////////////////////////////////////////////////////
+
+  void loadCurrent();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief ask about a collection
+  /// If it is not found in the cache, the cache is reloaded once. The second
+  /// argument can be a collection ID or a collection name (both cluster-wide).
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<LogicalCollection> getCollection(DatabaseID const&,
+                                                   CollectionID const&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief ask about all collections
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::vector<std::shared_ptr<LogicalCollection>> const getCollections(
+      DatabaseID const&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief (re-)load the information about current collections from the agency
+  /// Usually one does not have to call this directly. Note that this is
+  /// necessarily complicated, since here we have to consider information
+  /// about all shards of a collection.
+  //////////////////////////////////////////////////////////////////////////////
+
+  void loadCurrentCollections();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief ask about a collection in current. This returns information about
+  /// all shards in the collection.
+  /// If it is not found in the cache, the cache is reloaded once.
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<CollectionInfoCurrent> getCollectionCurrent(
+      DatabaseID const&, CollectionID const&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create database in coordinator
+  //////////////////////////////////////////////////////////////////////////////
+
+  int createDatabaseCoordinator(std::string const&,
+                                arangodb::velocypack::Slice const&,
+                                std::string&, double);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief drop database in coordinator
+  //////////////////////////////////////////////////////////////////////////////
+
+  int dropDatabaseCoordinator(std::string const& name, std::string& errorMsg,
+                              double timeout);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create collection in coordinator
+  //////////////////////////////////////////////////////////////////////////////
+
+  int createCollectionCoordinator(std::string const& databaseName,
                                   std::string const& collectionID,
-                                  TRI_idx_iid_t iid,
-                                  std::string& errorMsg,
-                                  double timeout);
+                                  uint64_t numberOfShards,
+                                  arangodb::velocypack::Slice const& json,
+                                  std::string& errorMsg, double timeout);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief drop collection in coordinator
+  //////////////////////////////////////////////////////////////////////////////
+
+  int dropCollectionCoordinator(std::string const& databaseName,
+                                std::string const& collectionID,
+                                std::string& errorMsg, double timeout);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief set collection properties in coordinator
+  //////////////////////////////////////////////////////////////////////////////
+
+  int setCollectionPropertiesCoordinator(std::string const& databaseName,
+                                         std::string const& collectionID,
+                                         LogicalCollection const*);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief set collection status in coordinator
+  //////////////////////////////////////////////////////////////////////////////
+
+  int setCollectionStatusCoordinator(std::string const& databaseName,
+                                     std::string const& collectionID,
+                                     TRI_vocbase_col_status_e status);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief ensure an index in coordinator.
+  //////////////////////////////////////////////////////////////////////////////
+
+  int ensureIndexCoordinator(
+      std::string const& databaseName, std::string const& collectionID,
+      arangodb::velocypack::Slice const& slice, bool create,
+      bool (*compare)(arangodb::velocypack::Slice const&,
+                      arangodb::velocypack::Slice const&),
+      arangodb::velocypack::Builder& resultBuilder, std::string& errorMsg, double timeout);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief drop an index in coordinator.
+  //////////////////////////////////////////////////////////////////////////////
+
+  int dropIndexCoordinator(std::string const& databaseName,
+                           std::string const& collectionID, TRI_idx_iid_t iid,
+                           std::string& errorMsg, double timeout);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief (re-)load the information about servers from the agency
+  /// Usually one does not have to call this directly.
+  //////////////////////////////////////////////////////////////////////////////
+
+  void loadServers();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief find the endpoint of a server from its ID.
+  /// If it is not found in the cache, the cache is reloaded once, if
+  /// it is still not there an empty string is returned as an error.
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::string getServerEndpoint(ServerID const&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief find the server ID for an endpoint.
+  /// If it is not found in the cache, the cache is reloaded once, if
+  /// it is still not there an empty string is returned as an error.
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::string getServerName(std::string const& endpoint);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief (re-)load the information about all coordinators from the agency
+  /// Usually one does not have to call this directly.
+  //////////////////////////////////////////////////////////////////////////////
+
+  void loadCurrentCoordinators();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief (re-)load the information about all DBservers from the agency
+  /// Usually one does not have to call this directly.
+  //////////////////////////////////////////////////////////////////////////////
+
+  void loadCurrentDBServers();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return a list of all DBServers in the cluster that have
+  /// currently registered
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::vector<ServerID> getCurrentDBServers();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief find the servers who are responsible for a shard (one leader
+  /// and possibly multiple followers).
+  /// If it is not found in the cache, the cache is reloaded once, if
+  /// it is still not there a pointer to an empty vector is returned as
+  /// an error.
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<std::vector<ServerID>> getResponsibleServer(ShardID const&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief find the shard list of a collection, sorted numerically
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<std::vector<ShardID>> getShardList(CollectionID const&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief find the shard that is responsible for a document
+  //////////////////////////////////////////////////////////////////////////////
+
+  int getResponsibleShard(CollectionID const&, arangodb::velocypack::Slice,
+                          bool docComplete, ShardID& shardID,
+                          bool& usesDefaultShardingAttributes,
+                          std::string const& key = "");
+
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the list of coordinator server names
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::vector<ServerID> getCurrentCoordinators();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief invalidate planned
+  //////////////////////////////////////////////////////////////////////////////
+
+  void invalidatePlan();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief invalidate current
+  //////////////////////////////////////////////////////////////////////////////
+
+  void invalidateCurrent();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get current "Plan" structure
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<VPackBuilder> getPlan();
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get current "Current" structure
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<VPackBuilder> getCurrent();
+
+ private:
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get an operation timeout
+  //////////////////////////////////////////////////////////////////////////////
+
+  double getTimeout(double timeout) const {
+    if (timeout == 0.0) {
+      return 24.0 * 3600.0;
+    }
+    return timeout;
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get the poll interval
+  //////////////////////////////////////////////////////////////////////////////
+
+  double getPollInterval() const { return 5.0; }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get the timeout for reloading the server list
+  //////////////////////////////////////////////////////////////////////////////
+
+  double getReloadServerListTimeout() const { return 60.0; }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief object for agency communication
+  //////////////////////////////////////////////////////////////////////////////
+
+  AgencyComm _agency;
+
+  AgencyCallbackRegistry* _agencyCallbackRegistry;
+
+  // Cached data from the agency, we reload whenever necessary:
+
+  // We group the data, each group has an atomic "valid-flag" which is
+  // used for lazy loading in the beginning. It starts as false, is set
+  // to true at each reload and is only reset to false if the cache
+  // needs to be invalidated. The variable is atomic to be able to check
+  // it without acquiring the read lock (see below). Flush is just an
+  // explicit reload for all data and is only used in tests.
+  // Furthermore, each group has a mutex that protects against
+  // simultaneously contacting the agency for an update.
+  // In addition, each group has two atomic version numbers, these are
+  // used to prevent a stampede if multiple threads notice concurrently
+  // that an update from the agency is necessary. Finally, there is a
+  // read/write lock which protects the actual data structure.
+  // We encapsulate this protection in the struct ProtectionData:
+
+  struct ProtectionData {
+    std::atomic<bool> isValid;
+    Mutex mutex;
+    std::atomic<uint64_t> wantedVersion;
+    std::atomic<uint64_t> doneVersion;
+    arangodb::basics::ReadWriteLock lock;
+
+    ProtectionData() : isValid(false), wantedVersion(0), doneVersion(0) {}
+  };
+
+  // The servers, first all, we only need Current here:
+  std::unordered_map<ServerID, std::string>
+      _servers;  // from Current/ServersRegistered
+  ProtectionData _serversProt;
+
+  // The DBServers, also from Current:
+  std::unordered_map<ServerID, ServerID> _DBServers;  // from Current/DBServers
+  ProtectionData _DBServersProt;
+
+  // The Coordinators, also from Current:
+  std::unordered_map<ServerID, ServerID>
+      _coordinators;  // from Current/Coordinators
+  ProtectionData _coordinatorsProt;
+
+  std::shared_ptr<VPackBuilder> _plan;
+  std::shared_ptr<VPackBuilder> _current;
+
+  std::unordered_map<DatabaseID, VPackSlice> _plannedDatabases;  // from Plan/Databases
+
+  ProtectionData _planProt;
+
+  std::unordered_map<DatabaseID,
+                     std::unordered_map<ServerID, VPackSlice>>
+      _currentDatabases;  // from Current/Databases
+  ProtectionData _currentProt;
+
+  // We need information about collections, again we have
+  // data from Plan and from Current.
+  // The information for _shards and _shardKeys are filled from the
+  // Plan (since they are fixed for the lifetime of the collection).
+  // _shardIds is filled from Current, since we have to be able to
+  // move shards between servers, and Plan contains who ought to be
+  // responsible and Current contains the actual current responsibility.
+
+  // The Plan state:
+  AllCollections _plannedCollections;  // from Plan/Collections/
+  std::unordered_map<CollectionID,
+                     std::shared_ptr<std::vector<std::string>>>
+      _shards;  // from Plan/Collections/
+                // (may later come from Current/Collections/ )
+  std::unordered_map<CollectionID,
+                     std::shared_ptr<std::vector<std::string>>>
+      _shardKeys;  // from Plan/Collections/
+
+  // The Current state:
+  AllCollectionsCurrent _currentCollections;  // from Current/Collections/
+  std::unordered_map<ShardID, std::shared_ptr<std::vector<ServerID>>>
+      _shardIds;  // from Current/Collections/
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief uniqid sequence
+  //////////////////////////////////////////////////////////////////////////////
+
+  struct {
+    uint64_t _currentValue;
+    uint64_t _upperValue;
+  } _uniqid;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief lock for uniqid sequence
+  //////////////////////////////////////////////////////////////////////////////
+
+  Mutex _idLock;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief the sole instance
+  //////////////////////////////////////////////////////////////////////////////
+
+  static ClusterInfo* _theinstance;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief how big a batch is for unique ids
+  //////////////////////////////////////////////////////////////////////////////
+
+  static uint64_t const MinIdsPerBatch = 1000000;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief default wait timeout
+  //////////////////////////////////////////////////////////////////////////////
+
+  static double const operationTimeout;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief reload timeout
+  //////////////////////////////////////////////////////////////////////////////
+
+  static double const reloadServerListTimeout;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief (re-)load the information about servers from the agency
-/// Usually one does not have to call this directly.
+/// @brief a class to track followers that are in sync for a shard
 ////////////////////////////////////////////////////////////////////////////////
 
-        void loadServers ();
+class FollowerInfo {
+  std::shared_ptr<std::vector<ServerID> const> _followers;
+  Mutex                                        _mutex;
+  arangodb::LogicalCollection*                 _docColl;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief find the endpoint of a server from its ID.
-/// If it is not found in the cache, the cache is reloaded once, if
-/// it is still not there an empty string is returned as an error.
-////////////////////////////////////////////////////////////////////////////////
+ public:
 
-        std::string getServerEndpoint (ServerID const&);
+  explicit FollowerInfo(arangodb::LogicalCollection* d)
+    : _followers(new std::vector<ServerID>()), _docColl(d) { }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief find the server ID for an endpoint.
-/// If it is not found in the cache, the cache is reloaded once, if
-/// it is still not there an empty string is returned as an error.
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief get information about current followers of a shard.
+  //////////////////////////////////////////////////////////////////////////////
 
-        std::string getServerName (std::string const& endpoint);
+  std::shared_ptr<std::vector<ServerID> const> get();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief (re-)load the information about all coordinators from the agency
-/// Usually one does not have to call this directly.
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief add a follower to a shard, this is only done by the server side
+  /// of the "get-in-sync" capabilities. This reports to the agency under
+  /// `/Current` but in asynchronous "fire-and-forget" way. The method
+  /// fails silently, if the follower information has since been dropped
+  /// (see `dropFollowerInfo` below).
+  //////////////////////////////////////////////////////////////////////////////
 
-        void loadCurrentCoordinators ();
+  void add(ServerID const& s);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief (re-)load the information about all DBservers from the agency
-/// Usually one does not have to call this directly.
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief remove a follower from a shard, this is only done by the
+  /// server if a synchronous replication request fails. This reports to
+  /// the agency under `/Current` but in an asynchronous "fire-and-forget"
+  /// way.
+  //////////////////////////////////////////////////////////////////////////////
 
-        void loadCurrentDBServers ();
+  void remove(ServerID const& s);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a list of all DBServers in the cluster that have
-/// currently registered
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief clear follower list, no changes in agency necesary
+  //////////////////////////////////////////////////////////////////////////////
 
-        std::vector<ServerID> getCurrentDBServers ();
+  void clear();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief lookup the server's endpoint by scanning Target/MapIDToEnpdoint for
-/// our id
-////////////////////////////////////////////////////////////////////////////////
+};
 
-        std::string getTargetServerEndpoint (ServerID const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief find the server who is responsible for a shard
-/// If it is not found in the cache, the cache is reloaded once, if
-/// it is still not there an empty string is returned as an error.
-////////////////////////////////////////////////////////////////////////////////
-
-        ServerID getResponsibleServer (ShardID const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief find the shard that is responsible for a document
-////////////////////////////////////////////////////////////////////////////////
-
-        int getResponsibleShard (CollectionID const&,
-                                 TRI_json_t const*,
-                                 bool docComplete,
-                                 ShardID& shardID,
-                                 bool& usesDefaultShardingAttributes);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the list of coordinator server names
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<ServerID> getCurrentCoordinators ();
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief actually clears a list of planned databases
-////////////////////////////////////////////////////////////////////////////////
-
-        void clearPlannedDatabases (
-               std::unordered_map<DatabaseID, TRI_json_t*>& databases);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief actually clears a list of current databases
-////////////////////////////////////////////////////////////////////////////////
-
-        void clearCurrentDatabases (
-               std::unordered_map<DatabaseID, 
-                                  std::unordered_map<ServerID, TRI_json_t*>>&
-               databases);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get an operation timeout
-////////////////////////////////////////////////////////////////////////////////
-
-        double getTimeout (double timeout) const {
-          if (timeout == 0.0) {
-            return 24.0 * 3600.0;
-          }
-          return timeout;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the poll interval
-////////////////////////////////////////////////////////////////////////////////
-
-        double getPollInterval () const {
-          return 5.0;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the timeout for reloading the server list
-////////////////////////////////////////////////////////////////////////////////
-
-        double getReloadServerListTimeout () const {
-          return 60.0;
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-        AgencyComm                         _agency;
-        
-        // Cached data from the agency, we reload whenever necessary:
- 
-        // We group the data, each group has an atomic "valid-flag"
-        // which is used for lazy loading in the beginning. It starts
-        // as false, is set to true at each reload and is never reset
-        // to false in the lifetime of the server. The variable is
-        // atomic to be able to check it without acquiring
-        // the read lock (see below). Flush is just an explicit reload
-        // for all data and is only used in tests.
-        // Furthermore, each group has a mutex that protects against
-        // simultaneously contacting the agency for an update.
-        // In addition, each group has an atomic version number, this is used
-        // to prevent a stampede if multiple threads notice concurrently
-        // that an update from the agency is necessary. Finally, there is
-        // a read/write lock which protects the actual data structure.
-        // We encapsulate this protection in the struct ProtectionData:
- 
-        struct ProtectionData {
-          std::atomic<bool> isValid;
-          triagens::basics::Mutex mutex;
-          std::atomic<uint64_t> version;
-          triagens::basics::ReadWriteLock lock;
-
-          ProtectionData () : isValid(false), version(0) {
-          }
-        };
-
-        // The servers, first all, we only need Current here:
-        std::unordered_map<ServerID, std::string>
-            _servers;                   // from Current/ServersRegistered
-        ProtectionData _serversProt;
-
-        // The DBServers, also from Current:
-        std::unordered_map<ServerID, ServerID>
-            _DBServers;                 // from Current/DBServers
-        ProtectionData _DBServersProt;
-
-        // The Coordinators, also from Current:
-        std::unordered_map<ServerID, ServerID>
-            _coordinators;              // from Current/Coordinators
-        ProtectionData _coordinatorsProt;
-
-        // First the databases, there is Plan and Current information:
-        std::unordered_map<DatabaseID, struct TRI_json_t*>
-            _plannedDatabases;          // from Plan/Databases
-        ProtectionData _plannedDatabasesProt;
-
-        std::unordered_map<DatabaseID,
-                           std::unordered_map<ServerID, struct TRI_json_t*>>
-            _currentDatabases;          // from Current/Databases
-        ProtectionData _currentDatabasesProt;
-
-        // Finally, we need information about collections, again we have
-        // data from Plan and from Current.
-        // The information for _shards and _shardKeys are filled from the 
-        // Plan (since they are fixed for the lifetime of the collection).
-        // _shardIds is filled from Current, since we have to be able to
-        // move shards between servers, and Plan contains who ought to be
-        // responsible and Current contains the actual current responsibility.
-
-        // The Plan state:
-        AllCollections
-            _plannedCollections;               // from Plan/Collections/
-        ProtectionData _plannedCollectionsProt;
-        std::unordered_map<CollectionID,
-                           std::shared_ptr<std::vector<std::string>>>
-            _shards;                    // from Plan/Collections/
-                               // (may later come from Current/Colletions/ )
-        std::unordered_map<CollectionID,
-                           std::shared_ptr<std::vector<std::string>>>
-            _shardKeys;                 // from Plan/Collections/
-
-        // The Current state:
-        AllCollectionsCurrent
-            _currentCollections;        // from Current/Collections/
-        ProtectionData _currentCollectionsProt;
-        std::unordered_map<ShardID, ServerID>
-            _shardIds;                  // from Current/Collections/
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief uniqid sequence
-////////////////////////////////////////////////////////////////////////////////
-
-        struct {
-          uint64_t _currentValue;
-          uint64_t _upperValue;
-        }
-        _uniqid;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief lock for uniqid sequence
-////////////////////////////////////////////////////////////////////////////////
-
-        triagens::basics::Mutex _idLock;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                          private static variables
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the sole instance
-////////////////////////////////////////////////////////////////////////////////
-
-        static ClusterInfo* _theinstance;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief how big a batch is for unique ids
-////////////////////////////////////////////////////////////////////////////////
-
-        static const uint64_t MinIdsPerBatch = 1000000;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief default wait timeout
-////////////////////////////////////////////////////////////////////////////////
-
-        static const double operationTimeout;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief reload timeout
-////////////////////////////////////////////////////////////////////////////////
-
-        static const double reloadServerListTimeout;
-
-    };
-
-  }  // end namespace arango
-}  // end namespace triagens
+}  // end namespace arangodb
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

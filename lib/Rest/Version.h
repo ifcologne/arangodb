@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief server version information
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,8 +19,6 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_REST_VERSION_H
@@ -32,159 +26,109 @@
 
 #include "Basics/Common.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              forward declarations
-// -----------------------------------------------------------------------------
+#include "Basics/build.h"
 
-struct TRI_json_t;
-struct TRI_memory_zone_s;
+#ifdef USE_ENTERPRISE
+#include "Enterprise/Basics/Version.h"
 
+#ifndef ARANGODB_ENTERPRISE_VERSION
+#error "enterprise version number is not defined"
+#endif
 
-namespace triagens {
-  namespace rest {
+#ifdef _DEBUG
+#define ARANGODB_VERSION_FULL ARANGODB_VERSION " " ARANGODB_ENTERPRISE_VERSION " [" TRI_PLATFORM "-DEBUG]"
+#else
+#define ARANGODB_VERSION_FULL ARANGODB_VERSION " " ARANGODB_ENTERPRISE_VERSION " [" TRI_PLATFORM "]"
+#endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                     class Version
-// -----------------------------------------------------------------------------
+#else
 
-    class Version {
+#ifdef ARANGODB_ENTERPRISE_VERSION
+#error "enterprise version number should not be defined"
+#endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the version information
-////////////////////////////////////////////////////////////////////////////////
-
-        Version () = delete;
-        Version (Version const&) = delete;
-        Version& operator= (Version const&) = delete;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                           public static functions
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initialize
-////////////////////////////////////////////////////////////////////////////////
-
-        static void initialize ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get numeric server version
-////////////////////////////////////////////////////////////////////////////////
-
-        static int32_t getNumericServerVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get server version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getServerVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get V8 version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getV8Version ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get OpenSSL version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getOpenSSLVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get libev version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getLibevVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get zlib version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getZLibVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get readline version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getReadlineVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get ICU version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getICUVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get configure
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getConfigure ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get configure environment
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getConfigureEnvironment ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get repository version
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getRepositoryVersion ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get build date
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getBuildDate ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a server version string
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getVerboseVersionString ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get detailed version information as a (multi-line) string
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string getDetailed ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief JSONise all data
-////////////////////////////////////////////////////////////////////////////////
-
-        static void getJson (struct TRI_memory_zone_s*, struct TRI_json_t*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                           public static variables
-// -----------------------------------------------------------------------------
-
-      public:
-
-        static std::map<std::string, std::string> Values;
-
-    };
-
-  }
-}
+#ifdef _DEBUG
+#define ARANGODB_VERSION_FULL ARANGODB_VERSION " [" TRI_PLATFORM "-DEBUG]"
+#else
+#define ARANGODB_VERSION_FULL ARANGODB_VERSION " [" TRI_PLATFORM "]"
+#endif
 
 #endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+namespace arangodb {
+namespace velocypack {
+class Builder;
+}
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+namespace rest {
+
+class Version {
+ private:
+  /// @brief create the version information
+  Version() = delete;
+  Version(Version const&) = delete;
+  Version& operator=(Version const&) = delete;
+
+ public:
+  /// @brief parse a version string into major, minor
+  /// returns -1, -1 when the version string has an invalid format
+  static std::pair<int, int> parseVersionString(std::string const&);
+
+  /// @brief initialize
+  static void initialize();
+
+  /// @brief get numeric server version
+  static int32_t getNumericServerVersion();
+
+  /// @brief get server version
+  static std::string getServerVersion();
+
+  /// @brief get BOOST version
+  static std::string getBoostVersion();
+
+  /// @brief get V8 version
+  static std::string getV8Version();
+
+  /// @brief get OpenSSL version
+  static std::string getOpenSSLVersion();
+
+  /// @brief get libev version
+  static std::string getLibevVersion();
+
+  /// @brief get vpack version
+  static std::string getVPackVersion();
+
+  /// @brief get zlib version
+  static std::string getZLibVersion();
+
+  /// @brief get ICU version
+  static std::string getICUVersion();
+  
+  /// @brief get compiler
+  static std::string getCompiler();
+  
+  /// @brief get endianness
+  static std::string getEndianness();
+
+  /// @brief get build date
+  static std::string getBuildDate();
+  
+  /// @brief get build repository
+  static std::string getBuildRepository();
+
+  /// @brief return a server version string
+  static std::string getVerboseVersionString();
+
+  /// @brief get detailed version information as a (multi-line) string
+  static std::string getDetailed();
+
+  /// @brief VelocyPack all data
+  static void getVPack(arangodb::velocypack::Builder&);
+
+ public:
+  static std::map<std::string, std::string> Values;
+};
+}
+}
+
+#endif

@@ -55,6 +55,36 @@ var uiComponentsHelper = uiComponentsHelper || {};
       $(".gv_action_button").each(function(i, btn) {
         $(btn).toggleClass("active", false);
       });
+
+      if (button.id === "control_event_new_node") {
+        $('.node').css('cursor', 'pointer');
+        $('.gv-background').css('cursor', 'copy');
+      }
+      else if (button.id === "control_event_drag") {
+        $('.node').css('cursor', '-webkit-grabbing');
+        $('.gv-background').css('cursor', 'default');
+      }
+      else if (button.id === "control_event_expand") {
+        $('.node').css('cursor', 'grabbing');
+        $('.gv-background').css('cursor', 'default');
+      }
+      else if (button.id === "control_event_view") {
+        $('.node').css('cursor', '-webkit-zoom-in');
+        $('.gv-background').css('cursor', 'default');
+      }
+      else if (button.id === "control_event_edit") {
+        $('.gv-background .node').css('cursor', 'context-menu');
+        $('.gv-background').css('cursor', 'default');
+      }
+      else if (button.id === "control_event_connect") {
+        $('.node').css('cursor', 'ne-resize');
+        $('.gv-background').css('cursor', 'default');
+      }
+      else if (button.id === "control_event_delete") {
+        $('.node').css('cursor', 'pointer');
+        $('.gv-background').css('cursor', 'default');
+      }
+
       $(button).toggleClass("active", true);
       callback();
     };

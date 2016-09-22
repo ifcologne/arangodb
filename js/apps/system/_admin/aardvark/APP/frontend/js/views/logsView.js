@@ -1,48 +1,48 @@
-/*jshint browser: true */
-/*jshint unused: false */
-/*global Backbone, arangoHelper, $, window, templateEngine*/
+/* jshint browser: true */
+/* jshint unused: false */
+/* global arangoHelper, $, window, templateEngine*/
 
 (function () {
-  "use strict";
+  'use strict';
 
   window.LogsView = window.PaginationView.extend({
-
     el: '#content',
     id: '#logContent',
-    paginationDiv: "#logPaginationDiv",
-    idPrefix: "logTable",
+    paginationDiv: '#logPaginationDiv',
+    idPrefix: 'logTable',
     fetchedAmount: false,
 
-    initialize: function () {
+    initialize: function (options) {
+      this.options = options;
       this.convertModelToJSON();
     },
 
-    currentLoglevel: "logall",
+    currentLoglevel: 'logall',
 
     events: {
-      "click #arangoLogTabbar button": "setActiveLoglevel",
-      "click #logTable_first": "firstPage",
-      "click #logTable_last": "lastPage"
+      'click #arangoLogTabbar button': 'setActiveLoglevel',
+      'click #logTable_first': 'firstPage',
+      'click #logTable_last': 'lastPage'
     },
 
-    template: templateEngine.createTemplate("logsView.ejs"),
-    tabbar: templateEngine.createTemplate("arangoTabbar.ejs"),
-    table: templateEngine.createTemplate("arangoTable.ejs"),
+    template: templateEngine.createTemplate('logsView.ejs'),
+    tabbar: templateEngine.createTemplate('arangoTabbar.ejs'),
+    table: templateEngine.createTemplate('arangoTable.ejs'),
 
     tabbarElements: {
-      id: "arangoLogTabbar",
+      id: 'arangoLogTabbar',
       titles: [
-        ["Debug", "logdebug"],
-        ["Warning", "logwarning"],
-        ["Error", "logerror"],
-        ["Info", "loginfo"],
-        ["All", "logall"]
+        ['All', 'logall'],
+        ['Info', 'loginfo'],
+        ['Error', 'logerror'],
+        ['Warning', 'logwarning'],
+        ['Debug', 'logdebug']
       ]
     },
 
     tableDescription: {
-      id: "arangoLogTable",
-      titles: ["Loglevel", "Date", "Message"],
+      id: 'arangoLogTable',
+      titles: ['Loglevel', 'Date', 'Message'],
       rows: []
     },
 
@@ -57,11 +57,13 @@
       }
     },
 
-    initTotalAmount: function() {
+    initTotalAmount: function () {
       var self = this;
       this.collection = this.options[this.currentLoglevel];
       this.collection.fetch({
-        data: $.param({ test: true}),
+        data: $.param(
+          {test: true}
+        ),
         success: function () {
           self.convertModelToJSON();
         }
@@ -70,7 +72,9 @@
     },
 
     invertArray: function (array) {
-      var rtnArr = [], counter = 0, i;
+      var rtnArr = [];
+      var counter = 0;
+      var i;
       for (i = array.length - 1; i >= 0; i--) {
         rtnArr[counter] = array[i];
         counter++;
@@ -98,7 +102,7 @@
               model.get('text')]);
           });
           self.tableDescription.rows = self.invertArray(rowsArray);
-          //invert order
+          // invert order
           self.render();
         }
       });
@@ -119,4 +123,3 @@
     }
   });
 }());
-

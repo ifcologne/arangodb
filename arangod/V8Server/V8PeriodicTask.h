@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief periodic V8 task
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,153 +19,50 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_V8SERVER_V8PERIODIC_TASK_H
-#define ARANGODB_V8SERVER_V8PERIODIC_TASK_H 1
+#ifndef ARANGOD_V8_SERVER_V8_PERIODIC_TASK_H
+#define ARANGOD_V8_SERVER_V8_PERIODIC_TASK_H 1
 
 #include "Basics/Common.h"
-
 #include "Scheduler/PeriodicTask.h"
-
 #include "VocBase/vocbase.h"
 
-struct TRI_json_t;
+namespace arangodb {
+namespace rest {
+class Dispatcher;
+}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class V8PeriodicTask
-// -----------------------------------------------------------------------------
+class V8PeriodicTask : public rest::PeriodicTask {
+ public:
+  V8PeriodicTask(std::string const&, std::string const&, TRI_vocbase_t*, double,
+                 double, std::string const&,
+                 std::shared_ptr<arangodb::velocypack::Builder>, bool);
 
-namespace triagens {
-  namespace rest {
-    class Dispatcher;
-    class Scheduler;
-  }
+  ~V8PeriodicTask() = default;
 
-  namespace arango {
-    class ApplicationV8;
+ public:
+  static void jobDone(Task*);
 
-    class V8PeriodicTask : public rest::PeriodicTask {
+ protected:
+  void getDescription(arangodb::velocypack::Builder&) const override;
+  bool isUserDefined() const override { return true; }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ public:
+  bool handlePeriod() override;
 
-      public:
+ private:
+  static Mutex RUNNING_LOCK;
+  static std::unordered_set<Task*> RUNNING;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-        V8PeriodicTask (std::string const&,
-                        std::string const&,
-                        TRI_vocbase_t*,
-                        ApplicationV8*,
-                        rest::Scheduler*,
-                        rest::Dispatcher*,
-                        double,
-                        double,
-                        std::string const&,
-                        struct TRI_json_t*,
-                        bool);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-        ~V8PeriodicTask ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get a task specific description in JSON format
-////////////////////////////////////////////////////////////////////////////////
-
-        void getDescription (struct TRI_json_t*) const override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the task is user-defined
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isUserDefined () const override {
-          return true;
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                              PeriodicTask methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief handles the next tick
-////////////////////////////////////////////////////////////////////////////////
-
-        bool handlePeriod () override;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief system vocbase
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_vocbase_t* _vocbase;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief V8 dealer
-////////////////////////////////////////////////////////////////////////////////
-
-        arango::ApplicationV8* _v8Dealer;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief dispatcher
-////////////////////////////////////////////////////////////////////////////////
-
-        rest::Dispatcher* _dispatcher;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief command to execute
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string const _command;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief paramaters
-////////////////////////////////////////////////////////////////////////////////
-
-        struct TRI_json_t* _parameters;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creation timestamp
-////////////////////////////////////////////////////////////////////////////////
-
-        double _created;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the task is allowed to switch the database
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _allowUseDatabase;
-    };
-  }
+ private:
+  /// @brief guard to make sure the database is not dropped while used by us
+  VocbaseGuard _vocbaseGuard;
+  std::string const _command;
+  std::shared_ptr<arangodb::velocypack::Builder> _parameters;
+  double _created;
+  bool _allowUseDatabase;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

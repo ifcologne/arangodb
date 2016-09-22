@@ -11,7 +11,7 @@ describe ArangoDB do
   before do  
     @rePath = Regexp.new('^/_db/[^/]+/_api/document/[a-zA-Z0-9_@:\.\-]+/\d+$')
     @reFull = Regexp.new('^[a-zA-Z0-9_\-]+/\d+$')
-    @reRev  = Regexp.new('^[0-9]+$')
+    @reRev  = Regexp.new('^[-_0-9a-zA-Z]+$')
   end
 
 ################################################################################
@@ -32,10 +32,10 @@ describe ArangoDB do
         cmd = "/_api/document/123456"
         doc = ArangoDB.log_get("#{prefix}-bad-handle", cmd)
 
-        doc.code.should eq(400)
+        doc.code.should eq(404)
         doc.parsed_response['error'].should eq(true)
-        doc.parsed_response['errorNum'].should eq(1205)
-        doc.parsed_response['code'].should eq(400)
+        doc.parsed_response['errorNum'].should eq(1203)
+        doc.parsed_response['code'].should eq(404)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
       end
 
@@ -43,10 +43,10 @@ describe ArangoDB do
         cmd = "/_api/document//123456"
         doc = ArangoDB.log_get("#{prefix}-bad-handle2", cmd)
 
-        doc.code.should eq(400)
+        doc.code.should eq(404)
         doc.parsed_response['error'].should eq(true)
         doc.parsed_response['errorNum'].should eq(1203)
-        doc.parsed_response['code'].should eq(400)
+        doc.parsed_response['code'].should eq(404)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
       end
 
@@ -212,7 +212,7 @@ describe ArangoDB do
 
         # get document, if-none-match with different rev
         cmd = "/_api/document/#{did}"
-        hdr = { "if-none-match" => "\"54454#{rev}\"" }
+        hdr = { "if-none-match" => "\"54454\"" }
         doc = ArangoDB.log_get("#{prefix}-if-none-match-other", cmd, :headers => hdr)
 
         doc.code.should eq(200)
@@ -287,7 +287,7 @@ describe ArangoDB do
 
         # get document, if-match with different rev
         cmd = "/_api/document/#{did}"
-        hdr = { "if-match" => "\"348574#{rev}\"" }
+        hdr = { "if-match" => "\"348574\"" }
         doc = ArangoDB.log_get("#{prefix}-if-match-other", cmd, :headers => hdr)
 
         doc.code.should eq(412)
@@ -326,13 +326,14 @@ describe ArangoDB do
 
       it "get all documents of an empty collection" do
         # get documents
-        cmd = "/_api/document?collection=#{@cid}"
-        doc = ArangoDB.log_get("#{prefix}-all-0", cmd)
+        cmd = "/_api/simple/all-keys"
+        body = "{ \"collection\" : \"" + @cn + "\" }"
+        doc = ArangoDB.log_put("#{prefix}-all-0", cmd, :body => body)
 
-        doc.code.should eq(200)
+        doc.code.should eq(201)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
 
-        documents = doc.parsed_response['documents']
+        documents = doc.parsed_response['result']
         documents.should be_kind_of(Array)
         documents.length.should eq(0)
 
@@ -341,13 +342,14 @@ describe ArangoDB do
 
       it "get all documents of an empty collection, using type=id" do
         # get documents
-        cmd = "/_api/document?collection=#{@cid}&type=id"
-        doc = ArangoDB.log_get("#{prefix}-all-type-id", cmd)
+        cmd = "/_api/simple/all-keys"
+        body = "{ \"collection\" : \"" + @cn + "\", \"type\" : \"id\" }"
+        doc = ArangoDB.log_put("#{prefix}-all-type-id", cmd, :body => body)
 
-        doc.code.should eq(200)
+        doc.code.should eq(201)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
 
-        documents = doc.parsed_response['documents']
+        documents = doc.parsed_response['result']
         documents.should be_kind_of(Array)
         documents.length.should eq(0)
 
@@ -369,13 +371,14 @@ describe ArangoDB do
         end
 
         # get document
-        cmd = "/_api/document?collection=#{@cid}"
-        doc = ArangoDB.log_get("#{prefix}-all", cmd)
+        cmd = "/_api/simple/all-keys"
+        body = "{ \"collection\" : \"" + @cn + "\" }"
+        doc = ArangoDB.log_put("#{prefix}-all", cmd, :body => body)
 
-        doc.code.should eq(200)
+        doc.code.should eq(201)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
 
-        documents = doc.parsed_response['documents']
+        documents = doc.parsed_response['result']
         documents.should be_kind_of(Array)
         documents.length.should eq(3)
 
@@ -406,13 +409,14 @@ describe ArangoDB do
         end
 
         # get document
-        cmd = "/_api/document?collection=#{@cn}"
-        doc = ArangoDB.log_get("#{prefix}-all-name", cmd)
+        cmd = "/_api/simple/all-keys"
+        body = "{ \"collection\" : \"" + @cn + "\" }"
+        doc = ArangoDB.log_put("#{prefix}-all-name", cmd, :body => body)
 
-        doc.code.should eq(200)
+        doc.code.should eq(201)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
 
-        documents = doc.parsed_response['documents']
+        documents = doc.parsed_response['result']
         documents.should be_kind_of(Array)
         documents.length.should eq(3)
         
@@ -443,13 +447,14 @@ describe ArangoDB do
         end
 
         # get documents
-        cmd = "/_api/document?collection=#{@cn}&type=id"
-        doc = ArangoDB.log_get("#{prefix}-all-name", cmd)
+        cmd = "/_api/simple/all-keys"
+        body = "{ \"collection\" : \"" + @cn + "\", \"type\" : \"id\" }"
+        doc = ArangoDB.log_put("#{prefix}-all-name", cmd, :body => body)
 
-        doc.code.should eq(200)
+        doc.code.should eq(201)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
 
-        documents = doc.parsed_response['documents']
+        documents = doc.parsed_response['result']
         documents.should be_kind_of(Array)
         documents.length.should eq(3)
         
@@ -474,13 +479,15 @@ describe ArangoDB do
         end
 
         # get documents
-        cmd = "/_api/document?collection=#{@cn}&type=key"
-        doc = ArangoDB.log_get("#{prefix}-all-name", cmd)
+        #
+        cmd = "/_api/simple/all-keys"
+        body = "{ \"collection\" : \"" + @cn + "\", \"type\": \"key\" }"
+        doc = ArangoDB.log_put("#{prefix}-all-name", cmd, :body => body)
 
-        doc.code.should eq(200)
+        doc.code.should eq(201)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
 
-        documents = doc.parsed_response['documents']
+        documents = doc.parsed_response['result']
         documents.should be_kind_of(Array)
         documents.length.should eq(3)
         
@@ -552,12 +559,12 @@ describe ArangoDB do
         doc.code.should eq(200)
         doc.headers['content-type'].should eq("application/json; charset=utf-8")
 
-        # get the document head
+        # get the document head, withdrawn for 3.0
         doc = ArangoDB.head(cmd + "?rev=abcd")
 
-        doc.code.should eq(400)
+        doc.code.should eq(200)
         
-        hdr = { "if-match" => "'abcd'" }
+        hdr = { "if-match" => "'*abcd'" }
         doc = ArangoDB.log_head("#{prefix}-head-rev-invalid", cmd, :headers => hdr)
         
         doc.code.should eq(400)

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief vocbase types
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,269 +19,154 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_VOC_BASE_VOC__TYPES_H
-#define ARANGODB_VOC_BASE_VOC__TYPES_H 1
+#ifndef ARANGOD_VOC_BASE_VOC_TYPES_H
+#define ARANGOD_VOC_BASE_VOC_TYPES_H 1
 
 #include "Basics/Common.h"
-#include "Cluster/ServerState.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public defines
-// -----------------------------------------------------------------------------
+#include <velocypack/Slice.h>
+#include <velocypack/velocypack-aliases.h>
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection meta info filename
-////////////////////////////////////////////////////////////////////////////////
+/// @brief forward declarations
+struct TRI_doc_mptr_t;
 
-#define TRI_VOC_PARAMETER_FILE  "parameter.json"
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief tick type (48bit)
-////////////////////////////////////////////////////////////////////////////////
-
+/// @brief tick type (56bit)
 typedef uint64_t TRI_voc_tick_t;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief collection identifier type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef uint64_t TRI_voc_cid_t;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief datafile identifier type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef uint64_t TRI_voc_fid_t;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief document key identifier type
-////////////////////////////////////////////////////////////////////////////////
-
-typedef char* TRI_voc_key_t;
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief revision identifier type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef uint64_t TRI_voc_rid_t;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief transaction identifier type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef uint64_t TRI_voc_tid_t;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief size type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef uint32_t TRI_voc_size_t;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief signed size type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef int32_t TRI_voc_ssize_t;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief index identifier
-////////////////////////////////////////////////////////////////////////////////
-
 typedef TRI_voc_tick_t TRI_idx_iid_t;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief crc type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef uint32_t TRI_voc_crc_t;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection storage type
-////////////////////////////////////////////////////////////////////////////////
-
-typedef uint32_t TRI_col_type_t;
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief server id type
-////////////////////////////////////////////////////////////////////////////////
-
 typedef uint64_t TRI_server_id_t;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief enum for write operations
-////////////////////////////////////////////////////////////////////////////////
+/// @brief Convert a revision ID to a string
+std::string TRI_RidToString(TRI_voc_rid_t rid);
 
-typedef enum {
+/// @brief Convert a string into a revision ID, no check variant
+TRI_voc_rid_t TRI_StringToRid(std::string const& ridStr, bool& isOld);
+
+/// @brief Convert a string into a revision ID, no check variant
+TRI_voc_rid_t TRI_StringToRid(char const* p, size_t len);
+
+/// @brief Convert a string into a revision ID, no check variant
+TRI_voc_rid_t TRI_StringToRid(char const* p, size_t len, bool& isOld);
+
+/// @brief Convert a string into a revision ID, returns 0 if format invalid
+TRI_voc_rid_t TRI_StringToRidWithCheck(std::string const& ridStr, bool& isOld);
+
+/// @brief Convert a string into a revision ID, returns 0 if format invalid
+TRI_voc_rid_t TRI_StringToRidWithCheck(char const* p, size_t len, bool& isOld);
+
+/// @brief enum for write operations
+enum TRI_voc_document_operation_e : uint8_t {
   TRI_VOC_DOCUMENT_OPERATION_UNKNOWN = 0,
   TRI_VOC_DOCUMENT_OPERATION_INSERT,
   TRI_VOC_DOCUMENT_OPERATION_UPDATE,
+  TRI_VOC_DOCUMENT_OPERATION_REPLACE,
   TRI_VOC_DOCUMENT_OPERATION_REMOVE
-}
-TRI_voc_document_operation_e;
+};
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief server operation modes
-////////////////////////////////////////////////////////////////////////////////
-
-typedef enum {
-  TRI_VOCBASE_MODE_NORMAL    = 1,    // CRUD is allowed
+enum TRI_vocbase_operationmode_e {
+  TRI_VOCBASE_MODE_NORMAL = 1,     // CRUD is allowed
   TRI_VOCBASE_MODE_NO_CREATE = 2,  // C & U not allowed RD allowed
-}
-TRI_vocbase_operationmode_e;
+};
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief edge from and to
-////////////////////////////////////////////////////////////////////////////////
+/// @brief edge direction
+enum TRI_edge_direction_e {
+  TRI_EDGE_ANY = 0,  // can only be used for searching
+  TRI_EDGE_IN = 1,
+  TRI_EDGE_OUT = 2
+};
 
-typedef struct TRI_document_edge_s {
-  TRI_voc_cid_t _fromCid;
-  TRI_voc_key_t _fromKey;
-
-  TRI_voc_cid_t _toCid;
-  TRI_voc_key_t _toKey;
-}
-TRI_document_edge_t;
-
-namespace triagens {
-  namespace arango {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                             class TransactionBase
-// -----------------------------------------------------------------------------
-//
-    class TransactionBase {
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief Transaction base, every transaction class has to inherit from here
-////////////////////////////////////////////////////////////////////////////////
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-        TransactionBase () {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-          TRI_ASSERT(_numberTrxInScope >= 0);
-          TRI_ASSERT(_numberTrxInScope == _numberTrxActive);
-          _numberTrxInScope++;
-#endif
-        }
-
-        explicit TransactionBase (bool standalone) {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-          TRI_ASSERT(_numberTrxInScope >= 0);
-          TRI_ASSERT(_numberTrxInScope == _numberTrxActive);
-          _numberTrxInScope++;
-          if (standalone) {
-            _numberTrxActive++;
-          }
-#endif
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual ~TransactionBase () {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-          TRI_ASSERT(_numberTrxInScope > 0);
-          _numberTrxInScope--;
-          // Note that embedded transactions might have seen a begin()
-          // but no abort() or commit(), so _numberTrxActive might
-          // be one too big. We simply fix it here:
-          _numberTrxActive = _numberTrxInScope;
-#endif
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief set counters, used in replication client to transfer transactions
-/// between threads.
-////////////////////////////////////////////////////////////////////////////////
-
-        static void setNumbers (int numberInScope, int numberActive) {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-          _numberTrxInScope = numberInScope;
-          _numberTrxActive = numberActive;
-#endif
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief increase counters, used in replication client in shutdown to
-/// kill transactions of other threads.
-////////////////////////////////////////////////////////////////////////////////
-
-        static void increaseNumbers (int numberInScope, int numberActive) {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-          TRI_ASSERT(_numberTrxInScope + numberInScope >= 0);
-          TRI_ASSERT(_numberTrxActive + numberActive >= 0);
-          _numberTrxInScope += numberInScope;
-          _numberTrxActive += numberActive;
-#endif
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief assert that a transaction object is in scope in the current thread
-////////////////////////////////////////////////////////////////////////////////
-
-        static void assertSomeTrxInScope () {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-          TRI_ASSERT(_numberTrxInScope > 0);
-#endif
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief assert that the innermost transaction object in scope in the
-/// current thread is actually active (between begin() and commit()/abort().
-////////////////////////////////////////////////////////////////////////////////
-
-        static void assertCurrentTrxActive () {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-          TRI_ASSERT(_numberTrxInScope > 0 &&
-                     _numberTrxInScope == _numberTrxActive);
-#endif
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the following is for the runtime protection check, number of
-/// transaction objects in scope in the current thread
-////////////////////////////////////////////////////////////////////////////////
-
-      protected:
-
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-        static thread_local int _numberTrxInScope;
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the following is for the runtime protection check, number of
-/// transaction objects in the current thread that are active (between
-/// begin and commit()/abort().
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-        static thread_local int _numberTrxActive;
-#endif
-
-      };
+/// @brief velocypack sub-object (for indexes, as part of TRI_index_element_t, 
+/// if the last byte in data[] is 0, then it is an offset into the VelocyPack 
+/// data in the datafile or WAL file. If the last byte in data[] is 1, then 
+/// value.data contains the actual VelocyPack data in place.
+struct TRI_vpack_sub_t {
+  union {
+    uint8_t data[12];
+    uint32_t offset;
+  } value;
+  
+  static constexpr size_t maxValueLength() noexcept {
+    return sizeof(value.data) - 1;
   }
+  
+  void setOffset(uint32_t offset) noexcept {
+    value.offset = offset;
+    value.data[maxValueLength()] = 0; // type = offset
+  }
+    
+  void setValue(uint8_t const* data, size_t length) noexcept {
+    memcpy(&value.data[0], data, length);
+    value.data[maxValueLength()] = 1; // type = value
+  }
+
+  inline bool isOffset() const noexcept {
+    return value.data[maxValueLength()] == 0;
+  }
+
+  inline bool isValue() const noexcept {
+    return value.data[maxValueLength()] == 1;
+  }
+
+  VPackSlice slice(TRI_doc_mptr_t const* mptr) const;
+};
+
+static_assert(sizeof(TRI_vpack_sub_t) == 12, "invalid size of TRI_vpack_sub_t");
+
+/// @brief fill a TRI_vpack_sub_t structure with a subvalue
+void TRI_FillVPackSub(TRI_vpack_sub_t* sub, 
+                      VPackSlice const base, VPackSlice const value) noexcept;
+
+/// @brief Hash and Equal comparison for a vector of VPackSlice
+namespace std {
+
+template <>
+struct hash<std::vector<VPackSlice>> {
+  size_t operator()(std::vector<VPackSlice> const& x) const {
+    std::hash<VPackSlice> sliceHash;
+    size_t res = 0xdeadbeef;
+    for (auto& el : x) {
+      res ^= sliceHash(el);
+    }
+    return res;
+  }
+};
+
 }
+
+/// @brief databases list structure
+struct TRI_vocbase_t;
+
+struct DatabasesLists {
+  std::unordered_map<std::string, TRI_vocbase_t*> _databases;
+  std::unordered_map<std::string, TRI_vocbase_t*> _coordinatorDatabases;
+  std::unordered_set<TRI_vocbase_t*> _droppedDatabases;
+};
+
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

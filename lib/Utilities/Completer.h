@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief a basis class to define when an input is "complete"
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014-2015 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,8 +19,6 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Esteban Lombeyda
-/// @author Copyright 2014-2015, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_UTILITIES_COMPLETER_H
@@ -34,58 +28,29 @@
 
 namespace arangodb {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   class Completer
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief Completer
 ////////////////////////////////////////////////////////////////////////////////
 
-  class Completer {
+class Completer {
+ public:
+  Completer() {}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
+  virtual ~Completer() {}
 
-    public:
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief check if line is complete
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  virtual bool isComplete(std::string const&, size_t lineno) = 0;
 
-      Completer () {
-      }
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief  computes all strings which begins with the given text
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-      virtual ~Completer () {
-      }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-    public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief check if line is complete
-////////////////////////////////////////////////////////////////////////////////
-
-      virtual bool isComplete (std::string const&, size_t lineno) = 0;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief  computes all strings which begins with the given text
-////////////////////////////////////////////////////////////////////////////////
-
-      virtual std::vector<std::string> alternatives (char const*) = 0;
-  };
+  virtual std::vector<std::string> alternatives(char const*) = 0;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------

@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief AQL, data-modification query options
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2010-2014 triagens GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,41 +16,38 @@
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
 ///
-/// Copyright holder is triAGENS GmbH, Cologne, Germany
+/// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Aql/ModificationOptions.h"
+#include "ModificationOptions.h"
+#include "Basics/VelocyPackHelper.h"
 
-using namespace triagens::aql;
-using Json = triagens::basics::Json;
-using JsonHelper = triagens::basics::JsonHelper;
+#include <velocypack/velocypack-aliases.h>
 
-ModificationOptions::ModificationOptions (Json const& json) {
-  Json obj = json.get("modificationFlags");
+using namespace arangodb::aql;
 
-  ignoreErrors           = JsonHelper::getBooleanValue(obj.json(), "ignoreErrors", false);
-  waitForSync            = JsonHelper::getBooleanValue(obj.json(), "waitForSync", false);
-  nullMeansRemove        = JsonHelper::getBooleanValue(obj.json(), "nullMeansRemove", false);
-  mergeObjects           = JsonHelper::getBooleanValue(obj.json(), "mergeObjects", true);
-  ignoreDocumentNotFound = JsonHelper::getBooleanValue(obj.json(), "ignoreDocumentNotFound", false);
-  readCompleteInput      = JsonHelper::getBooleanValue(obj.json(), "readCompleteInput", true);
+ModificationOptions::ModificationOptions(VPackSlice const& slice) {
+  VPackSlice obj = slice.get("modificationFlags");
+
+  ignoreErrors = basics::VelocyPackHelper::getBooleanValue(obj, "ignoreErrors", false);
+  waitForSync = basics::VelocyPackHelper::getBooleanValue(obj, "waitForSync", false);
+  nullMeansRemove =
+      basics::VelocyPackHelper::getBooleanValue(obj, "nullMeansRemove", false);
+  mergeObjects = basics::VelocyPackHelper::getBooleanValue(obj, "mergeObjects", true);
+  ignoreDocumentNotFound =
+      basics::VelocyPackHelper::getBooleanValue(obj, "ignoreDocumentNotFound", false);
+  readCompleteInput =
+      basics::VelocyPackHelper::getBooleanValue(obj, "readCompleteInput", true);
 }
 
-void ModificationOptions::toJson (triagens::basics::Json& json,
-                                  TRI_memory_zone_t* zone) const {
-  Json flags;
-
-  flags = Json(Json::Object, 6)
-    ("ignoreErrors", Json(ignoreErrors))
-    ("waitForSync", Json(waitForSync))
-    ("nullMeansRemove", Json(nullMeansRemove))
-    ("mergeObjects", Json(mergeObjects))
-    ("ignoreDocumentNotFound", Json(ignoreDocumentNotFound))
-    ("readCompleteInput", Json(readCompleteInput));
-
-  json("modificationFlags", flags);
+void ModificationOptions::toVelocyPack(VPackBuilder& builder) const {
+  VPackObjectBuilder guard(&builder);
+  builder.add("ignoreErrors", VPackValue(ignoreErrors));
+  builder.add("waitForSync", VPackValue(waitForSync));
+  builder.add("nullMeansRemove", VPackValue(nullMeansRemove));
+  builder.add("mergeObjects", VPackValue(mergeObjects));
+  builder.add("ignoreDocumentNotFound", VPackValue(ignoreDocumentNotFound));
+  builder.add("readCompleteInput", VPackValue(readCompleteInput));
 }
-

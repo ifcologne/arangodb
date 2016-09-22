@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief cursor request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,128 +19,105 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestCursorHandler.h"
 #include "Aql/Query.h"
 #include "Aql/QueryRegistry.h"
 #include "Basics/Exceptions.h"
-#include "Basics/json.h"
 #include "Basics/MutexLocker.h"
-#include "Basics/ScopeGuard.h"
+#include "Basics/StaticStrings.h"
+#include "Basics/VelocyPackDumper.h"
+#include "Basics/VelocyPackHelper.h"
 #include "Utils/Cursor.h"
 #include "Utils/CursorRepository.h"
-#include "V8Server/ApplicationV8.h"
+#include "Utils/TransactionContext.h"
 
-using namespace triagens::arango;
-using namespace triagens::rest;
+#include <velocypack/Iterator.h>
+#include <velocypack/Value.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb;
+using namespace arangodb::rest;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+RestCursorHandler::RestCursorHandler(
+    GeneralRequest* request, GeneralResponse* response,
+    arangodb::aql::QueryRegistry* queryRegistry)
+    : RestVocbaseBaseHandler(request, response),
+      _queryRegistry(queryRegistry),
+      _queryLock(),
+      _query(nullptr),
+      _hasStarted(false),
+      _queryKilled(false) {}
 
-RestCursorHandler::RestCursorHandler (HttpRequest* request,
-                                      std::pair<triagens::arango::ApplicationV8*, triagens::aql::QueryRegistry*>* pair) 
-  : RestVocbaseBaseHandler(request),
-    _applicationV8(pair->first),
-    _queryRegistry(pair->second),
-    _queryLock(),
-    _query(nullptr),
-    _queryKilled(false) {
-
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-HttpHandler::status_t RestCursorHandler::execute () {
+RestHandler::status RestCursorHandler::execute() {
   // extract the sub-request type
-  HttpRequest::HttpRequestType type = _request->requestType();
+  auto const type = _request->requestType();
 
-  if (type == HttpRequest::HTTP_REQUEST_POST) {
+  if (type == rest::RequestType::POST) {
     createCursor();
-    return status_t(HANDLER_DONE);
+    return status::DONE;
   }
 
-  if (type == HttpRequest::HTTP_REQUEST_PUT) {
+  if (type == rest::RequestType::PUT) {
     modifyCursor();
-    return status_t(HANDLER_DONE);
+    return status::DONE;
   }
 
-  if (type == HttpRequest::HTTP_REQUEST_DELETE) {
+  if (type == rest::RequestType::DELETE_REQ) {
     deleteCursor();
-    return status_t(HANDLER_DONE);
+    return status::DONE;
   }
-   
-  generateError(HttpResponse::METHOD_NOT_ALLOWED, TRI_ERROR_HTTP_METHOD_NOT_ALLOWED); 
-  return status_t(HANDLER_DONE);
+
+  generateError(rest::ResponseCode::METHOD_NOT_ALLOWED,
+                TRI_ERROR_HTTP_METHOD_NOT_ALLOWED);
+  return status::DONE;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-bool RestCursorHandler::cancel () {
-  return cancelQuery();
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
+bool RestCursorHandler::cancel() { return cancelQuery(); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief processes the query and returns the results/cursor
 /// this method is also used by derived classes
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestCursorHandler::processQuery (TRI_json_t const* json) {
-  if (! TRI_IsObjectJson(json)) {
-    generateError(HttpResponse::BAD, TRI_ERROR_QUERY_EMPTY);
+void RestCursorHandler::processQuery(VPackSlice const& slice) {
+  if (!slice.isObject()) {
+    generateError(rest::ResponseCode::BAD, TRI_ERROR_QUERY_EMPTY);
+    return;
+  }
+  VPackSlice const querySlice = slice.get("query");
+  if (!querySlice.isString()) {
+    generateError(rest::ResponseCode::BAD, TRI_ERROR_QUERY_EMPTY);
     return;
   }
 
-  auto const* queryString = TRI_LookupObjectJson(json, "query");
-
-  if (! TRI_IsStringJson(queryString)) {
-    generateError(HttpResponse::BAD, TRI_ERROR_QUERY_EMPTY);
-    return;
-  }
-
-  auto const* bindVars = TRI_LookupObjectJson(json, "bindVars");
-
-  if (bindVars != nullptr) {
-    if (! TRI_IsObjectJson(bindVars) && 
-        ! TRI_IsNullJson(bindVars)) {
-      generateError(HttpResponse::BAD, TRI_ERROR_TYPE_ERROR, "expecting object for <bindVars>");
+  VPackSlice const bindVars = slice.get("bindVars");
+  if (!bindVars.isNone()) {
+    if (!bindVars.isObject() && !bindVars.isNull()) {
+      generateError(rest::ResponseCode::BAD, TRI_ERROR_TYPE_ERROR,
+                    "expecting object for <bindVars>");
       return;
     }
   }
-  
-  auto options = buildOptions(json);
 
-  triagens::aql::Query query(_applicationV8, 
-                             false, 
-                             _vocbase, 
-                             queryString->_value._string.data,
-                             static_cast<size_t>(queryString->_value._string.length - 1),
-                             (bindVars != nullptr ? TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, bindVars) : nullptr),
-                             TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, options.json()), 
-                             triagens::aql::PART_MAIN);
+  std::shared_ptr<VPackBuilder> bindVarsBuilder;
+  if (!bindVars.isNone()) {
+    bindVarsBuilder.reset(new VPackBuilder);
+    bindVarsBuilder->add(bindVars);
+  }
 
-  registerQuery(&query); 
+  auto options = std::make_shared<VPackBuilder>(buildOptions(slice));
+  VPackValueLength l;
+  char const* queryString = querySlice.getString(l);
+
+  arangodb::aql::Query query(false, _vocbase, queryString,
+                             static_cast<size_t>(l), bindVarsBuilder, options,
+                             arangodb::aql::PART_MAIN);
+
+  registerQuery(&query);
   auto queryResult = query.execute(_queryRegistry);
-  unregisterQuery(); 
+  unregisterQuery();
 
   if (queryResult.code != TRI_ERROR_NO_ERROR) {
     if (queryResult.code == TRI_ERROR_REQUEST_CANCELED ||
@@ -155,95 +128,119 @@ void RestCursorHandler::processQuery (TRI_json_t const* json) {
     THROW_ARANGO_EXCEPTION_MESSAGE(queryResult.code, queryResult.details);
   }
 
-  TRI_ASSERT(TRI_IsArrayJson(queryResult.json));
- 
-  { 
-    _response = createResponse(HttpResponse::CREATED);
-    _response->setContentType("application/json; charset=utf-8");
+  VPackSlice qResult = queryResult.result->slice();
 
-    // build "extra" attribute
-    triagens::basics::Json extra(triagens::basics::Json::Object, 3); 
+  if (qResult.isNone()) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+  }
 
-    if (queryResult.stats != nullptr) {
-      extra.set("stats", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.stats, triagens::basics::Json::AUTOFREE));
-      queryResult.stats = nullptr;
-    }
-    if (queryResult.profile != nullptr) {
-      extra.set("profile", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.profile, triagens::basics::Json::AUTOFREE));
-      queryResult.profile = nullptr;
-    }
-    if (queryResult.warnings == nullptr) {
-      extra.set("warnings", triagens::basics::Json(triagens::basics::Json::Array));
-    }
-    else {
-      extra.set("warnings", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.warnings, triagens::basics::Json::AUTOFREE));
-      queryResult.warnings = nullptr;
-    }
+  TRI_ASSERT(qResult.isArray());
 
+  {
+    resetResponse(rest::ResponseCode::CREATED);
+    _response->setContentType(rest::ContentType::JSON);
+    std::shared_ptr<VPackBuilder> extra = buildExtra(queryResult);
+    VPackSlice opts = options->slice();
 
-    size_t batchSize = triagens::basics::JsonHelper::getNumericValue<size_t>(options.json(), "batchSize", 1000);
-    size_t const n = TRI_LengthArrayJson(queryResult.json);
+    size_t batchSize =
+        arangodb::basics::VelocyPackHelper::getNumericValue<size_t>(
+            opts, "batchSize", 1000);
+    size_t const n = static_cast<size_t>(qResult.length());
 
     if (n <= batchSize) {
-      // result is smaller than batchSize and will be returned directly. no need to create a cursor
+      // result is smaller than batchSize and will be returned directly. no need
+      // to create a cursor
 
-      triagens::basics::Json result(triagens::basics::Json::Object, 7);
-      result.set("result", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.json, triagens::basics::Json::AUTOFREE));
-      queryResult.json = nullptr;
+      VPackOptions options = VPackOptions::Defaults;
+      options.buildUnindexedArrays = true;
+      options.buildUnindexedObjects = true;
 
-      result.set("hasMore", triagens::basics::Json(false));
-
-      if (triagens::basics::JsonHelper::getBooleanValue(options.json(), "count", false)) {
-        result.set("count", triagens::basics::Json(static_cast<double>(n)));
+      // conservatively allocate a few bytes per value to be returned
+      int res;
+      if (n >= 10000) {
+        res = _response->reservePayload(128 * 1024);
+      } else if (n >= 1000) {
+        res = _response->reservePayload(64 * 1024);
+      } else {
+        res = _response->reservePayload(n * 48);
       }
-    
-      result.set("cached", triagens::basics::Json(queryResult.cached));
-      result.set("extra", extra);
-      result.set("error", triagens::basics::Json(false));
-      result.set("code", triagens::basics::Json(static_cast<double>(_response->responseCode())));
 
-      result.dump(_response->body());
+      if (res != TRI_ERROR_NO_ERROR) {
+        THROW_ARANGO_EXCEPTION(res);
+      }
+
+      VPackBuilder result(&options);
+      try {
+        VPackObjectBuilder b(&result);
+        result.add(VPackValue("result"));
+        result.add(VPackValue(qResult.begin(), VPackValueType::External));
+        result.add("hasMore", VPackValue(false));
+        if (arangodb::basics::VelocyPackHelper::getBooleanValue(opts, "count",
+                                                                false)) {
+          result.add("count", VPackValue(n));
+        }
+        result.add("cached", VPackValue(queryResult.cached));
+        if (queryResult.cached) {
+          result.add("extra", VPackValue(VPackValueType::Object));
+          result.close();
+        } else {
+          result.add("extra", extra->slice());
+        }
+        result.add("error", VPackValue(false));
+        result.add("code", VPackValue((int)_response->responseCode()));
+      } catch (...) {
+        THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+      }
+      generateResult(rest::ResponseCode::CREATED, result.slice(),
+                     queryResult.context);
       return;
     }
-      
+
     // result is bigger than batchSize, and a cursor will be created
-    auto cursors = static_cast<triagens::arango::CursorRepository*>(_vocbase->_cursorRepository);
+    auto cursors = _vocbase->cursorRepository();
     TRI_ASSERT(cursors != nullptr);
 
-    double ttl = triagens::basics::JsonHelper::getNumericValue<double>(options.json(), "ttl", 30);
-    bool count = triagens::basics::JsonHelper::getBooleanValue(options.json(), "count", false);
-    
-    // steal the query JSON, cursor will take over the ownership
-    auto j = queryResult.json;
-    triagens::arango::JsonCursor* cursor = cursors->createFromJson(j, batchSize, extra.steal(), ttl, count, queryResult.cached); 
-    queryResult.json = nullptr;
+    double ttl = arangodb::basics::VelocyPackHelper::getNumericValue<double>(
+        opts, "ttl", 30);
+    bool count = arangodb::basics::VelocyPackHelper::getBooleanValue(
+        opts, "count", false);
+
+    TRI_ASSERT(queryResult.result.get() != nullptr);
+
+    // steal the query result, cursor will take over the ownership
+    arangodb::VelocyPackCursor* cursor = cursors->createFromQueryResult(
+        std::move(queryResult), batchSize, extra, ttl, count);
 
     try {
-      _response->body().appendChar('{');
-      cursor->dump(_response->body());
-      _response->body().appendText(",\"error\":false,\"code\":");
-      _response->body().appendInteger(static_cast<uint32_t>(_response->responseCode()));
-      _response->body().appendChar('}');
+      VPackBuilder result;
+      result.openObject();
+      result.add("error", VPackValue(false));
+      result.add("code", VPackValue((int)_response->responseCode()));
+      cursor->dump(result);
+      result.close();
+
+      _response->setContentType(rest::ContentType::JSON);
+      generateResult(_response->responseCode(), result.slice(),
+                     cursor->result()->context);
 
       cursors->release(cursor);
-    }
-    catch (...) {
+    } catch (...) {
       cursors->release(cursor);
       throw;
     }
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief register the currently running query
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestCursorHandler::registerQuery (triagens::aql::Query* query) {
-  MUTEX_LOCKER(_queryLock);
+void RestCursorHandler::registerQuery(arangodb::aql::Query* query) {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
+
+  if (_queryKilled) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_REQUEST_CANCELED);
+  }
 
   TRI_ASSERT(_query == nullptr);
   _query = query;
@@ -253,8 +250,8 @@ void RestCursorHandler::registerQuery (triagens::aql::Query* query) {
 /// @brief unregister the currently running query
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestCursorHandler::unregisterQuery () {
-  MUTEX_LOCKER(_queryLock);
+void RestCursorHandler::unregisterQuery() {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
 
   _query = nullptr;
 }
@@ -263,11 +260,15 @@ void RestCursorHandler::unregisterQuery () {
 /// @brief cancel the currently running query
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestCursorHandler::cancelQuery () {
-  MUTEX_LOCKER(_queryLock);
+bool RestCursorHandler::cancelQuery() {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
 
   if (_query != nullptr) {
     _query->killed(true);
+    _queryKilled = true;
+    _hasStarted = true;
+    return true;
+  } else if (!_hasStarted) {
     _queryKilled = true;
     return true;
   }
@@ -279,8 +280,8 @@ bool RestCursorHandler::cancelQuery () {
 /// @brief whether or not the query was canceled
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestCursorHandler::wasCanceled () {
-  MUTEX_LOCKER(_queryLock);
+bool RestCursorHandler::wasCanceled() {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
   return _queryKilled;
 }
 
@@ -288,733 +289,221 @@ bool RestCursorHandler::wasCanceled () {
 /// @brief build options for the query as JSON
 ////////////////////////////////////////////////////////////////////////////////
 
-triagens::basics::Json RestCursorHandler::buildOptions (TRI_json_t const* json) const {
-  auto getAttribute = [&json] (char const* name) {
-    return TRI_LookupObjectJson(json, name);
-  };
+VPackBuilder RestCursorHandler::buildOptions(VPackSlice const& slice) const {
+  VPackBuilder options;
+  options.openObject();
 
-  triagens::basics::Json options(triagens::basics::Json::Object, 3);
-
-  auto attribute = getAttribute("count");
-  options.set("count", triagens::basics::Json(TRI_IsBooleanJson(attribute) ? attribute->_value._boolean : false));
-
-  attribute = getAttribute("batchSize");
-  options.set("batchSize", triagens::basics::Json(TRI_IsNumberJson(attribute) ? attribute->_value._number : 1000.0));
-
-  if (TRI_IsNumberJson(attribute) && static_cast<size_t>(attribute->_value._number) == 0) {
-    THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_TYPE_ERROR, "expecting non-zero value for <batchSize>");
+  VPackSlice count = slice.get("count");
+  if (count.isBool()) {
+    options.add("count", count);
+  } else {
+    options.add("count", VPackValue(false));
   }
 
-  attribute = getAttribute("cache");
-  if (TRI_IsBooleanJson(attribute)) {
-    options.set("cache", triagens::basics::Json(attribute->_value._boolean));
+  VPackSlice batchSize = slice.get("batchSize");
+  if (batchSize.isNumber()) {
+    if ((batchSize.isDouble() && batchSize.getDouble() == 0.0) ||
+        (batchSize.isInteger() && batchSize.getUInt() == 0)) {
+      THROW_ARANGO_EXCEPTION_MESSAGE(
+          TRI_ERROR_TYPE_ERROR, "expecting non-zero value for <batchSize>");
+    }
+    options.add("batchSize", batchSize);
+  } else {
+    options.add("batchSize", VPackValue(1000));
   }
 
-  attribute = getAttribute("options");
+  bool hasCache = false;
+  VPackSlice cache = slice.get("cache");
+  if (cache.isBool()) {
+    hasCache = true;
+    options.add("cache", cache);
+  }
 
-  if (TRI_IsObjectJson(attribute)) {
-    size_t const n = TRI_LengthVector(&attribute->_value._objects);
-
-    for (size_t i = 0; i < n; i += 2) {
-      auto key   = static_cast<TRI_json_t const*>(TRI_AtVector(&attribute->_value._objects, i));
-      auto value = static_cast<TRI_json_t const*>(TRI_AtVector(&attribute->_value._objects, i + 1));
-
-      if (! TRI_IsStringJson(key) || value == nullptr) {
+  VPackSlice opts = slice.get("options");
+  if (opts.isObject()) {
+    for (auto const& it : VPackObjectIterator(opts)) {
+      if (!it.key.isString() || it.value.isNone()) {
         continue;
       }
+      std::string keyName = it.key.copyString();
 
-      auto keyName = key->_value._string.data;
-
-      if (strcmp(keyName, "count") != 0 && 
-          strcmp(keyName, "batchSize") != 0) { 
-
-        if (strcmp(keyName, "cache") == 0 && options.has("cache")) {
+      if (keyName != "count" && keyName != "batchSize") {
+        if (keyName == "cache" && hasCache) {
           continue;
         }
-
-        options.set(keyName, triagens::basics::Json(
-          TRI_UNKNOWN_MEM_ZONE, 
-          TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, value),
-          triagens::basics::Json::NOFREE
-        ));
+        options.add(keyName, it.value);
       }
     }
   }
 
-  if (! options.has("ttl")) {
-    attribute = getAttribute("ttl");
-    options.set("ttl", triagens::basics::Json(TRI_IsNumberJson(attribute) ? attribute->_value._number : 30.0));
+  VPackSlice ttl = slice.get("ttl");
+  if (ttl.isNumber()) {
+    options.add("ttl", ttl);
+  } else {
+    options.add("ttl", VPackValue(30));
   }
+  options.close();
 
   return options;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief builds the "extra" attribute values from the result.
-/// note that the "extra" object will take ownership from the result for 
+/// note that the "extra" object will take ownership from the result for
 /// several values
 ////////////////////////////////////////////////////////////////////////////////
-      
-triagens::basics::Json RestCursorHandler::buildExtra (triagens::aql::QueryResult& queryResult) const {
-  // build "extra" attribute
-  triagens::basics::Json extra(triagens::basics::Json::Object); 
- 
-  if (queryResult.stats != nullptr) {
-    extra.set("stats", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.stats, triagens::basics::Json::AUTOFREE));
-    queryResult.stats = nullptr;
-  }
-  if (queryResult.profile != nullptr) {
-    extra.set("profile", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.profile, triagens::basics::Json::AUTOFREE));
-    queryResult.profile = nullptr;
-  }
-  if (queryResult.warnings == nullptr) {
-    extra.set("warnings", triagens::basics::Json(triagens::basics::Json::Array));
-  }
-  else {
-    extra.set("warnings", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.warnings, triagens::basics::Json::AUTOFREE));
-    queryResult.warnings = nullptr;
-  }
 
+std::shared_ptr<VPackBuilder> RestCursorHandler::buildExtra(
+    arangodb::aql::QueryResult& queryResult) const {
+  // build "extra" attribute
+  auto extra = std::make_shared<VPackBuilder>();
+  try {
+    VPackObjectBuilder b(extra.get());
+    if (queryResult.stats != nullptr) {
+      VPackSlice stats = queryResult.stats->slice();
+      if (!stats.isNone()) {
+        extra->add("stats", stats);
+      }
+    }
+    if (queryResult.profile != nullptr) {
+      extra->add(VPackValue("profile"));
+      extra->add(queryResult.profile->slice());
+      queryResult.profile = nullptr;
+    }
+    if (queryResult.warnings == nullptr) {
+      extra->add("warnings", VPackValue(VPackValueType::Array));
+      extra->close();
+    } else {
+      extra->add(VPackValue("warnings"));
+      extra->add(queryResult.warnings->slice());
+    }
+  } catch (...) {
+    return nullptr;
+  }
   return extra;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_post_api_cursor
-/// @brief create a cursor and return the first results
-///
-/// @RESTHEADER{POST /_api/cursor, Create cursor}
-///
-/// A JSON object describing the query and query parameters.
-///
-/// @RESTBODYPARAM{query,string,required,string}
-/// contains the query string to be executed
-///
-/// @RESTBODYPARAM{count,boolean,optional,}
-/// indicates whether the number of documents in the result set should be returned in
-/// the "count" attribute of the result.
-/// Calculating the "count" attribute might in the future have a performance
-/// impact for some queries so this option is turned off by default, and "count"
-/// is only returned when requested.
-///
-/// @RESTBODYPARAM{batchSize,integer,optional,int64}
-/// maximum number of result documents to be transferred from
-/// the server to the client in one roundtrip. If this attribute is
-/// not set, a server-controlled default value will be used. A *batchSize* value of
-/// *0* is disallowed.
-///
-/// @RESTBODYPARAM{ttl,integer,optional,int64}
-/// The time-to-live for the cursor (in seconds). The cursor will be
-/// removed on the server automatically after the specified amount of time. This
-/// is useful to ensure garbage collection of cursors that are not fully fetched
-/// by clients. If not set, a server-defined value will be used.
-///
-/// @RESTBODYPARAM{cache,boolean,optional,}
-/// flag to determine whether the AQL query cache
-/// shall be used. If set to *false*, then any query cache lookup will be skipped
-/// for the query. If set to *true*, it will lead to the query cache being checked
-/// for the query if the query cache mode is either *on* or *demand*.
-///
-/// @RESTBODYPARAM{bindVars,array,optional,object}
-/// list of bind parameter objects.
-///
-/// @RESTBODYPARAM{options,object,optional,JSF_post_api_cursor_opts}
-/// key/value object with extra options for the query.
-///
-/// @RESTSTRUCT{fullCount,JSF_post_api_cursor_opts,boolean,optional,}
-/// if set to *true* and the query contains a *LIMIT* clause, then the
-/// result will contain an extra attribute *extra* with a sub-attribute *fullCount*.
-/// This sub-attribute will contain the number of documents in the result before the
-/// last LIMIT in the query was applied. It can be used to count the number of documents that
-/// match certain filter criteria, but only return a subset of them, in one go.
-/// It is thus similar to MySQL's *SQL_CALC_FOUND_ROWS* hint. Note that setting the option
-/// will disable a few LIMIT optimizations and may lead to more documents being processed,
-/// and thus make queries run longer. Note that the *fullCount* sub-attribute will only
-/// be present in the result if the query has a LIMIT clause and the LIMIT clause is
-/// actually used in the query.
-///
-/// @RESTSTRUCT{maxPlans,JSF_post_api_cursor_opts,integer,optional,int64}
-/// limits the maximum number of plans that are created by the AQL query optimizer.
-///
-/// @RESTSTRUCT{optimizer.rules,JSF_post_api_cursor_opts,array,optional,string}
-/// a list of to-be-included or to-be-excluded optimizer rules
-/// can be put into this attribute, telling the optimizer to include or exclude
-/// specific rules. To disable a rule, prefix its name with a `-`, to enable a rule, prefix it
-/// with a `+`. There is also a pseudo-rule `all`, which will match all optimizer rules.
-///
-/// @RESTSTRUCT{profile,JSF_post_api_cursor_opts,boolean,optional,}
-/// if set to *true*, then the additional query profiling information
-/// will be returned in the *extra.stats* return attribute if the query result is not
-/// served from the query cache.
-///
-/// @RESTDESCRIPTION
-/// The query details include the query string plus optional query options and
-/// bind parameters. These values need to be passed in a JSON representation in
-/// the body of the POST request.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{201}
-/// is returned if the result set can be created by the server.
-///
-/// @RESTREPLYBODY{error,boolean,required,}
-/// A flag to indicate that an error occurred (*false* in this case)
-///
-/// @RESTREPLYBODY{code,integer,required,integer}
-/// the HTTP status code
-///
-/// @RESTREPLYBODY{result,array,optional,}
-/// an array of result documents (might be empty if query has no results)
-///
-/// @RESTREPLYBODY{hasMore,boolean,required,}
-/// A boolean indicator whether there are more results
-/// available for the cursor on the server
-///
-/// @RESTREPLYBODY{count,integer,optional,int64}
-/// the total number of result documents available (only
-/// available if the query was executed with the *count* attribute set)
-///
-/// @RESTREPLYBODY{id,string,required,string}
-/// id of temporary cursor created on the server (optional, see above)
-///
-/// @RESTREPLYBODY{extra,object,optional,}
-/// an optional JSON object with extra information about the query result
-/// contained in its *stats* sub-attribute. For data-modification queries, the 
-/// *extra.stats* sub-attribute will contain the number of modified documents and 
-/// the number of documents that could not be modified
-/// due to an error (if *ignoreErrors* query option is specified)
-///
-/// @RESTREPLYBODY{cached,boolean,required,}
-/// a boolean flag indicating whether the query result was served 
-/// from the query cache or not. If the query result is served from the query
-/// cache, the *extra* return attribute will not contain any *stats* sub-attribute
-/// and no *profile* sub-attribute.
-///
-/// @RESTRETURNCODE{400}
-/// is returned if the JSON representation is malformed or the query specification is
-/// missing from the request.
-///
-/// If the JSON representation is malformed or the query specification is
-/// missing from the request, the server will respond with *HTTP 400*.
-///
-/// The body of the response will contain a JSON object with additional error
-/// details. The object has the following attributes:
-///
-/// @RESTREPLYBODY{error,boolean,required,}
-/// boolean flag to indicate that an error occurred (*true* in this case)
-///
-/// @RESTREPLYBODY{code,integer,required,int64}
-/// the HTTP status code
-///
-/// @RESTREPLYBODY{errorNum,integer,required,int64}
-/// the server error number
-///
-/// @RESTREPLYBODY{errorMessage,string,required,string}
-/// a descriptive error message
-///
-/// If the query specification is complete, the server will process the query. If an
-/// error occurs during query processing, the server will respond with *HTTP 400*.
-/// Again, the body of the response will contain details about the error.
-///
-/// A list of query errors can be found (../ArangoErrors/README.md) here.
-///
-///
-/// @RESTRETURNCODE{404}
-/// The server will respond with *HTTP 404* in case a non-existing collection is
-/// accessed in the query.
-///
-/// @RESTRETURNCODE{405}
-/// The server will respond with *HTTP 405* if an unsupported HTTP method is used.
-///
-/// @EXAMPLES
-///
-/// Execute a query and extract the result in a single go
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorCreateCursorForLimitReturnSingle}
-///     var cn = "products";
-///     db._drop(cn);
-///     db._create(cn);
-///
-///     db.products.save({"hello1":"world1"});
-///     db.products.save({"hello2":"world1"});
-///
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR p IN products LIMIT 2 RETURN p",
-///       count: true,
-///       batchSize: 2
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 201);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Execute a query and extract a part of the result
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorCreateCursorForLimitReturn}
-///     var cn = "products";
-///     db._drop(cn);
-///     db._create(cn);
-///
-///     db.products.save({"hello1":"world1"});
-///     db.products.save({"hello2":"world1"});
-///     db.products.save({"hello3":"world1"});
-///     db.products.save({"hello4":"world1"});
-///     db.products.save({"hello5":"world1"});
-///
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR p IN products LIMIT 5 RETURN p",
-///       count: true,
-///       batchSize: 2
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 201);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Using the query option "fullCount"
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorCreateCursorOption}
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR i IN 1..1000 FILTER i > 500 LIMIT 10 RETURN i",
-///       count: true,
-///       options: {
-///         fullCount: true
-///       }
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 201);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Enabling and disabling optimizer rules
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorOptimizerRules}
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR i IN 1..10 LET a = 1 LET b = 2 FILTER a + b == 3 RETURN i",
-///       count: true,
-///       options: {
-///         maxPlans: 1,
-///         optimizer: {
-///           rules: [ "-all", "+remove-unnecessary-filters" ]
-///         }
-///       }
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 201);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Execute a data-modification query and retrieve the number of
-/// modified documents
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorDeleteQuery}
-///     var cn = "products";
-///     db._drop(cn);
-///     db._create(cn);
-///
-///     db.products.save({"hello1":"world1"});
-///     db.products.save({"hello2":"world1"});
-///
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR p IN products REMOVE p IN products"
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 201);
-///     assert(JSON.parse(response.body).extra.stats.writesExecuted === 2);
-///     assert(JSON.parse(response.body).extra.stats.writesIgnored === 0);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Execute a data-modification query with option *ignoreErrors*
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorDeleteIgnore}
-///     var cn = "products";
-///     db._drop(cn);
-///     db._create(cn);
-///
-///     db.products.save({ _key: "foo" });
-///
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "REMOVE 'bar' IN products OPTIONS { ignoreErrors: true }"
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 201);
-///     assert(JSON.parse(response.body).extra.stats.writesExecuted === 0);
-///     assert(JSON.parse(response.body).extra.stats.writesIgnored === 1);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Bad query - Missing body
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorCreateCursorMissingBody}
-///     var url = "/_api/cursor";
-///
-///     var response = logCurlRequest('POST', url, '');
-///
-///     assert(response.code === 400);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Bad query - Unknown collection
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorCreateCursorUnknownCollection}
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR u IN unknowncoll LIMIT 2 RETURN u",
-///       count: true,
-///       batchSize: 2
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 404);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Bad query - Execute a data-modification query that attempts to remove a non-existing
-/// document
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorDeleteQueryFail}
-///     var cn = "products";
-///     db._drop(cn);
-///     db._create(cn);
-///
-///     db.products.save({ _key: "bar" });
-///
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "REMOVE 'foo' IN products"
-///     };
-///
-///     var response = logCurlRequest('POST', url, body);
-///
-///     assert(response.code === 404);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// @endDocuBlock
+/// @brief was docuBlock JSF_post_api_cursor
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestCursorHandler::createCursor () {
+void RestCursorHandler::createCursor() {
+  if (_request->payload().isEmptyObject()) {
+    generateError(rest::ResponseCode::BAD, 600);
+    return;
+  }
+
   std::vector<std::string> const& suffix = _request->suffix();
 
   if (suffix.size() != 0) {
-    generateError(HttpResponse::BAD,
-                  TRI_ERROR_HTTP_BAD_PARAMETER,
+    generateError(rest::ResponseCode::BAD, TRI_ERROR_HTTP_BAD_PARAMETER,
                   "expecting POST /_api/cursor");
     return;
   }
 
-  try { 
-    std::unique_ptr<TRI_json_t> json(parseJsonBody());
+  try {
+    bool parseSuccess = true;
+    std::shared_ptr<VPackBuilder> parsedBody =
+        parseVelocyPackBody(&VPackOptions::Defaults, parseSuccess);
 
-    if (json.get() == nullptr) {
+    if (!parseSuccess) {
       return;
     }
+    VPackSlice body = parsedBody.get()->slice();
 
-    processQuery(json.get());
-  }  
-  catch (triagens::basics::Exception const& ex) {
-    unregisterQuery(); 
-    generateError(HttpResponse::responseCode(ex.code()), ex.code(), ex.what());
-  }
-  catch (std::bad_alloc const&) {
-    unregisterQuery(); 
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_OUT_OF_MEMORY);
-  }
-  catch (std::exception const& ex) {
-    unregisterQuery(); 
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL, ex.what());
-  }
-  catch (...) {
-    unregisterQuery(); 
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL);
+    processQuery(body);
+  } catch (...) {
+    unregisterQuery();
+    throw;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_post_api_cursor_identifier
-/// @brief return the next results from an existing cursor
-///
-/// @RESTHEADER{PUT /_api/cursor/{cursor-identifier}, Read next batch from cursor}
-///
-/// @RESTURLPARAMETERS
-///
-/// @RESTURLPARAM{cursor-identifier,string,required}
-/// The name of the cursor
-///
-/// @RESTDESCRIPTION
-///
-/// If the cursor is still alive, returns an object with the following
-/// attributes:
-///
-/// - *id*: the *cursor-identifier*
-/// - *result*: a list of documents for the current batch
-/// - *hasMore*: *false* if this was the last batch
-/// - *count*: if present the total number of elements
-///
-/// Note that even if *hasMore* returns *true*, the next call might
-/// still return no documents. If, however, *hasMore* is *false*, then
-/// the cursor is exhausted.  Once the *hasMore* attribute has a value of
-/// *false*, the client can stop.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// The server will respond with *HTTP 200* in case of success.
-///
-/// @RESTRETURNCODE{400}
-/// If the cursor identifier is omitted, the server will respond with *HTTP 404*.
-///
-/// @RESTRETURNCODE{404}
-/// If no cursor with the specified identifier can be found, the server will respond
-/// with *HTTP 404*.
-///
-/// @EXAMPLES
-///
-/// Valid request for next batch
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorForLimitReturnCont}
-///     var url = "/_api/cursor";
-///     var cn = "products";
-///     db._drop(cn);
-///     db._create(cn);
-///
-///     db.products.save({"hello1":"world1"});
-///     db.products.save({"hello2":"world1"});
-///     db.products.save({"hello3":"world1"});
-///     db.products.save({"hello4":"world1"});
-///     db.products.save({"hello5":"world1"});
-///
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR p IN products LIMIT 5 RETURN p",
-///       count: true,
-///       batchSize: 2
-///     };
-///     var response = logCurlRequest('POST', url, body);
-///
-///     var body = response.body.replace(/\\/g, '');
-///     var _id = JSON.parse(body).id;
-///     response = logCurlRequest('PUT', url + '/' + _id, '');
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Missing identifier
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorMissingCursorIdentifier}
-///     var url = "/_api/cursor";
-///
-///     var response = logCurlRequest('PUT', url, '');
-///
-///     assert(response.code === 400);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Unknown identifier
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorInvalidCursorIdentifier}
-///     var url = "/_api/cursor/123123";
-///
-///     var response = logCurlRequest('PUT', url, '');
-///
-///     assert(response.code === 404);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
+/// @brief was docuBlock JSF_post_api_cursor_identifier
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestCursorHandler::modifyCursor () {
+void RestCursorHandler::modifyCursor() {
   std::vector<std::string> const& suffix = _request->suffix();
 
   if (suffix.size() != 1) {
-    generateError(HttpResponse::BAD,
-                  TRI_ERROR_HTTP_BAD_PARAMETER,
+    generateError(rest::ResponseCode::BAD, TRI_ERROR_HTTP_BAD_PARAMETER,
                   "expecting PUT /_api/cursor/<cursor-id>");
     return;
   }
-  
+
   std::string const& id = suffix[0];
 
-  auto cursors = static_cast<triagens::arango::CursorRepository*>(_vocbase->_cursorRepository);
+  auto cursors = _vocbase->cursorRepository();
   TRI_ASSERT(cursors != nullptr);
 
-  auto cursorId = static_cast<triagens::arango::CursorId>(triagens::basics::StringUtils::uint64(id));
+  auto cursorId = static_cast<arangodb::CursorId>(
+      arangodb::basics::StringUtils::uint64(id));
   bool busy;
   auto cursor = cursors->find(cursorId, busy);
 
   if (cursor == nullptr) {
     if (busy) {
-      generateError(HttpResponse::responseCode(TRI_ERROR_CURSOR_BUSY), TRI_ERROR_CURSOR_BUSY);
-    }
-    else {
-      generateError(HttpResponse::responseCode(TRI_ERROR_CURSOR_NOT_FOUND), TRI_ERROR_CURSOR_NOT_FOUND);
+      generateError(GeneralResponse::responseCode(TRI_ERROR_CURSOR_BUSY),
+                    TRI_ERROR_CURSOR_BUSY);
+    } else {
+      generateError(GeneralResponse::responseCode(TRI_ERROR_CURSOR_NOT_FOUND),
+                    TRI_ERROR_CURSOR_NOT_FOUND);
     }
     return;
   }
 
   try {
-    _response = createResponse(HttpResponse::OK);
-    _response->setContentType("application/json; charset=utf-8");
+    VPackBuilder builder;
+    builder.openObject();
+    builder.add("error", VPackValue(false));
+    builder.add("code", VPackValue(static_cast<int>(rest::ResponseCode::OK)));
+    cursor->dump(builder);
+    builder.close();
 
-    _response->body().appendChar('{');
-    cursor->dump(_response->body());
-    _response->body().appendText(",\"error\":false,\"code\":");
-    _response->body().appendInteger(static_cast<uint32_t>(_response->responseCode()));
-    _response->body().appendChar('}');
+    _response->setContentType(rest::ContentType::JSON);
+    generateResult(rest::ResponseCode::OK, builder.slice());
 
     cursors->release(cursor);
-  }
-  catch (triagens::basics::Exception const& ex) {
+  } catch (...) {
     cursors->release(cursor);
-
-    generateError(HttpResponse::responseCode(ex.code()), ex.code(), ex.what());
-  }
-  catch (...) {
-    cursors->release(cursor);
-
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL);
+    throw;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_post_api_cursor_delete
-/// @brief dispose an existing cursor
-///
-/// @RESTHEADER{DELETE /_api/cursor/{cursor-identifier}, Delete cursor}
-///
-/// @RESTURLPARAMETERS
-///
-/// @RESTURLPARAM{cursor-identifier,string,required}
-/// The id of the cursor
-///
-/// @RESTDESCRIPTION
-/// Deletes the cursor and frees the resources associated with it.
-///
-/// The cursor will automatically be destroyed on the server when the client has
-/// retrieved all documents from it. The client can also explicitly destroy the
-/// cursor at any earlier time using an HTTP DELETE request. The cursor id must
-/// be included as part of the URL.
-///
-/// Note: the server will also destroy abandoned cursors automatically after a
-/// certain server-controlled timeout to avoid resource leakage.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{202}
-/// is returned if the server is aware of the cursor.
-///
-/// @RESTRETURNCODE{404}
-/// is returned if the server is not aware of the cursor. It is also
-/// returned if a cursor is used after it has been destroyed.
-///
-/// @EXAMPLES
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestCursorDelete}
-///     var url = "/_api/cursor";
-///     var cn = "products";
-///     db._drop(cn);
-///     db._create(cn);
-///
-///     db.products.save({"hello1":"world1"});
-///     db.products.save({"hello2":"world1"});
-///     db.products.save({"hello3":"world1"});
-///     db.products.save({"hello4":"world1"});
-///     db.products.save({"hello5":"world1"});
-///
-///     var url = "/_api/cursor";
-///     var body = {
-///       query: "FOR p IN products LIMIT 5 RETURN p",
-///       count: true,
-///       batchSize: 2
-///     };
-///     var response = logCurlRequest('POST', url, body);
-///     logJsonResponse(response);
-///     var body = response.body.replace(/\\/g, '');
-///     var _id = JSON.parse(body).id;
-///     response = logCurlRequest('DELETE', url + '/' + _id);
-///
-///     assert(response.code === 202);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
+/// @brief was docuBlock JSF_post_api_cursor_delete
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestCursorHandler::deleteCursor () {
+void RestCursorHandler::deleteCursor() {
   std::vector<std::string> const& suffix = _request->suffix();
 
   if (suffix.size() != 1) {
-    generateError(HttpResponse::BAD,
-                  TRI_ERROR_HTTP_BAD_PARAMETER,
+    generateError(rest::ResponseCode::BAD, TRI_ERROR_HTTP_BAD_PARAMETER,
                   "expecting DELETE /_api/cursor/<cursor-id>");
     return;
   }
-  
+
   std::string const& id = suffix[0];
 
-  auto cursors = static_cast<triagens::arango::CursorRepository*>(_vocbase->_cursorRepository);
+  auto cursors = _vocbase->cursorRepository();
   TRI_ASSERT(cursors != nullptr);
- 
-  auto cursorId = static_cast<triagens::arango::CursorId>(triagens::basics::StringUtils::uint64(id));
+
+  auto cursorId = static_cast<arangodb::CursorId>(
+      arangodb::basics::StringUtils::uint64(id));
   bool found = cursors->remove(cursorId);
 
-  if (! found) {
-    generateError(HttpResponse::NOT_FOUND, TRI_ERROR_CURSOR_NOT_FOUND);
+  if (!found) {
+    generateError(rest::ResponseCode::NOT_FOUND, TRI_ERROR_CURSOR_NOT_FOUND);
     return;
   }
 
-  _response = createResponse(HttpResponse::ACCEPTED);
-  _response->setContentType("application/json; charset=utf-8");
-   
-  triagens::basics::Json json(triagens::basics::Json::Object);
-  json.set("id", triagens::basics::Json(id)); // id as a string! 
-  json.set("error", triagens::basics::Json(false)); 
-  json.set("code", triagens::basics::Json(static_cast<double>(_response->responseCode())));
+  VPackBuilder builder;
+  builder.openObject();
+  builder.add("id", VPackValue(id));
+  builder.add("error", VPackValue(false));
+  builder.add("code",
+              VPackValue(static_cast<int>(rest::ResponseCode::ACCEPTED)));
+  builder.close();
 
-  json.dump(_response->body());
+  generateResult(rest::ResponseCode::ACCEPTED, builder.slice());
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

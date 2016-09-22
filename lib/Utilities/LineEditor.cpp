@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief implementation of basis class LineEditor
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014-2015 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,141 +19,77 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014-2015, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "LineEditor.h"
 
-#include "Utilities/ShellImplementation.h"
-#include "Utilities/Completer.h"
+#include "Utilities/ShellBase.h"
 
-using namespace std;
-using namespace triagens;
 using namespace arangodb;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  class LineEditor
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructs a new editor
 ////////////////////////////////////////////////////////////////////////////////
 
-LineEditor::LineEditor (std::string const& history)
-  : _history(history) {
-  _shellImpl = nullptr;
-}
+LineEditor::LineEditor() : _shell(nullptr), _signalFunc(nullptr) {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-LineEditor::~LineEditor () {
-  if (_shellImpl) {
+LineEditor::~LineEditor() {
+  if (_shell != nullptr) {
     close();
-    delete _shellImpl;
+    delete _shell;
   }
- }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                              static public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sort the alternatives results vector
-////////////////////////////////////////////////////////////////////////////////
-
-void LineEditor::sortAlternatives (vector<string>& completions) {
-  std::sort(completions.begin(), completions.end(),
-    [](std::string const& l, std::string const& r) -> bool {
-      int res = strcasecmp(l.c_str(), r.c_str());
-      return (res < 0);
-    }
-  );
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
+/// @brief whether or not the shell implementation supports colors
+////////////////////////////////////////////////////////////////////////////////
+
+bool LineEditor::supportsColors() const { return _shell->supportsColors(); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief line editor open
 ////////////////////////////////////////////////////////////////////////////////
 
-bool LineEditor::open (bool autoComplete) {
-  prepareShell();
-  return _shellImpl->open(autoComplete);
-}
+bool LineEditor::open(bool autoComplete) { return _shell->open(autoComplete); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief line editor shutdown
 ////////////////////////////////////////////////////////////////////////////////
 
-bool LineEditor::close () {
-  prepareShell();
-  return _shellImpl->close();
-}
+bool LineEditor::close() { return _shell->close(); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief line editor prompt
 ////////////////////////////////////////////////////////////////////////////////
 
-string LineEditor::prompt (const string& prompt,
-			   const string& begin,
-			   bool& eof) {
-  return _shellImpl->prompt(prompt, begin, eof);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the history file path
-////////////////////////////////////////////////////////////////////////////////
-
-string LineEditor::historyPath () {
-  prepareShell();
-  return _shellImpl->historyPath();
+std::string LineEditor::prompt(std::string const& prompt,
+                               std::string const& begin, bool& eof) {
+  return _shell->prompt(prompt, begin, eof);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief add to history
 ////////////////////////////////////////////////////////////////////////////////
 
-void LineEditor::addHistory (const string& line) {
-  prepareShell();
-  return _shellImpl->addHistory(line);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief save history
-////////////////////////////////////////////////////////////////////////////////
-
-bool LineEditor::writeHistory () {
-  prepareShell();
-  return _shellImpl->writeHistory();
+void LineEditor::addHistory(std::string const& line) {
+  return _shell->addHistory(line);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief send a signal to the shell implementation
 ////////////////////////////////////////////////////////////////////////////////
 
-void LineEditor::signal () {
-  _shellImpl->signal();
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
-
-
-void LineEditor::prepareShell () {
-  if (! _shellImpl) {
-    initializeShell();
+void LineEditor::signal() {
+  if (_signalFunc != nullptr) {
+    _signalFunc();
   }
+  _shell->signal();
 }
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief register a callback function to be executed on signal receipt
+////////////////////////////////////////////////////////////////////////////////
+
+void LineEditor::setSignalFunction(std::function<void()> const& func) {
+  _signalFunc = func;
+}

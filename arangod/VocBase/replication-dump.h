@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief replication dump functions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,132 +19,114 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_VOC_BASE_REPLICATION__DUMP_H
-#define ARANGODB_VOC_BASE_REPLICATION__DUMP_H 1
+#ifndef ARANGOD_VOC_BASE_REPLICATION_DUMP_H
+#define ARANGOD_VOC_BASE_REPLICATION_DUMP_H 1
 
 #include "Basics/Common.h"
-#include "Basics/associative.h"
-#include "Basics/string-buffer.h"
 #include "Basics/Exceptions.h"
+#include "Basics/StringBuffer.h"
+#include "Utils/StandaloneTransactionContext.h"
 #include "VocBase/replication-common.h"
-#include "VocBase/shaped-json.h"
 #include "VocBase/voc-types.h"
 #include "VocBase/vocbase.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              forward declarations
-// -----------------------------------------------------------------------------
+#include <velocypack/Builder.h>
+#include <velocypack/Dumper.h>
+#include <velocypack/Iterator.h>
+#include <velocypack/Options.h>
+#include <velocypack/velocypack-aliases.h>
 
-struct TRI_shape_s;
-struct TRI_vocbase_col_s;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                REPLICATION LOGGER
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
+#include <vector>
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief replication dump container
 ////////////////////////////////////////////////////////////////////////////////
 
 struct TRI_replication_dump_t {
-  TRI_replication_dump_t (TRI_vocbase_t* vocbase,
-                          size_t chunkSize,
-                          bool includeSystem)
-    : _vocbase(vocbase),
-      _buffer(nullptr),
-      _chunkSize(chunkSize),
-      _lastFoundTick(0),
-      _lastSid(0),
-      _lastShape(nullptr),
-      _collectionNames(),
-      _failed(false),
-      _bufferFull(false),
-      _hasMore(false),
-      _includeSystem(includeSystem),
-      _fromTickIncluded(false) {
- 
+  TRI_replication_dump_t(std::shared_ptr<arangodb::StandaloneTransactionContext>
+                             transactionContext,
+                         size_t chunkSize, bool includeSystem,
+                         TRI_voc_cid_t restrictCollection, bool useVpp = false)
+      : _transactionContext(transactionContext),
+        _vocbase(transactionContext->vocbase()),
+        _buffer(nullptr),
+        _chunkSize(chunkSize),
+        _lastFoundTick(0),
+        _restrictCollection(restrictCollection),
+        _collectionNames(),
+        _vpackOptions(arangodb::velocypack::Options::Defaults),
+        _failed(false),
+        _bufferFull(false),
+        _hasMore(false),
+        _includeSystem(includeSystem),
+        _fromTickIncluded(false),
+        _compat28(false),
+        _slices(),
+        _useVpp(useVpp) {
     if (_chunkSize == 0) {
       // default chunk size
       _chunkSize = 128 * 1024;
     }
 
-    _buffer = TRI_CreateSizedStringBuffer(TRI_UNKNOWN_MEM_ZONE, _chunkSize);
+    if (!useVpp) {
+      _buffer = TRI_CreateSizedStringBuffer(TRI_UNKNOWN_MEM_ZONE, _chunkSize);
 
-    if (_buffer == nullptr) {
-      THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
-    } 
+      if (_buffer == nullptr) {
+        THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+      }
+    }
   }
 
-  ~TRI_replication_dump_t () {
+  ~TRI_replication_dump_t() {
     if (_buffer != nullptr) {
       TRI_FreeStringBuffer(TRI_UNKNOWN_MEM_ZONE, _buffer);
       _buffer = nullptr;
     }
   }
 
-  TRI_vocbase_t*               _vocbase;
-  TRI_string_buffer_t*         _buffer;
-  size_t                       _chunkSize;
-  TRI_voc_tick_t               _lastFoundTick;
-  TRI_shape_sid_t              _lastSid;
-  struct TRI_shape_s const*    _lastShape;
+  std::shared_ptr<arangodb::StandaloneTransactionContext> _transactionContext;
+  TRI_vocbase_t* _vocbase;
+  TRI_string_buffer_t* _buffer;
+  size_t _chunkSize;
+  TRI_voc_tick_t _lastFoundTick;
+  TRI_voc_cid_t _restrictCollection;
   std::unordered_map<TRI_voc_cid_t, std::string> _collectionNames;
-  bool                         _failed;
-  bool                         _bufferFull;
-  bool                         _hasMore;
-  bool                         _includeSystem;
-  bool                         _fromTickIncluded;
+  arangodb::velocypack::Options _vpackOptions;
+  bool _failed;
+  bool _bufferFull;
+  bool _hasMore;
+  bool _includeSystem;
+  bool _fromTickIncluded;
+  bool _compat28;
+  std::vector<VPackBuffer<uint8_t>> _slices;
+  bool _useVpp;
 };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief dump data from a single collection
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_DumpCollectionReplication (TRI_replication_dump_t*,
-                                   struct TRI_vocbase_col_s*,
-                                   TRI_voc_tick_t,
-                                   TRI_voc_tick_t,
-                                   bool,
-                                   bool);
+int TRI_DumpCollectionReplication(TRI_replication_dump_t*,
+                                  arangodb::LogicalCollection*, TRI_voc_tick_t,
+                                  TRI_voc_tick_t, bool);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief dump data from the replication log
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_DumpLogReplication (TRI_replication_dump_t*,
-                            std::unordered_set<TRI_voc_tid_t> const&,
-                            TRI_voc_tick_t,
-                            TRI_voc_tick_t,
-                            TRI_voc_tick_t,
-                            bool);
+int TRI_DumpLogReplication(TRI_replication_dump_t*,
+                           std::unordered_set<TRI_voc_tid_t> const&,
+                           TRI_voc_tick_t, TRI_voc_tick_t, TRI_voc_tick_t,
+                           bool);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief determine the transactions that were open at a given point in time
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_DetermineOpenTransactionsReplication (TRI_replication_dump_t*,
-                                              TRI_voc_tick_t,
-                                              TRI_voc_tick_t);
+int TRI_DetermineOpenTransactionsReplication(TRI_replication_dump_t*,
+                                             TRI_voc_tick_t, TRI_voc_tick_t,
+                                             bool useVpp = false);
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

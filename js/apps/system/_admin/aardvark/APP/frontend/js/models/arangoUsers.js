@@ -1,15 +1,15 @@
-/*jshint strict: false */
-/*global Backbone, $, window */
+/* jshint strict: false */
+/* global Backbone, $, window, arangoHelper */
 window.Users = Backbone.Model.extend({
   defaults: {
-    user: "",
+    user: '',
     active: false,
     extra: {}
   },
 
-  idAttribute : "user",
+  idAttribute: 'user',
 
-  parse : function (d) {
+  parse: function (d) {
     this.isNotNew = true;
     return d;
   },
@@ -20,53 +20,56 @@ window.Users = Backbone.Model.extend({
 
   url: function () {
     if (this.isNew()) {
-      return "/_api/user";
+      return arangoHelper.databaseUrl('/_api/user');
     }
-    if (this.get("user") !== "") {
-      return "/_api/user/" + this.get("user");
+    if (this.get('user') !== '') {
+      return arangoHelper.databaseUrl('/_api/user/' + this.get('user'));
     }
-    return "/_api/user";
+    return arangoHelper.databaseUrl('/_api/user');
   },
 
-  checkPassword: function(passwd) {
-    var result = false;
-
+  checkPassword: function (passwd, callback) {
     $.ajax({
       cache: false,
-      type: "POST",
-      async: false, // sequential calls!
-      url: "/_api/user/" + this.get("user"),
+      type: 'POST',
+      url: arangoHelper.databaseUrl('/_api/user/' + this.get('user')),
       data: JSON.stringify({ passwd: passwd }),
-      contentType: "application/json",
+      contentType: 'application/json',
       processData: false,
-      success: function(data) {
-        result = data.result;
+      success: function (data) {
+        callback(false, data);
+      },
+      error: function (data) {
+        callback(true, data);
       }
     });
-    return result;
   },
 
-  setPassword: function(passwd) {
+  setPassword: function (passwd) {
     $.ajax({
       cache: false,
-      type: "PATCH",
-      async: false, // sequential calls!
-      url: "/_api/user/" + this.get("user"),
+      type: 'PATCH',
+      url: arangoHelper.databaseUrl('/_api/user/' + this.get('user')),
       data: JSON.stringify({ passwd: passwd }),
-      contentType: "application/json",
+      contentType: 'application/json',
       processData: false
     });
   },
 
-  setExtras: function(name, img) {
+  setExtras: function (name, img, callback) {
     $.ajax({
       cache: false,
-      type: "PATCH",
-      async: false, // sequential calls!
-      url: "/_api/user/" + this.get("user"),
-      data: JSON.stringify({"extra": {"name":name, "img":img}}),
-      contentType: "application/json",
-      processData: false
+      type: 'PATCH',
+      url: arangoHelper.databaseUrl('/_api/user/' + this.get('user')),
+      data: JSON.stringify({'extra': {'name': name, 'img': img}}),
+      contentType: 'application/json',
+      processData: false,
+      success: function () {
+        callback(false);
+      },
+      error: function () {
+        callback(true);
+      }
     });
   }
 

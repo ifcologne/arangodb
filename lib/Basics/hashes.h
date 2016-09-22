@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief hash functions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,112 +19,81 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_BASICS_C_HASHES_H
-#define ARANGODB_BASICS_C_HASHES_H 1
+#ifndef ARANGODB_BASICS_HASHES_H
+#define ARANGODB_BASICS_HASHES_H 1
 
 #include "Basics/Common.h"
-
-// -----------------------------------------------------------------------------
-// --SECTION--        (FNV-1a Fowler–Noll–Vo hash function)                  FNV
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief computes a FNV hash for blocks
 ////////////////////////////////////////////////////////////////////////////////
 
-uint64_t TRI_FnvHashBlock (uint64_t, void const*, size_t);
+uint64_t TRI_FnvHashBlock(uint64_t, void const*, size_t);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief computes a FNV hash for memory blobs
 ////////////////////////////////////////////////////////////////////////////////
 
-uint64_t TRI_FnvHashPointer (void const*, size_t);
+uint64_t TRI_FnvHashPointer(void const*, size_t);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief computes a FNV hash for strings
 ////////////////////////////////////////////////////////////////////////////////
 
-uint64_t TRI_FnvHashString (char const*);
+uint64_t TRI_FnvHashString(char const*);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief computes a initial FNV for blocks
 ////////////////////////////////////////////////////////////////////////////////
 
-uint64_t TRI_FnvHashBlockInitial ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                             CRC32
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+static constexpr uint64_t TRI_FnvHashBlockInitial() {
+  return 0xcbf29ce484222325ULL; 
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief initial CRC32 value
 ////////////////////////////////////////////////////////////////////////////////
 
-uint32_t TRI_InitialCrc32 ();
+static constexpr uint32_t TRI_InitialCrc32() {
+  return (0xffffffff); 
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief final CRC32 value
 ////////////////////////////////////////////////////////////////////////////////
 
-uint32_t TRI_FinalCrc32 (uint32_t);
+static constexpr uint32_t TRI_FinalCrc32(uint32_t value) {
+  return (value ^ 0xffffffff); 
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief CRC32 value of data block
 ////////////////////////////////////////////////////////////////////////////////
 
-uint32_t TRI_BlockCrc32 (uint32_t, char const* data, size_t length);
+extern "C" {
+
+#if ENABLE_ASM_CRC32 == 1
+  uint32_t TRI_BlockCrc32_SSE42(uint32_t, char const* data, size_t length);
+#endif
+
+  uint32_t TRI_BlockCrc32_C(uint32_t hash, char const* data, size_t length);
+  extern uint32_t (*TRI_BlockCrc32)(uint32_t hash,
+                                    char const* data,
+                                    size_t length);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief computes a CRC32 for memory blobs
 ////////////////////////////////////////////////////////////////////////////////
 
-uint32_t TRI_Crc32HashPointer (void const*, size_t);
+uint32_t TRI_Crc32HashPointer(void const*, size_t);
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief computes a CRC32 for strings
 ////////////////////////////////////////////////////////////////////////////////
 
-uint32_t TRI_Crc32HashString (char const*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                            MODULE
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initializes the hashes components
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_InitializeHashes ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief shut downs the hashes components
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_ShutdownHashes ();
+uint32_t TRI_Crc32HashString(char const*);
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

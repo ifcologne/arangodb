@@ -1,4 +1,5 @@
-/* lib/Basics/local-configuration.h.  Generated from local-configuration.h.in by configure.  */
+/* lib/Basics/local-configuration.h.  Generated from local-configuration.h.in by
+ * configure.  */
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief High-Performance Database Framework made by triagens
 ///
@@ -6,7 +7,7 @@
 ///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,30 +29,11 @@
 /// @author Copyright 2011-2012, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_BASICS_C_LOCAL__CONFIGURATION__WIN_H
-#define ARANGODB_BASICS_C_LOCAL__CONFIGURATION__WIN_H 1
+#ifndef ARANGODB_BASICS_LOCAL__CONFIGURATION__WIN_H
+#define ARANGODB_BASICS_LOCAL__CONFIGURATION__WIN_H 1
 
 #ifndef TRI_WITHIN_COMMON
 #error use <Basics/Common.h>
 #endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                     Special Configuration Options
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief enable logging
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ENABLE_LOGGER 1
-
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

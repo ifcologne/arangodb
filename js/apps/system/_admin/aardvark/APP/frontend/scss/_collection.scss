@@ -1,11 +1,10 @@
 .collectionTh {
-  font-family: 'Open Sans', sans-serif !important;
+  @extend %font-family;
   font-size: 14px;
   font-weight: 400 !important;
   text-align: left;
   width: 20% !important;
 
-  select,
   textarea {
     margin-top: 10px;
   }
@@ -79,7 +78,7 @@
 }
 
 .collectionInfoTh2 {
-  font-family: 'Open Sans', sans-serif !important;
+  @extend %font-family;
   font-weight: 400 !important;
   text-align: left;
   width: 150px;
@@ -99,7 +98,7 @@
   border-bottom: 1px solid  $c-c2grey;
 
   th {
-    font-family: 'Open Sans', sans-serif !important;
+    @extend %font-family;
     font-weight: 400 !important;
   }
 }
@@ -111,21 +110,31 @@
 }
 
 #infoTab,
+#graphTab,
 #collectionTab {
   border-bottom: 0;
   margin-bottom: 1px;
   padding-bottom: 0;
   padding-right: 10px;
+
 }
 
 #infoTab li,
+#graphTab li,
 #collectionTab li {
   float: right;
+
+  &.disabled {
+    a {
+      cursor: not-allowed;
+    }
+  }
 }
 
 #infoTab a,
+#graphTab a,
 #collectionTab a {
-  background-color: $c-new-grey;
+  background-color: $c-bluegrey-dark;
   border-bottom: 1px solid $c-darker-grey;
   border-top-left-radius: 3px !important;
   border-top-right-radius: 3px !important;
@@ -138,6 +147,7 @@
 }
 
 #infoTab .active > a,
+#graphTab .active > a,
 #collectionTab .active > a {
   background-color: $c-modal-header;
   border-color: $c-collection-tab-border-bottom $c-collection-tab-border-bottom transparent !important;

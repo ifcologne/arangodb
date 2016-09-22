@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief binary buffer
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,9 +19,9 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2013, triAGENS GmbH, Cologne, Germany
-///
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
 /// Parts of the code are based on:
 ///
 /// Copyright Joyent, Inc. and other Node contributors.
@@ -57,34 +53,26 @@
 #include "V8/v8-globals.h"
 #include "V8/v8-utils.h"
 
-using namespace std;
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief safety overhead for buffer allocations
 ////////////////////////////////////////////////////////////////////////////////
 
 #define SAFETY_OVERHEAD 16
-  
-static void InitSafetyOverhead (char* p, size_t length) {
+
+static void InitSafetyOverhead(char* p, size_t length) {
   if (p != nullptr) {
-    memset(p + length, 0, SAFETY_OVERHEAD); 
+    memset(p + length, 0, SAFETY_OVERHEAD);
   }
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    private macros
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief sliceArgs
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline bool sliceArgs(v8::Isolate *isolate,
+static inline bool sliceArgs(v8::Isolate* isolate,
                              v8::Local<v8::Value> const& start_arg,
                              v8::Local<v8::Value> const& end_arg,
-                             V8Buffer* parent,
-                             int32_t &start,
-                             int32_t &end) {
+                             V8Buffer* parent, int32_t& start, int32_t& end) {
   if (!start_arg->IsInt32() || !end_arg->IsInt32()) {
     TRI_V8_SET_TYPE_ERROR("bad argument");
     return false;
@@ -110,35 +98,28 @@ static inline bool sliceArgs(v8::Isolate *isolate,
 /// @brief MIN
 ////////////////////////////////////////////////////////////////////////////////
 
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private functions
-// -----------------------------------------------------------------------------
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief unbase64
 ////////////////////////////////////////////////////////////////////////////////
 
 // supports regular and URL-safe base64
-static const int unbase64_table[] =
-  {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-2,-1,-1,-2,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-2,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,62,-1,63
-  ,52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1
-  ,-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14
-  ,15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,63
-  ,-1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40
-  ,41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  ,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-  };
+static int const unbase64_table[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -2, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, 62, -1, 62, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60,
+    61, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1,
+    63, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
+    43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1};
 
 #define unbase64(x) unbase64_table[(uint8_t)(x)]
 
@@ -146,13 +127,12 @@ static const int unbase64_table[] =
 /// @brief Base64DecodedSize
 ////////////////////////////////////////////////////////////////////////////////
 
-static size_t Base64DecodedSize (const char *src, size_t size) {
-  const char *const end = src + size;
-  const int remainder = size % 4;
+static size_t Base64DecodedSize(char const* src, size_t size) {
+  char const* const end = src + size;
+  int const remainder = size % 4;
 
   size = (size / 4) * 3;
   if (remainder) {
-
     // special case: 1-byte input cannot be decoded
     if (size == 0 && remainder == 1) {
       size = 0;
@@ -177,25 +157,21 @@ static size_t Base64DecodedSize (const char *src, size_t size) {
 /// @brief ByteLength
 ////////////////////////////////////////////////////////////////////////////////
 
-static size_t ByteLengthString (v8::Isolate* isolate,
-                                v8::Handle<v8::String> string,
-                                TRI_V8_encoding_t enc) {
+static size_t ByteLengthString(v8::Isolate* isolate,
+                               v8::Handle<v8::String> string,
+                               TRI_V8_encoding_t enc) {
   v8::HandleScope scope(isolate);
 
   if (enc == UTF8) {
     return string->Utf8Length();
-  }
-  else if (enc == BASE64) {
+  } else if (enc == BASE64) {
     v8::String::Utf8Value v(string);
     return Base64DecodedSize(*v, v.length());
-  }
-  else if (enc == UCS2) {
+  } else if (enc == UCS2) {
     return string->Length() * 2;
-  }
-  else if (enc == HEX) {
+  } else if (enc == HEX) {
     return string->Length() / 2;
-  }
-  else {
+  } else {
     return string->Length();
   }
 }
@@ -204,13 +180,13 @@ static size_t ByteLengthString (v8::Isolate* isolate,
 /// @brief encodes a buffer
 ////////////////////////////////////////////////////////////////////////////////
 
-static void Encode (const v8::FunctionCallbackInfo<v8::Value>& args,
-                    const void *buf,
-                    size_t len,
-                    TRI_V8_encoding_t enc) {
+static void Encode(v8::FunctionCallbackInfo<v8::Value> const& args,
+                   const void* buf, size_t len, TRI_V8_encoding_t enc) {
+  // cppcheck-suppress *
   v8::Isolate* isolate = args.GetIsolate();
+
   if (enc == BUFFER) {
-    TRI_V8_RETURN(TRI_V8_PAIR_STRING(static_cast<const char*>(buf), len));
+    TRI_V8_RETURN(TRI_V8_PAIR_STRING(static_cast<char const*>(buf), len));
   }
 
   if (!len) {
@@ -218,22 +194,22 @@ static void Encode (const v8::FunctionCallbackInfo<v8::Value>& args,
   }
 
   if (enc == BINARY) {
-    const unsigned char *cbuf = static_cast<const unsigned char*>(buf);
-    uint16_t * twobytebuf = new uint16_t[len];
+    const unsigned char* cbuf = static_cast<const unsigned char*>(buf);
+    uint16_t* twobytebuf = new uint16_t[len];
 
     for (size_t i = 0; i < len; i++) {
       // XXX is the following line platform independent?
       twobytebuf[i] = cbuf[i];
     }
 
-    v8::Local<v8::String> chunk = TRI_V8_STRING_UTF16(twobytebuf, (int) len);
-    delete [] twobytebuf; // TODO use ExternalTwoByteString?
+    v8::Local<v8::String> chunk = TRI_V8_STRING_UTF16(twobytebuf, (int)len);
+    delete[] twobytebuf;  // TODO use ExternalTwoByteString?
 
     TRI_V8_RETURN(chunk);
   }
 
   // utf8 or ascii enc
-  v8::Local<v8::String> chunk = TRI_V8_PAIR_STRING((const char*) buf, (int) len);
+  v8::Local<v8::String> chunk = TRI_V8_PAIR_STRING((char const*)buf, (int)len);
   TRI_V8_RETURN(chunk);
 }
 
@@ -247,8 +223,9 @@ static void Encode (const v8::FunctionCallbackInfo<v8::Value>& args,
 /// @brief constructor template
 ////////////////////////////////////////////////////////////////////////////////
 
-static void FromConstructorTemplate (v8::Local<v8::FunctionTemplate> t,
-                                     const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void FromConstructorTemplate(
+    v8::Local<v8::FunctionTemplate> t,
+    v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Local<v8::Value> argv[32];
   size_t argc = args.Length();
 
@@ -256,19 +233,19 @@ static void FromConstructorTemplate (v8::Local<v8::FunctionTemplate> t,
     argc = ARRAY_SIZE(argv);
   }
 
-  for (size_t i = 0;  i < argc;  ++i) {
-    argv[i] = args[(int) i];
+  for (size_t i = 0; i < argc; ++i) {
+    argv[i] = args[(int)i];
   }
 
-  TRI_V8_RETURN(t->GetFunction()->NewInstance((int) argc, argv));
+  TRI_V8_RETURN(t->GetFunction()->NewInstance((int)argc, argv));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief non ascii test, slow version
 ////////////////////////////////////////////////////////////////////////////////
 
-static bool ContainsNonAsciiSlow (const char* buf, size_t len) {
-  for (size_t i = 0;  i < len;  ++i) {
+static bool ContainsNonAsciiSlow(char const* buf, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
     if (buf[i] & 0x80) {
       return true;
     }
@@ -281,12 +258,12 @@ static bool ContainsNonAsciiSlow (const char* buf, size_t len) {
 /// @brief non ascii test
 ////////////////////////////////////////////////////////////////////////////////
 
-static bool ContainsNonAscii (const char* src, size_t len) {
+static bool ContainsNonAscii(char const* src, size_t len) {
   if (len < 16) {
     return ContainsNonAsciiSlow(src, len);
   }
 
-  const unsigned bytes_per_word = TRI_BITS / (8 * sizeof(char));
+  const unsigned bytes_per_word = ARANGODB_BITS / (8 * sizeof(char));
   const unsigned align_mask = bytes_per_word - 1;
   const unsigned unaligned = reinterpret_cast<uintptr_t>(src) & align_mask;
 
@@ -301,9 +278,9 @@ static bool ContainsNonAscii (const char* src, size_t len) {
     len -= n;
   }
 
-#if TRI_BITS == 64
+#if ARANGODB_BITS == 64
   typedef uint64_t word;
-  const uint64_t mask = 0x8080808080808080ll;
+  uint64_t const mask = 0x8080808080808080ll;
 #else
   typedef uint32_t word;
   const uint32_t mask = 0x80808080l;
@@ -318,7 +295,7 @@ static bool ContainsNonAscii (const char* src, size_t len) {
   const unsigned remainder = len & align_mask;
 
   if (remainder > 0) {
-    const size_t offset = len - remainder;
+    size_t const offset = len - remainder;
 
     if (ContainsNonAsciiSlow(src + offset, remainder)) {
       return true;
@@ -332,7 +309,7 @@ static bool ContainsNonAscii (const char* src, size_t len) {
 /// @brief strips high bit, slow version
 ////////////////////////////////////////////////////////////////////////////////
 
-static void ForceAsciiSlow (const char* src, char* dst, size_t len) {
+static void ForceAsciiSlow(char const* src, char* dst, size_t len) {
   for (size_t i = 0; i < len; ++i) {
     dst[i] = src[i] & 0x7f;
   }
@@ -342,13 +319,13 @@ static void ForceAsciiSlow (const char* src, char* dst, size_t len) {
 /// @brief strips high bit
 ////////////////////////////////////////////////////////////////////////////////
 
-static void ForceAscii (const char* src, char* dst, size_t len) {
+static void ForceAscii(char const* src, char* dst, size_t len) {
   if (len < 16) {
     ForceAsciiSlow(src, dst, len);
     return;
   }
 
-  const unsigned bytes_per_word = TRI_BITS / (8 * sizeof(char));
+  const unsigned bytes_per_word = ARANGODB_BITS / (8 * sizeof(char));
   const unsigned align_mask = bytes_per_word - 1;
   const unsigned src_unalign = reinterpret_cast<uintptr_t>(src) & align_mask;
   const unsigned dst_unalign = reinterpret_cast<uintptr_t>(dst) & align_mask;
@@ -360,16 +337,15 @@ static void ForceAscii (const char* src, char* dst, size_t len) {
       src += unalign;
       dst += unalign;
       len -= src_unalign;
-    }
-    else {
+    } else {
       ForceAsciiSlow(src, dst, len);
       return;
     }
   }
 
-#if TRI_BITS == 64
+#if ARANGODB_BITS == 64
   typedef uint64_t word;
-  const uint64_t mask = ~0x8080808080808080ll;
+  uint64_t const mask = ~0x8080808080808080ll;
 #else
   typedef uint32_t word;
   const uint32_t mask = ~0x80808080l;
@@ -385,7 +361,7 @@ static void ForceAscii (const char* src, char* dst, size_t len) {
   const unsigned remainder = len & align_mask;
 
   if (remainder > 0) {
-    const size_t offset = len - remainder;
+    size_t const offset = len - remainder;
     ForceAsciiSlow(src + offset, dst + offset, remainder);
   }
 }
@@ -394,10 +370,16 @@ static void ForceAscii (const char* src, char* dst, size_t len) {
 /// @brief hex2bin
 ////////////////////////////////////////////////////////////////////////////////
 
-static unsigned hex2bin (char c) {
-  if (c >= '0' && c <= '9') { return c - '0'; }
-  if (c >= 'A' && c <= 'F') { return 10 + (c - 'A'); }
-  if (c >= 'a' && c <= 'f') { return 10 + (c - 'a'); }
+static unsigned hex2bin(char c) {
+  if (c >= '0' && c <= '9') {
+    return c - '0';
+  }
+  if (c >= 'A' && c <= 'F') {
+    return 10 + (c - 'A');
+  }
+  if (c >= 'a' && c <= 'f') {
+    return 10 + (c - 'a');
+  }
 
   return static_cast<unsigned>(-1);
 }
@@ -408,11 +390,9 @@ static unsigned hex2bin (char c) {
 /// Returns number of bytes written.
 ////////////////////////////////////////////////////////////////////////////////
 
-static ssize_t DecodeWrite (v8::Isolate* isolate,
-                            char *buf,
-                            size_t buflen,
-                            v8::Handle<v8::Value> val,
-                            TRI_V8_encoding_t encoding) {
+static ssize_t DecodeWrite(v8::Isolate* isolate, char* buf, size_t buflen,
+                           v8::Handle<v8::Value> val,
+                           TRI_V8_encoding_t encoding) {
   v8::HandleScope scope(isolate);
 
   // A lot of improvement can be made here. See:
@@ -428,11 +408,11 @@ static ssize_t DecodeWrite (v8::Isolate* isolate,
 
   if (is_buffer && (encoding == BINARY || encoding == BUFFER)) {
     // fast path, copy buffer data
-    const char* data = V8Buffer::data(val.As<v8::Object>());
+    char const* data = V8Buffer::data(val.As<v8::Object>());
     size_t size = V8Buffer::length(val.As<v8::Object>());
     size_t len = size < buflen ? size : buflen;
     memcpy(buf, data, len);
-    return (ssize_t) len;
+    return (ssize_t)len;
   }
 
   v8::Local<v8::String> str;
@@ -441,49 +421,51 @@ static ssize_t DecodeWrite (v8::Isolate* isolate,
   if (is_buffer) {
     v8::Local<v8::Value> arg = TRI_V8_ASCII_STRING("binary");
     v8::Handle<v8::Object> object = val.As<v8::Object>();
-    v8::Local<v8::Function> callback = object->Get(TRI_V8_ASCII_STRING("toString")).As<v8::Function>();
+    v8::Local<v8::Function> callback =
+        object->Get(TRI_V8_ASCII_STRING("toString")).As<v8::Function>();
     str = callback->Call(object, 1, &arg)->ToString();
-  }
-  else {
+  } else {
     str = val->ToString();
   }
 
   if (encoding == UTF8) {
-    str->WriteUtf8(buf, (int) buflen, NULL, v8::String::HINT_MANY_WRITES_EXPECTED);
-    return (ssize_t) buflen;
+    str->WriteUtf8(buf, (int)buflen, NULL,
+                   v8::String::HINT_MANY_WRITES_EXPECTED);
+    return (ssize_t)buflen;
   }
 
   if (encoding == ASCII) {
-    str->WriteOneByte(reinterpret_cast<uint8_t*>(buf),
-                      0,
-                      (int) buflen,
+    str->WriteOneByte(reinterpret_cast<uint8_t*>(buf), 0, (int)buflen,
                       v8::String::HINT_MANY_WRITES_EXPECTED);
-    return (ssize_t) buflen;
+    return (ssize_t)buflen;
   }
 
   // THIS IS AWFUL!!! FIXME
   TRI_ASSERT(encoding == BINARY);
 
-  uint16_t * twobytebuf = new uint16_t[buflen];
+  uint16_t* twobytebuf = new uint16_t[buflen];
 
-  str->Write(twobytebuf, 0, (int) buflen, v8::String::HINT_MANY_WRITES_EXPECTED);
+  str->Write(twobytebuf, 0, (int)buflen, v8::String::HINT_MANY_WRITES_EXPECTED);
 
   for (size_t i = 0; i < buflen; i++) {
-    unsigned char *b = reinterpret_cast<unsigned char*>(&twobytebuf[i]);
+    unsigned char* b = reinterpret_cast<unsigned char*>(&twobytebuf[i]);
     buf[i] = b[0];
   }
 
-  delete [] twobytebuf;
+  delete[] twobytebuf;
 
-  return (ssize_t) buflen;
+  return (ssize_t)buflen;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief tests if we are big endian
 ////////////////////////////////////////////////////////////////////////////////
 
-static bool IsBigEndian () {
-  const union { uint8_t u8[2]; uint16_t u16; } u = {{0, 1}};
+static bool IsBigEndian() {
+  const union {
+    uint8_t u8[2];
+    uint16_t u16;
+  } u = {{0, 1}};
   return u.u16 == 1 ? true : false;
 }
 
@@ -491,11 +473,9 @@ static bool IsBigEndian () {
 /// @brief reverses a buffer
 ////////////////////////////////////////////////////////////////////////////////
 
-static void Swizzle (char* buf, size_t len) {
-  char t;
-
-  for (size_t i = 0;  i < len / 2;  ++i) {
-    t = buf[i];
+static void Swizzle(char* buf, size_t len) {
+  for (size_t i = 0; i < len / 2; ++i) {
+    char t = buf[i];
     buf[i] = buf[len - i - 1];
     buf[len - i - 1] = t;
   }
@@ -505,12 +485,12 @@ static void Swizzle (char* buf, size_t len) {
 /// @brief parses an encoding
 ////////////////////////////////////////////////////////////////////////////////
 
-static TRI_V8_encoding_t ParseEncoding (v8::Isolate* isolate,
-                                        v8::Handle<v8::Value> encoding_v,
-                                        TRI_V8_encoding_t defenc) {
+static TRI_V8_encoding_t ParseEncoding(v8::Isolate* isolate,
+                                       v8::Handle<v8::Value> encoding_v,
+                                       TRI_V8_encoding_t defenc) {
   v8::HandleScope scope(isolate);
 
-  if (! encoding_v->IsString()) {
+  if (!encoding_v->IsString()) {
     return defenc;
   }
 
@@ -518,45 +498,30 @@ static TRI_V8_encoding_t ParseEncoding (v8::Isolate* isolate,
 
   if (strcasecmp(*encoding, "utf8") == 0) {
     return UTF8;
-  }
-  else if (strcasecmp(*encoding, "utf-8") == 0) {
+  } else if (strcasecmp(*encoding, "utf-8") == 0) {
     return UTF8;
-  }
-  else if (strcasecmp(*encoding, "ascii") == 0) {
+  } else if (strcasecmp(*encoding, "ascii") == 0) {
     return ASCII;
-  }
-  else if (strcasecmp(*encoding, "base64") == 0) {
+  } else if (strcasecmp(*encoding, "base64") == 0) {
     return BASE64;
-  }
-  else if (strcasecmp(*encoding, "ucs2") == 0) {
+  } else if (strcasecmp(*encoding, "ucs2") == 0) {
     return UCS2;
-  }
-  else if (strcasecmp(*encoding, "ucs-2") == 0) {
+  } else if (strcasecmp(*encoding, "ucs-2") == 0) {
     return UCS2;
-  }
-  else if (strcasecmp(*encoding, "utf16le") == 0) {
+  } else if (strcasecmp(*encoding, "utf16le") == 0) {
     return UCS2;
-  }
-  else if (strcasecmp(*encoding, "utf-16le") == 0) {
+  } else if (strcasecmp(*encoding, "utf-16le") == 0) {
     return UCS2;
-  }
-  else if (strcasecmp(*encoding, "binary") == 0) {
+  } else if (strcasecmp(*encoding, "binary") == 0) {
     return BINARY;
-  }
-  else if (strcasecmp(*encoding, "buffer") == 0) {
+  } else if (strcasecmp(*encoding, "buffer") == 0) {
     return BUFFER;
-  }
-  else if (strcasecmp(*encoding, "hex") == 0) {
+  } else if (strcasecmp(*encoding, "hex") == 0) {
     return HEX;
-  }
-  else {
+  } else {
     return defenc;
   }
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                          class RetainedBufferInfo
-// -----------------------------------------------------------------------------
 
 namespace {
 
@@ -564,131 +529,108 @@ namespace {
 /// @brief object info
 ////////////////////////////////////////////////////////////////////////////////
 
-  class RetainedBufferInfo : public v8::RetainedObjectInfo {
-    public:
-      RetainedBufferInfo (V8Buffer* buffer);
+class RetainedBufferInfo : public v8::RetainedObjectInfo {
+ public:
+  explicit RetainedBufferInfo(V8Buffer* buffer);
 
-    public:
-      virtual void Dispose ();
-      virtual bool IsEquivalent (RetainedObjectInfo* other);
-      virtual intptr_t GetHash ();
-      virtual const char* GetLabel ();
-      virtual intptr_t GetSizeInBytes ();
+ public:
+  virtual void Dispose();
+  virtual bool IsEquivalent(RetainedObjectInfo* other);
+  virtual intptr_t GetHash();
+  virtual char const* GetLabel();
+  virtual intptr_t GetSizeInBytes();
 
-    private:
-      static const char _label[];
+ private:
+  static char const _label[];
 
-    private:
-      V8Buffer* _buffer;
-  };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                          static private variables
-// -----------------------------------------------------------------------------
+ private:
+  V8Buffer* _buffer;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief name of the class
 ////////////////////////////////////////////////////////////////////////////////
 
-  const char RetainedBufferInfo::_label[] = "Buffer";
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+char const RetainedBufferInfo::_label[] = "Buffer";
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructors
 ////////////////////////////////////////////////////////////////////////////////
 
-  RetainedBufferInfo::RetainedBufferInfo (V8Buffer* buffer)
-    : _buffer(buffer) {
-  }
+RetainedBufferInfo::RetainedBufferInfo(V8Buffer* buffer) : _buffer(buffer) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create a new wrapper info
 ////////////////////////////////////////////////////////////////////////////////
 
-  v8::RetainedObjectInfo* WrapperInfo (uint16_t classId, v8::Handle<v8::Value> wrapper) {
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-    ISOLATE;
-    TRI_ASSERT(classId == TRI_V8_BUFFER_CID);
-    TRI_ASSERT(V8Buffer::hasInstance(isolate, wrapper));
+v8::RetainedObjectInfo* WrapperInfo(uint16_t classId,
+                                    v8::Handle<v8::Value> wrapper) {
+#ifdef ARANGODB_ENABLE_MAINTAINER_MODE
+  ISOLATE;
+  TRI_ASSERT(classId == TRI_V8_BUFFER_CID);
+  TRI_ASSERT(V8Buffer::hasInstance(isolate, wrapper));
 #endif
 
-    V8Buffer* buffer = V8Buffer::unwrap(wrapper.As<v8::Object>());
-    return new RetainedBufferInfo(buffer);
-  }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
+  V8Buffer* buffer = V8Buffer::unwrap(wrapper.As<v8::Object>());
+  return new RetainedBufferInfo(buffer);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief deletes the info
 ////////////////////////////////////////////////////////////////////////////////
 
-  void RetainedBufferInfo::Dispose () {
-    _buffer = NULL;
-    delete this;
-  }
+void RetainedBufferInfo::Dispose() {
+  _buffer = NULL;
+  delete this;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief checks for equivalence
 ////////////////////////////////////////////////////////////////////////////////
 
-  bool RetainedBufferInfo::IsEquivalent (RetainedObjectInfo* other) {
-    return _label == other->GetLabel()
-      &&  _buffer == static_cast<RetainedBufferInfo*>(other)->_buffer;
-  }
+bool RetainedBufferInfo::IsEquivalent(RetainedObjectInfo* other) {
+  return _label == other->GetLabel() &&
+         _buffer == static_cast<RetainedBufferInfo*>(other)->_buffer;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief computes the equivalence hash
 ////////////////////////////////////////////////////////////////////////////////
 
-  intptr_t RetainedBufferInfo::GetHash () {
-    return reinterpret_cast<intptr_t>(_buffer);
-  }
+intptr_t RetainedBufferInfo::GetHash() {
+  return reinterpret_cast<intptr_t>(_buffer);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief returns the label of the class
 ////////////////////////////////////////////////////////////////////////////////
 
-  const char* RetainedBufferInfo::GetLabel () {
-    return _label;
-  }
+char const* RetainedBufferInfo::GetLabel() { return _label; }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief returns the size in bytes
 ////////////////////////////////////////////////////////////////////////////////
 
-  intptr_t RetainedBufferInfo::GetSizeInBytes () {
-    return V8Buffer::length(_buffer->_isolate, _buffer);
-  }
+intptr_t RetainedBufferInfo::GetSizeInBytes() {
+  return V8Buffer::length(_buffer->_isolate, _buffer);
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  classes V8Buffer
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructs a new buffer from arguments
 ////////////////////////////////////////////////////////////////////////////////
 
-void V8Buffer::New (v8::FunctionCallbackInfo<v8::Value> const& args) {
+void V8Buffer::New(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
 
-  if (! args.IsConstructCall()) {
+  if (!args.IsConstructCall()) {
     TRI_GET_GLOBAL(BufferTempl, v8::FunctionTemplate);
     FromConstructorTemplate(BufferTempl, args);
     return;
   }
 
-  if (! args[0]->IsUint32()) {
+  if (!args[0]->IsUint32()) {
     TRI_V8_THROW_TYPE_ERROR("bad argument");
   }
 
@@ -707,8 +649,8 @@ void V8Buffer::New (v8::FunctionCallbackInfo<v8::Value> const& args) {
 /// @brief C++ API for constructing fast buffer
 ////////////////////////////////////////////////////////////////////////////////
 
-v8::Handle<v8::Object> V8Buffer::New (v8::Isolate* isolate,
-                                      v8::Handle<v8::String> string) {
+v8::Handle<v8::Object> V8Buffer::New(v8::Isolate* isolate,
+                                     v8::Handle<v8::String> string) {
   TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
 
   // get Buffer from global scope.
@@ -716,13 +658,13 @@ v8::Handle<v8::Object> V8Buffer::New (v8::Isolate* isolate,
   TRI_GET_GLOBAL_STRING(BufferConstant);
   v8::Local<v8::Value> bv = global->Get(BufferConstant);
 
-  if (! bv->IsFunction()) {
+  if (!bv->IsFunction()) {
     return v8::Object::New(isolate);
   }
 
   v8::Local<v8::Function> b = v8::Local<v8::Function>::Cast(bv);
 
-  v8::Local<v8::Value> argv[1] = { v8::Local<v8::Value>::New(isolate, string) };
+  v8::Local<v8::Value> argv[1] = {v8::Local<v8::Value>::New(isolate, string)};
   v8::Local<v8::Object> instance = b->NewInstance(1, argv);
 
   return instance;
@@ -732,10 +674,11 @@ v8::Handle<v8::Object> V8Buffer::New (v8::Isolate* isolate,
 /// @brief constructs a new buffer with length
 ////////////////////////////////////////////////////////////////////////////////
 
-V8Buffer* V8Buffer::New (v8::Isolate* isolate, size_t length) {
+V8Buffer* V8Buffer::New(v8::Isolate* isolate, size_t length) {
   TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
 
-  v8::Local<v8::Value> arg = v8::Integer::NewFromUnsigned(isolate, (uint32_t) length);
+  v8::Local<v8::Value> arg =
+      v8::Integer::NewFromUnsigned(isolate, (uint32_t)length);
   TRI_GET_GLOBAL(BufferTempl, v8::FunctionTemplate);
   v8::Local<v8::Object> b = BufferTempl->GetFunction()->NewInstance(1, &arg);
 
@@ -750,7 +693,7 @@ V8Buffer* V8Buffer::New (v8::Isolate* isolate, size_t length) {
 /// @brief constructor, data is copied
 ////////////////////////////////////////////////////////////////////////////////
 
-V8Buffer* V8Buffer::New (v8::Isolate* isolate, const char* data, size_t length) {
+V8Buffer* V8Buffer::New(v8::Isolate* isolate, char const* data, size_t length) {
   TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
 
   v8::Local<v8::Value> arg = v8::Integer::NewFromUnsigned(isolate, 0);
@@ -760,7 +703,6 @@ V8Buffer* V8Buffer::New (v8::Isolate* isolate, const char* data, size_t length) 
   V8Buffer* buffer = V8Buffer::unwrap(obj);
   buffer->replace(isolate, const_cast<char*>(data), length, NULL, NULL);
 
-
   return buffer;
 }
 
@@ -768,11 +710,8 @@ V8Buffer* V8Buffer::New (v8::Isolate* isolate, const char* data, size_t length) 
 /// @brief constructs a new buffer from buffer with free callback
 ////////////////////////////////////////////////////////////////////////////////
 
-V8Buffer* V8Buffer::New (v8::Isolate* isolate,
-                         char* data,
-                         size_t length,
-                         free_callback_fptr callback,
-                         void* hint) {
+V8Buffer* V8Buffer::New(v8::Isolate* isolate, char* data, size_t length,
+                        free_callback_fptr callback, void* hint) {
   TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
 
   v8::Local<v8::Value> arg = v8::Integer::NewFromUnsigned(isolate, 0);
@@ -785,39 +724,32 @@ V8Buffer* V8Buffer::New (v8::Isolate* isolate,
   return buffer;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-V8Buffer::~V8Buffer() {
-  replace(_isolate, NULL, 0, NULL, NULL);
-}
+V8Buffer::~V8Buffer() { replace(_isolate, NULL, 0, NULL, NULL); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief private constructor
 ////////////////////////////////////////////////////////////////////////////////
 
-V8Buffer::V8Buffer (v8::Isolate* isolate,
-                    v8::Handle<v8::Object> wrapper,
-                    size_t length)
-  : V8Wrapper<V8Buffer, TRI_V8_BUFFER_CID>(isolate, this, nullptr, wrapper), // TODO: warning C4355: 'this' : used in base member initializer list
-    _length(0),
-    _callback(nullptr) {
+V8Buffer::V8Buffer(v8::Isolate* isolate, v8::Handle<v8::Object> wrapper,
+                   size_t length)
+    : V8Wrapper<V8Buffer, TRI_V8_BUFFER_CID>(
+          isolate, this, nullptr, wrapper),  // TODO: warning C4355: 'this' :
+                                             // used in base member initializer
+                                             // list
+      _length(0),
+      _data(nullptr),
+      _callback(nullptr) {
   replace(isolate, NULL, length, NULL, NULL);
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                             static public methods
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief
 ////////////////////////////////////////////////////////////////////////////////
 
-bool V8Buffer::hasInstance (v8::Isolate *isolate, v8::Handle<v8::Value> val) {
+bool V8Buffer::hasInstance(v8::Isolate* isolate, v8::Handle<v8::Value> val) {
   TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
 
-  if (! val->IsObject()) {
+  if (!val->IsObject()) {
     return false;
   }
 
@@ -829,36 +761,30 @@ bool V8Buffer::hasInstance (v8::Isolate *isolate, v8::Handle<v8::Value> val) {
     return true;
   }
 
-#ifdef TRI_ENABLE_MAINTAINER_MODE
-  TRI_GET_GLOBAL(FastBufferConstructor, v8::Function);
-  TRI_ASSERT(! FastBufferConstructor.IsEmpty());
-#endif
+  if (obj->Has(TRI_V8_ASCII_STRING("__buffer__"))) {
+    return true;
+  }
 
-  return strcmp(*v8::String::Utf8Value(obj->GetConstructorName()), "Buffer") == 0;
+  return strcmp(*v8::String::Utf8Value(obj->GetConstructorName()), "Buffer") ==
+         0;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief replaces the buffer
 ////////////////////////////////////////////////////////////////////////////////
 
-void V8Buffer::replace (v8::Isolate* isolate,
-                        char* data,
-                        size_t length,
-                        free_callback_fptr callback,
-                        void* hint) {
+void V8Buffer::replace(v8::Isolate* isolate, char* data, size_t length,
+                       free_callback_fptr callback, void* hint) {
   TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
 
   if (_callback != 0) {
     _callback(_data, _callbackHint);
-  }
-  else if (0 < _length) {
-    delete [] _data;
+  } else if (0 < _length) {
+    delete[] _data;
     isolate->AdjustAmountOfExternalAllocatedMemory(
-      -static_cast<intptr_t>(sizeof(V8Buffer) + _length));
+        -static_cast<intptr_t>(sizeof(V8Buffer) + _length));
+  } else {
+    delete[] _data;
   }
 
   _length = length;
@@ -867,8 +793,7 @@ void V8Buffer::replace (v8::Isolate* isolate,
 
   if (_callback != 0) {
     _data = data;
-  }
-  else if (0 < _length) {
+  } else if (0 < _length) {
     _data = new char[_length + SAFETY_OVERHEAD];
     InitSafetyOverhead(_data, _length);
 
@@ -876,27 +801,23 @@ void V8Buffer::replace (v8::Isolate* isolate,
       memcpy(_data, data, _length);
     }
 
-    isolate->AdjustAmountOfExternalAllocatedMemory(
-      sizeof(V8Buffer) + _length + SAFETY_OVERHEAD);
-  }
-  else {
+    isolate->AdjustAmountOfExternalAllocatedMemory(sizeof(V8Buffer) + _length +
+                                                   SAFETY_OVERHEAD);
+  } else {
     _data = NULL;
   }
-  
+
   auto handle = v8::Local<v8::Object>::New(isolate, _handle);
   TRI_GET_GLOBAL(LengthKey, v8::String);
-  handle->Set(LengthKey, v8::Integer::NewFromUnsigned(isolate, (uint32_t) _length));
+  handle->Set(LengthKey,
+              v8::Integer::NewFromUnsigned(isolate, (uint32_t)_length));
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                              javascript functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief binarySlice
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_BinarySlice (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_BinarySlice(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
   int32_t start;
@@ -916,7 +837,7 @@ static void JS_BinarySlice (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief asciiSlice
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_AsciiSlice (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_AsciiSlice(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
   int32_t start;
@@ -934,19 +855,19 @@ static void JS_AsciiSlice (const v8::FunctionCallbackInfo<v8::Value>& args) {
     char* out = new char[len + SAFETY_OVERHEAD];
     InitSafetyOverhead(out, len);
     ForceAscii(data, out, len);
-    v8::Local<v8::String> rc = TRI_V8_PAIR_STRING(out, (int) len);
+    v8::Local<v8::String> rc = TRI_V8_PAIR_STRING(out, (int)len);
     delete[] out;
     TRI_V8_RETURN(rc);
   }
 
-  TRI_V8_RETURN(TRI_V8_PAIR_STRING(data, (int) len));
+  TRI_V8_RETURN(TRI_V8_PAIR_STRING(data, (int)len));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief utf8Slice
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Utf8Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Utf8Slice(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
   int32_t start;
@@ -965,7 +886,7 @@ static void JS_Utf8Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief ucs2Slice
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Ucs2Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Ucs2Slice(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
   int32_t start;
@@ -984,7 +905,7 @@ static void JS_Ucs2Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief hexSlice
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_HexSlice (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_HexSlice(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
   int32_t start;
@@ -1006,7 +927,7 @@ static void JS_HexSlice (const v8::FunctionCallbackInfo<v8::Value>& args) {
   InitSafetyOverhead(dst, dstlen);
 
   for (uint32_t i = 0, k = 0; k < dstlen; i += 1, k += 2) {
-    static const char hex[] = "0123456789abcdef";
+    static char const hex[] = "0123456789abcdef";
     uint8_t val = static_cast<uint8_t>(src[i]);
     dst[k + 0] = hex[val >> 4];
     dst[k + 1] = hex[val & 15];
@@ -1021,7 +942,7 @@ static void JS_HexSlice (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief base64Slice
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Base64Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Base64Slice(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
   int32_t start;
@@ -1033,7 +954,7 @@ static void JS_Base64Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
   }
 
   unsigned slen = end - start;
-  const char* src = parent->_data + start;
+  char const* src = parent->_data + start;
 
   unsigned dlen = (slen + 2 - ((slen + 2) % 3)) / 3 * 4;
   char* dst = new char[dlen + SAFETY_OVERHEAD];
@@ -1041,14 +962,14 @@ static void JS_Base64Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
   unsigned a;
   unsigned b;
-  unsigned c;
   unsigned i;
   unsigned k;
   unsigned n;
 
-  static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                              "abcdefghijklmnopqrstuvwxyz"
-                              "0123456789+/";
+  static char const table[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz"
+      "0123456789+/";
 
   i = 0;
   k = 0;
@@ -1057,7 +978,7 @@ static void JS_Base64Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
   while (i < n) {
     a = src[i + 0] & 0xff;
     b = src[i + 1] & 0xff;
-    c = src[i + 2] & 0xff;
+    unsigned c = src[i + 2] & 0xff;
 
     dst[k + 0] = table[a >> 2];
     dst[k + 1] = table[((a & 3) << 4) | (b >> 4)];
@@ -1085,7 +1006,7 @@ static void JS_Base64Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
         dst[k + 1] = table[((a & 3) << 4) | (b >> 4)];
         dst[k + 2] = table[(b & 0x0f) << 2];
         dst[k + 3] = '=';
-      break;
+        break;
     }
   }
 
@@ -1098,7 +1019,7 @@ static void JS_Base64Slice (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief fill
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Fill (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Fill(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
   int32_t start;
@@ -1115,9 +1036,7 @@ static void JS_Fill (const v8::FunctionCallbackInfo<v8::Value>& args) {
     return;
   }
 
-  memset( (void*)(parent->_data + start),
-          value,
-          end - start);
+  memset((void*)(parent->_data + start), value, end - start);
 
   TRI_V8_RETURN_UNDEFINED();
 }
@@ -1126,24 +1045,28 @@ static void JS_Fill (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief copy
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Copy (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Copy(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
   V8Buffer* source = V8Buffer::unwrap(args.This());
 
-  if (! V8Buffer::hasInstance(isolate, args[0])) {
-    TRI_V8_THROW_EXCEPTION_USAGE("copy(<buffer>, [<start>], [<end>])");
+  if (source == nullptr) {
+    TRI_V8_THROW_EXCEPTION_USAGE("expecting a buffer as this");
   }
 
   v8::Local<v8::Value> target = args[0];
   char* target_data = V8Buffer::data(target);
+
+  if (target_data == nullptr || source == nullptr || source->_data == nullptr) {
+    TRI_V8_THROW_EXCEPTION_MESSAGE(TRI_ERROR_INTERNAL, "invalid pointer value");
+  }
+
   size_t target_length = V8Buffer::length(target);
   size_t target_start = args[1]->IsUndefined() ? 0 : args[1]->Uint32Value();
   size_t source_start = args[2]->IsUndefined() ? 0 : args[2]->Uint32Value();
-  size_t source_end = args[3]->IsUndefined()
-                      ? source->_length
-                      : args[3]->Uint32Value();
+  size_t source_end =
+      args[3]->IsUndefined() ? source->_length : args[3]->Uint32Value();
 
   if (source_end < source_start) {
     TRI_V8_THROW_RANGE_ERROR("sourceEnd < sourceStart");
@@ -1166,35 +1089,30 @@ static void JS_Copy (const v8::FunctionCallbackInfo<v8::Value>& args) {
     TRI_V8_THROW_RANGE_ERROR("sourceEnd out of bounds");
   }
 
-  if (target_data == nullptr || source == nullptr || source->_data == nullptr) {
-    TRI_V8_THROW_EXCEPTION_MESSAGE(TRI_ERROR_INTERNAL, "invalid pointer value");
-  }
-
-  size_t to_copy = MIN(MIN(source_end - source_start,
-                           target_length - target_start),
-                           source->_length - source_start);
+  size_t to_copy =
+      MIN(MIN(source_end - source_start, target_length - target_start),
+          source->_length - source_start);
 
   // need to use slightly slower memmove is the ranges might overlap
-  memmove((void *)(target_data + target_start),
-          (const void*)(source->_data + source_start),
-          to_copy);
+  memmove((void*)(target_data + target_start),
+          (const void*)(source->_data + source_start), to_copy);
 
-  TRI_V8_RETURN(v8::Integer::New(isolate, (int32_t) to_copy));
+  TRI_V8_RETURN(v8::Integer::New(isolate, (int32_t)to_copy));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief utf8Write
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Utf8Write(const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Utf8Write(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
-
 
   V8Buffer* buffer = V8Buffer::unwrap(args.This());
 
   if (!args[0]->IsString()) {
-    TRI_V8_THROW_EXCEPTION_USAGE("utf8Write(<string>, <offset>, [<maxLength>])");
+    TRI_V8_THROW_EXCEPTION_USAGE(
+        "utf8Write(<string>, <offset>, [<maxLength>])");
   }
 
   v8::Local<v8::String> s = args[0]->ToString();
@@ -1203,7 +1121,7 @@ static void JS_Utf8Write(const v8::FunctionCallbackInfo<v8::Value>& args) {
   int length = s->Length();
 
   if (length == 0) {
-      TRI_V8_RETURN(v8::Integer::New(isolate, 0));
+    TRI_V8_RETURN(v8::Integer::New(isolate, 0));
   }
 
   if (length > 0 && offset >= buffer->_length) {
@@ -1218,11 +1136,9 @@ static void JS_Utf8Write(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
   int char_written;
 
-  int written = s->WriteUtf8(p,
-                             (int) max_length,
-                             &char_written,
-                             (v8::String::HINT_MANY_WRITES_EXPECTED
-                            | v8::String::NO_NULL_TERMINATION));
+  int written = s->WriteUtf8(p, (int)max_length, &char_written,
+                             (v8::String::HINT_MANY_WRITES_EXPECTED |
+                              v8::String::NO_NULL_TERMINATION));
 
   TRI_V8_RETURN(v8::Integer::New(isolate, written));
 }
@@ -1231,14 +1147,13 @@ static void JS_Utf8Write(const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief ucs2Write
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Ucs2Write (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Ucs2Write(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
+  V8Buffer* buffer = V8Buffer::unwrap(args.This());
 
-  V8Buffer *buffer = V8Buffer::unwrap(args.This());
-
-  if (! args[0]->IsString()) {
+  if (!args[0]->IsString()) {
     TRI_V8_THROW_EXCEPTION_USAGE("ucs2Write(string, offset, [maxLength])");
   }
 
@@ -1249,19 +1164,16 @@ static void JS_Ucs2Write (const v8::FunctionCallbackInfo<v8::Value>& args) {
     TRI_V8_THROW_RANGE_ERROR("<offset> is out of bounds");
   }
 
-  size_t max_length = args[2]->IsUndefined()
-    ? buffer->_length - offset
-    : args[2]->Uint32Value();
+  size_t max_length = args[2]->IsUndefined() ? buffer->_length - offset
+                                             : args[2]->Uint32Value();
 
   max_length = MIN(buffer->_length - offset, max_length) / 2;
 
   uint16_t* p = (uint16_t*)(buffer->_data + offset);
 
-  int written = s->Write(p,
-                         0,
-                         (int) max_length,
-                         (v8::String::HINT_MANY_WRITES_EXPECTED
-                        | v8::String::NO_NULL_TERMINATION));
+  int written =
+      s->Write(p, 0, (int)max_length, (v8::String::HINT_MANY_WRITES_EXPECTED |
+                                       v8::String::NO_NULL_TERMINATION));
 
   TRI_V8_RETURN(v8::Integer::New(isolate, written * 2));
 }
@@ -1270,14 +1182,13 @@ static void JS_Ucs2Write (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief hexWrite
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_HexWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_HexWrite(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
-
   V8Buffer* parent = V8Buffer::unwrap(args.This());
 
-  if (! args[0]->IsString()) {
+  if (!args[0]->IsString()) {
     TRI_V8_THROW_EXCEPTION_USAGE("hexWrite(string, offset, [maxLength])");
   }
 
@@ -1298,7 +1209,7 @@ static void JS_HexWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
   // overflow + bounds check.
   if (end < start || end > parent->_length) {
     // dead assignment: end = (uint32_t) parent->_length;
-    size = (uint32_t) (parent->_length - start);
+    size = (uint32_t)(parent->_length - start);
   }
 
   if (size == 0) {
@@ -1307,7 +1218,7 @@ static void JS_HexWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
   char* dst = parent->_data + start;
   v8::String::Utf8Value string(s);
-  const char* src = *string;
+  char const* src = *string;
   uint32_t max = string.length() / 2;
 
   if (max > size) {
@@ -1332,15 +1243,15 @@ static void JS_HexWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief asciiWrite
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_AsciiWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_AsciiWrite(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
-
   V8Buffer* buffer = V8Buffer::unwrap(args.This());
 
-  if (! args[0]->IsString()) {
-    TRI_V8_THROW_EXCEPTION_USAGE("asciiWrite(<string>, <offset>, [<maxLength>])");
+  if (!args[0]->IsString()) {
+    TRI_V8_THROW_EXCEPTION_USAGE(
+        "asciiWrite(<string>, <offset>, [<maxLength>])");
   }
 
   v8::Local<v8::String> s = args[0]->ToString();
@@ -1351,19 +1262,17 @@ static void JS_AsciiWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
     TRI_V8_THROW_TYPE_ERROR("<offset> is out of bounds");
   }
 
-  size_t max_length = args[2]->IsUndefined()
-    ? buffer->_length - offset
-  : args[2]->Uint32Value();
+  size_t max_length = args[2]->IsUndefined() ? buffer->_length - offset
+                                             : args[2]->Uint32Value();
 
   max_length = MIN(length, MIN(buffer->_length - offset, max_length));
 
   char* p = buffer->_data + offset;
 
-  int written = s->WriteOneByte(reinterpret_cast<uint8_t*>(p),
-                                0,
-                                (int) max_length,
-                                (v8::String::HINT_MANY_WRITES_EXPECTED
-                               | v8::String::NO_NULL_TERMINATION));
+  int written =
+      s->WriteOneByte(reinterpret_cast<uint8_t*>(p), 0, (int)max_length,
+                      (v8::String::HINT_MANY_WRITES_EXPECTED |
+                       v8::String::NO_NULL_TERMINATION));
   TRI_V8_RETURN(v8::Integer::New(isolate, written));
 }
 
@@ -1371,23 +1280,22 @@ static void JS_AsciiWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief base64Write
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_Base64Write (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_Base64Write(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
-
   V8Buffer* buffer = V8Buffer::unwrap(args.This());
 
-  if (! args[0]->IsString()) {
-    TRI_V8_THROW_EXCEPTION_USAGE("base64Write(<string>, <offset>, [<maxLength>])");
+  if (!args[0]->IsString()) {
+    TRI_V8_THROW_EXCEPTION_USAGE(
+        "base64Write(<string>, <offset>, [<maxLength>])");
   }
 
   v8::String::Utf8Value s(args[0]);
   size_t length = s.length();
   size_t offset = args[1]->Int32Value();
-  size_t max_length = args[2]->IsUndefined()
-    ? buffer->_length - offset
-    : args[2]->Uint32Value();
+  size_t max_length = args[2]->IsUndefined() ? buffer->_length - offset
+                                             : args[2]->Uint32Value();
 
   max_length = MIN(length, MIN(buffer->_length - offset, max_length));
 
@@ -1395,57 +1303,64 @@ static void JS_Base64Write (const v8::FunctionCallbackInfo<v8::Value>& args) {
     TRI_V8_THROW_TYPE_ERROR("<offset> is out of bounds");
   }
 
-  char a, b, c, d;
   char* start = buffer->_data + offset;
   char* dst = start;
   char* const dstEnd = dst + max_length;
-  const char* src = *s;
-  const char* const srcEnd = src + s.length();
+  char const* src = *s;
+  char const* const srcEnd = src + s.length();
 
   while (src < srcEnd && dst < dstEnd) {
-    int remaining = (int) (srcEnd - src);
+    int remaining = (int)(srcEnd - src);
 
-    while (unbase64(*src) < 0 && src < srcEnd) { src++, remaining--; }
+    while (unbase64(*src) < 0 && src < srcEnd) {
+      src++, remaining--;
+    }
     if (remaining == 0 || *src == '=') break;
-    a = unbase64(*src++);
+    char a = unbase64(*src++);
 
-    while (unbase64(*src) < 0 && src < srcEnd) { src++, remaining--; }
+    while (unbase64(*src) < 0 && src < srcEnd) {
+      src++, remaining--;
+    }
     if (remaining <= 1 || *src == '=') break;
-    b = unbase64(*src++);
+    char b = unbase64(*src++);
 
     *dst++ = (a << 2) | ((b & 0x30) >> 4);
     if (dst == dstEnd) break;
 
-    while (unbase64(*src) < 0 && src < srcEnd) { src++, remaining--; }
+    while (unbase64(*src) < 0 && src < srcEnd) {
+      src++, remaining--;
+    }
     if (remaining <= 2 || *src == '=') break;
-    c = unbase64(*src++);
+    char c = unbase64(*src++);
 
     *dst++ = ((b & 0x0F) << 4) | ((c & 0x3C) >> 2);
     if (dst == dstEnd) break;
 
-    while (unbase64(*src) < 0 && src < srcEnd) { src++, remaining--; }
+    while (unbase64(*src) < 0 && src < srcEnd) {
+      src++, remaining--;
+    }
     if (remaining <= 3 || *src == '=') break;
-    d = unbase64(*src++);
+    char d = unbase64(*src++);
 
     *dst++ = ((c & 0x03) << 6) | (d & 0x3F);
   }
 
-  TRI_V8_RETURN(v8::Integer::New(isolate, (int32_t) (dst - start)));
+  TRI_V8_RETURN(v8::Integer::New(isolate, (int32_t)(dst - start)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief binaryWrite
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_BinaryWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_BinaryWrite(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
+  V8Buffer* buffer = V8Buffer::unwrap(args.This());
 
-  V8Buffer *buffer = V8Buffer::unwrap(args.This());
-
-  if (! args[0]->IsString()) {
-    TRI_V8_THROW_EXCEPTION_USAGE("binaryWrite(<string>, <offset>, [<maxLength>])");
+  if (!args[0]->IsString()) {
+    TRI_V8_THROW_EXCEPTION_USAGE(
+        "binaryWrite(<string>, <offset>, [<maxLength>])");
   }
 
   v8::Local<v8::String> s = args[0]->ToString();
@@ -1456,10 +1371,9 @@ static void JS_BinaryWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
     TRI_V8_THROW_TYPE_ERROR("<offset> is out of bounds");
   }
 
-  char *p = (char*)buffer->_data + offset;
-  size_t max_length = args[2]->IsUndefined()
-    ? buffer->_length - offset
-  : args[2]->Uint32Value();
+  char* p = (char*)buffer->_data + offset;
+  size_t max_length = args[2]->IsUndefined() ? buffer->_length - offset
+                                             : args[2]->Uint32Value();
 
   max_length = MIN(length, MIN(buffer->_length - offset, max_length));
 
@@ -1473,14 +1387,14 @@ static void JS_BinaryWrite (const v8::FunctionCallbackInfo<v8::Value>& args) {
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T, bool ENDIANNESS>
-static void ReadFloatGeneric (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void ReadFloatGeneric(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
   double offset_tmp = args[0]->NumberValue();
   int64_t offset = static_cast<int64_t>(offset_tmp);
-  bool doTRI_ASSERT = ! args[1]->BooleanValue();
-    
+  bool doTRI_ASSERT = !args[1]->BooleanValue();
+
   V8Buffer* buffer = V8Buffer::unwrap(args.This());
 
   if (doTRI_ASSERT) {
@@ -1512,7 +1426,7 @@ static void ReadFloatGeneric (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief  readFloatLE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_ReadFloatLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_ReadFloatLE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   ReadFloatGeneric<float, false>(args);
 }
 
@@ -1520,7 +1434,7 @@ static void JS_ReadFloatLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief readFloatBE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_ReadFloatBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_ReadFloatBE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   ReadFloatGeneric<float, true>(args);
 }
 
@@ -1528,7 +1442,7 @@ static void JS_ReadFloatBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief readDoubleLE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_ReadDoubleLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_ReadDoubleLE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   return ReadFloatGeneric<double, false>(args);
 }
 
@@ -1536,7 +1450,7 @@ static void JS_ReadDoubleLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief readDoubleBE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_ReadDoubleBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_ReadDoubleBE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   ReadFloatGeneric<double, true>(args);
 }
 
@@ -1545,22 +1459,22 @@ static void JS_ReadDoubleBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T, bool ENDIANNESS>
-static void WriteFloatGeneric (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void WriteFloatGeneric(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
   bool doTRI_ASSERT = !args[2]->BooleanValue();
 
   if (doTRI_ASSERT) {
-    if (! args[0]->IsNumber()) {
+    if (!args[0]->IsNumber()) {
       TRI_V8_THROW_TYPE_ERROR("<value> not a number");
     }
 
-    if (! args[1]->IsUint32()) {
+    if (!args[1]->IsUint32()) {
       TRI_V8_THROW_TYPE_ERROR("<offset> is not uint");
     }
   }
-  
+
   V8Buffer* buffer = V8Buffer::unwrap(args.This());
 
   T val = static_cast<T>(args[0]->NumberValue());
@@ -1589,7 +1503,7 @@ static void WriteFloatGeneric (const v8::FunctionCallbackInfo<v8::Value>& args) 
 /// @brief writeFloatLE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_WriteFloatLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_WriteFloatLE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   WriteFloatGeneric<float, false>(args);
 }
 
@@ -1597,7 +1511,7 @@ static void JS_WriteFloatLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief writeFloatBE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_WriteFloatBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_WriteFloatBE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   WriteFloatGeneric<float, true>(args);
 }
 
@@ -1605,7 +1519,7 @@ static void JS_WriteFloatBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief writeDoubleLE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_WriteDoubleLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_WriteDoubleLE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   WriteFloatGeneric<double, false>(args);
 }
 
@@ -1613,7 +1527,7 @@ static void JS_WriteDoubleLE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief writeDoubleBE
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_WriteDoubleBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_WriteDoubleBE(v8::FunctionCallbackInfo<v8::Value> const& args) {
   WriteFloatGeneric<double, true>(args);
 }
 
@@ -1621,103 +1535,78 @@ static void JS_WriteDoubleBE (const v8::FunctionCallbackInfo<v8::Value>& args) {
 /// @brief byteLength
 ////////////////////////////////////////////////////////////////////////////////
 
-static void JS_ByteLength (const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void JS_ByteLength(v8::FunctionCallbackInfo<v8::Value> const& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
-
-  if (! args[0]->IsString()) {
+  if (!args[0]->IsString()) {
     TRI_V8_THROW_EXCEPTION_USAGE("byteLength(<string>, <utf8>)");
   }
 
   v8::Local<v8::String> s = args[0]->ToString();
   TRI_V8_encoding_t e = ParseEncoding(isolate, args[1], UTF8);
 
-  TRI_V8_RETURN(v8::Integer::New(isolate, (int32_t) ByteLengthString(isolate, s, e)));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief makeFastBuffer
-////////////////////////////////////////////////////////////////////////////////
-
-static void JS_MakeFastBuffer (const v8::FunctionCallbackInfo<v8::Value>& args) {
-  v8::Isolate* isolate = args.GetIsolate();
-  v8::HandleScope scope(isolate);
-
-  if (! V8Buffer::hasInstance(isolate, args[0])) {
-    TRI_V8_THROW_EXCEPTION_USAGE("makeFastBuffer(<buffer>, <fastBuffer>, <offset>, <length>");
-  }
-
-  V8Buffer* buffer = V8Buffer::unwrap(args[0]->ToObject());
-  v8::Local<v8::Object> fast_buffer = args[1]->ToObject();;
-  uint32_t offset = args[2]->Uint32Value();
-  uint32_t length = args[3]->Uint32Value();
-
-  if (offset > buffer->_length) {
-    TRI_V8_THROW_RANGE_ERROR("<offset> out of range");
-  }
-
-  if (offset + length > buffer->_length) {
-    TRI_V8_THROW_RANGE_ERROR("<length> out of range");
-  }
-
-  // Check for wraparound. Safe because offset and length are unsigned.
-  if (offset + length < offset) {
-    TRI_V8_THROW_RANGE_ERROR("<offset> or <length> out of range");
-  }
-
-  fast_buffer->SetIndexedPropertiesToExternalArrayData(
-    buffer->_data + offset,
-    v8::kExternalUnsignedByteArray,
-    length);
-
-  TRI_V8_RETURN_UNDEFINED();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief setFastBufferConstructor
-////////////////////////////////////////////////////////////////////////////////
-
-static void JS_SetFastBufferConstructor (const v8::FunctionCallbackInfo<v8::Value>& args) {
-  v8::Isolate* isolate = args.GetIsolate();
-  TRI_V8_CURRENT_GLOBALS_AND_SCOPE;
-  if (args[0]->IsFunction()) {
-    v8::Handle<v8::Function> fn = args[0].As<v8::Function>();
-    v8g->FastBufferConstructor.Reset(isolate, fn);
-  }
-  TRI_V8_RETURN_UNDEFINED();
+  TRI_V8_RETURN(
+      v8::Integer::New(isolate, (int32_t)ByteLengthString(isolate, s, e)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief selects an indexed attribute from the buffer
 ////////////////////////////////////////////////////////////////////////////////
 
-static void MapGetIndexedBuffer (uint32_t idx,
-                                 const v8::PropertyCallbackInfo<v8::Value>& args) {
+static void MapGetIndexedBuffer(
+    uint32_t idx, const v8::PropertyCallbackInfo<v8::Value>& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
   v8::Handle<v8::Object> self = args.Holder();
+
+  if (self->InternalFieldCount() == 0) {
+    // seems object has become a FastBuffer already
+    if (self->Has(TRI_V8_ASCII_STRING("parent"))) {
+      v8::Handle<v8::Value> parent = self->Get(TRI_V8_ASCII_STRING("parent"));
+      if (!parent->IsObject()) {
+        TRI_V8_RETURN(v8::Handle<v8::Value>());
+      }
+      self = parent->ToObject();
+      // fallthrough intentional
+    }
+  }
+
   V8Buffer* buffer = V8Buffer::unwrap(self);
 
   if (buffer == nullptr || idx >= buffer->_length) {
     TRI_V8_RETURN(v8::Handle<v8::Value>());
   }
 
-  TRI_V8_RETURN(v8::Integer::NewFromUnsigned(isolate, ((uint8_t) buffer->_data[idx])));
+  TRI_V8_RETURN(
+      v8::Integer::NewFromUnsigned(isolate, ((uint8_t)buffer->_data[idx])));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief sets an indexed attribute in the buffer
 ////////////////////////////////////////////////////////////////////////////////
 
-static void MapSetIndexedBuffer (uint32_t idx,
-                                 v8::Local<v8::Value> value,
-                                 const v8::PropertyCallbackInfo<v8::Value>& args) {
+static void MapSetIndexedBuffer(
+    uint32_t idx, v8::Local<v8::Value> value,
+    const v8::PropertyCallbackInfo<v8::Value>& args) {
   v8::Isolate* isolate = args.GetIsolate();
   v8::HandleScope scope(isolate);
 
   v8::Handle<v8::Object> self = args.Holder();
+
+  if (self->InternalFieldCount() == 0) {
+    // seems object has become a FastBuffer already
+    if (self->Has(TRI_V8_ASCII_STRING("parent"))) {
+      v8::Handle<v8::Value> parent = self->Get(TRI_V8_ASCII_STRING("parent"));
+      if (!parent->IsObject()) {
+        TRI_V8_RETURN(v8::Handle<v8::Value>());
+      }
+      self = parent->ToObject();
+      // fallthrough intentional
+    }
+  }
+
   V8Buffer* buffer = V8Buffer::unwrap(self);
 
   if (buffer == nullptr || idx >= buffer->_length) {
@@ -1726,20 +1615,17 @@ static void MapSetIndexedBuffer (uint32_t idx,
 
   auto val = static_cast<uint8_t>(value->NumberValue());
 
-  buffer->_data[idx] = (char) val;
+  buffer->_data[idx] = (char)val;
 
-  TRI_V8_RETURN(v8::Integer::NewFromUnsigned(isolate, ((uint8_t) buffer->_data[idx])));
+  TRI_V8_RETURN(
+      v8::Integer::NewFromUnsigned(isolate, ((uint8_t)buffer->_data[idx])));
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  global functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief initializes the buffer module
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_InitV8Buffer (v8::Isolate* isolate, v8::Handle<v8::Context> context) {
+void TRI_InitV8Buffer(v8::Isolate* isolate, v8::Handle<v8::Context> context) {
   v8::HandleScope scope(isolate);
 
   // sanity checks
@@ -1754,6 +1640,7 @@ void TRI_InitV8Buffer (v8::Isolate* isolate, v8::Handle<v8::Context> context) {
   TRI_ASSERT(unbase64('\r') == -2);
 
   TRI_v8_global_t* v8g = TRI_GetV8Globals(isolate);
+
   // .............................................................................
   // generate the general SlowBuffer template
   // .............................................................................
@@ -1764,56 +1651,67 @@ void TRI_InitV8Buffer (v8::Isolate* isolate, v8::Handle<v8::Context> context) {
   ft->SetClassName(TRI_V8_ASCII_STRING("SlowBuffer"));
   rt = ft->InstanceTemplate();
   rt->SetInternalFieldCount(1);
-  
+
   // accessor for indexed properties (e.g. buffer[1])
   rt->SetIndexedPropertyHandler(MapGetIndexedBuffer, MapSetIndexedBuffer);
 
   v8g->BufferTempl.Reset(isolate, ft);
 
   // copy free
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("binarySlice"), JS_BinarySlice);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("asciiSlice"), JS_AsciiSlice);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("base64Slice"), JS_Base64Slice);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("ucs2Slice"), JS_Ucs2Slice);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("hexSlice"), JS_HexSlice);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("utf8Slice"), JS_Utf8Slice);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("binarySlice"),
+                        JS_BinarySlice);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("asciiSlice"),
+                        JS_AsciiSlice);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("base64Slice"),
+                        JS_Base64Slice);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("ucs2Slice"),
+                        JS_Ucs2Slice);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("hexSlice"),
+                        JS_HexSlice);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("utf8Slice"),
+                        JS_Utf8Slice);
 
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("utf8Write"), JS_Utf8Write);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("asciiWrite"), JS_AsciiWrite);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("binaryWrite"), JS_BinaryWrite);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("base64Write"), JS_Base64Write);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("ucs2Write"), JS_Ucs2Write);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("hexWrite"), JS_HexWrite);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readFloatLE"), JS_ReadFloatLE);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readFloatBE"), JS_ReadFloatBE);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readDoubleLE"), JS_ReadDoubleLE);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readDoubleBE"), JS_ReadDoubleBE);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeFloatLE"), JS_WriteFloatLE);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeFloatBE"), JS_WriteFloatBE);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeDoubleLE"), JS_WriteDoubleLE);
-  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeDoubleBE"), JS_WriteDoubleBE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("utf8Write"),
+                        JS_Utf8Write);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("asciiWrite"),
+                        JS_AsciiWrite);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("binaryWrite"),
+                        JS_BinaryWrite);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("base64Write"),
+                        JS_Base64Write);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("ucs2Write"),
+                        JS_Ucs2Write);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("hexWrite"),
+                        JS_HexWrite);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readFloatLE"),
+                        JS_ReadFloatLE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readFloatBE"),
+                        JS_ReadFloatBE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readDoubleLE"),
+                        JS_ReadDoubleLE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("readDoubleBE"),
+                        JS_ReadDoubleBE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeFloatLE"),
+                        JS_WriteFloatLE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeFloatBE"),
+                        JS_WriteFloatBE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeDoubleLE"),
+                        JS_WriteDoubleLE);
+  TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("writeDoubleBE"),
+                        JS_WriteDoubleBE);
   TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("fill"), JS_Fill);
   TRI_V8_AddProtoMethod(isolate, ft, TRI_V8_ASCII_STRING("copy"), JS_Copy);
 
-  TRI_V8_AddMethod(isolate, ft, TRI_V8_ASCII_STRING("byteLength"), JS_ByteLength);
-  TRI_V8_AddMethod(isolate, ft, TRI_V8_ASCII_STRING("makeFastBuffer"), JS_MakeFastBuffer);
+  TRI_V8_AddMethod(isolate, ft, TRI_V8_ASCII_STRING("byteLength"),
+                   JS_ByteLength);
 
   // create the exports
   v8::Handle<v8::Object> exports = v8::Object::New(isolate);
 
   TRI_V8_AddMethod(isolate, exports, TRI_V8_ASCII_STRING("SlowBuffer"), ft);
-  TRI_V8_AddMethod(isolate, exports, TRI_V8_ASCII_STRING("setFastBufferConstructor"), JS_SetFastBufferConstructor);
-  TRI_AddGlobalVariableVocbase(isolate, context, TRI_V8_ASCII_STRING("EXPORTS_SLOW_BUFFER"), exports);
+  TRI_AddGlobalVariableVocbase(
+      isolate, context, TRI_V8_ASCII_STRING("EXPORTS_SLOW_BUFFER"), exports);
 
   v8::HeapProfiler* heap_profiler = isolate->GetHeapProfiler();
   heap_profiler->SetWrapperClassInfoProvider(TRI_V8_BUFFER_CID, WrapperInfo);
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

@@ -46,7 +46,6 @@
     },
 
     mapStatToFigure : {
-      residentSize : ["times", "residentSizePercent"],
       pageFaults : ["times", "majorPageFaultsPerSecond", "minorPageFaultsPerSecond"],
       systemUserTime : ["times", "systemTimePerSecond", "userTimePerSecond"],
       totalTime : ["times", "avgQueueTime", "avgRequestTime", "avgIoTime"],
@@ -57,7 +56,7 @@
     },
 
     //colors for dygraphs
-    colors: ["#617e2b", "#296e9c", "#81ccd8", "#7ca530", "#3c3c3c",
+    colors: ["rgb(95, 194, 135)", "rgb(238, 190, 77)", "#81ccd8", "#7ca530", "#3c3c3c",
              "#aa90bd", "#e1811d", "#c7d4b2", "#d0b2d4"],
 
 
@@ -81,21 +80,6 @@
               }
 
               return parseFloat(y.toPrecision(3));
-            }
-          }
-        }
-      },
-
-      residentSize: {
-        header: "Resident Size",
-        axes: {
-          y: {
-            labelsKMG2: false,
-            axisLabelFormatter: function (y) {
-              return parseFloat(y.toPrecision(3) * 100) + "%";
-            },
-            valueFormatter: function (y) {
-              return parseFloat(y.toPrecision(3) * 100) + "%";
             }
           }
         }
@@ -173,7 +157,7 @@
 
       requests: {
         header: "Requests",
-        labels: ["datetime", "GET", "PUT", "POST", "DELETE", "PATCH", "HEAD", "OPTIONS", "OTHER"],
+        labels: ["datetime", "Reads", "Writes"],
         stackedGraph: true,
         div: "requestsChart",
         axes: {
@@ -210,14 +194,15 @@
         digitsAfterDecimal: 1,
         drawGapPoints: true,
         fillGraph: true,
+        fillAlpha: 0.85,
         showLabelsOnHighlight: false,
-        strokeWidth: 1.0,
-        lineWidth: 1.0,
-        strokeBorderWidth: 1.0,
+        strokeWidth: 0.0,
+        lineWidth: 0.0,
+        strokeBorderWidth: 0.0,
         includeZero: true,
         highlightCircleSize: 2.5,
         labelsSeparateLines : true,
-        strokeBorderColor: '#ffffff',
+        strokeBorderColor: 'rgba(0,0,0,0)',
         interactionModel: {},
         maxNumberWidth : 10,
         colors: [this.colors[0]],

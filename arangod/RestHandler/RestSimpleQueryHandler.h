@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief simple query handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,82 +19,31 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_REST_HANDLER_REST_SIMPLE_QUERY_HANDLER_H
-#define ARANGODB_REST_HANDLER_REST_SIMPLE_QUERY_HANDLER_H 1
+#ifndef ARANGOD_REST_HANDLER_REST_SIMPLE_QUERY_HANDLER_H
+#define ARANGOD_REST_HANDLER_REST_SIMPLE_QUERY_HANDLER_H 1
 
 #include "Basics/Common.h"
 #include "RestHandler/RestCursorHandler.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      class RestSimpleQueryHandler
-// -----------------------------------------------------------------------------
+namespace arangodb {
+namespace aql {
+class QueryRegistry;
+}
 
-namespace triagens {
-  namespace aql {
-    class QueryRegistry;
-  }
+class RestSimpleQueryHandler : public RestCursorHandler {
+ public:
+  RestSimpleQueryHandler(GeneralRequest*, GeneralResponse*,
+                         arangodb::aql::QueryRegistry*);
 
-  namespace arango {
-    class ApplicationV8;
+ public:
+  status execute() override final;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief cursor request handler
-////////////////////////////////////////////////////////////////////////////////
-
-    class RestSimpleQueryHandler : public RestCursorHandler {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-        RestSimpleQueryHandler (rest::HttpRequest*,
-                                std::pair<triagens::arango::ApplicationV8*, triagens::aql::QueryRegistry*>*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        status_t execute () override final;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a cursor with all documents from the collection
-////////////////////////////////////////////////////////////////////////////////
-
-        void allDocuments ();
-
-    };
-  }
+ private:
+  void allDocuments();
+  void allDocumentKeys();
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

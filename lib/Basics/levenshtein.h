@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief levenshtein function
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,9 +18,7 @@
 ///
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
-/// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
+/// @author Jen Steemann
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_BASICS_LEVENSHTEIN_H
@@ -32,28 +26,10 @@
 
 #include "Basics/Common.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief calculate the levenshtein distance of the two strings
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_Levenshtein (char const* string1,
-                     char const* string2,
-                     int swap_penalty = 0, 
-                     int substitution_penalty = 2,
-                     int insertion_penalty = 1, 
-                     int deletion_penalty = 3);
+int TRI_Levenshtein(std::string const&, std::string const&);
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

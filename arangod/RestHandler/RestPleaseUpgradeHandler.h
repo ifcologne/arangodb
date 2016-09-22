@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief please upgrade handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,76 +19,23 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_REST_HANDLER_REST_PLEASE_UPGRADE_HANDLER_H
-#define ARANGODB_REST_HANDLER_REST_PLEASE_UPGRADE_HANDLER_H 1
+#ifndef ARANGOD_REST_HANDLER_REST_PLEASE_UPGRADE_HANDLER_H
+#define ARANGOD_REST_HANDLER_REST_PLEASE_UPGRADE_HANDLER_H 1
 
-#include "Basics/Common.h"
+#include "GeneralServer/RestHandler.h"
 
-#include "HttpServer/HttpHandler.h"
+namespace arangodb {
+class RestPleaseUpgradeHandler : public rest::RestHandler {
+ public:
+  explicit RestPleaseUpgradeHandler(GeneralRequest*, GeneralResponse*);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                         class RestDocumentHandler
-// -----------------------------------------------------------------------------
-
-namespace triagens {
-  namespace arango {
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief document request handler
-////////////////////////////////////////////////////////////////////////////////
-
-    class RestPleaseUpgradeHandler : public rest::HttpHandler {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-        RestPleaseUpgradeHandler (rest::HttpRequest*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isDirect () const override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        status_t execute () override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        void handleError (const basics::Exception&) override;
-    };
-  }
+ public:
+  bool isDirect() const override;
+  status execute() override;
+  void handleError(const basics::Exception&) override;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

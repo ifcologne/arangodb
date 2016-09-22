@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief console input using linenoise
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014-2015 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -22,116 +19,48 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Esteban Lombeyda
-/// @author Copyright 2014-2015, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_UTILITIES_LINENOISE_SHELL_H
 #define ARANGODB_UTILITIES_LINENOISE_SHELL_H 1
 
-#include "ShellImplementation.h"
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                              forward declarations
-// -----------------------------------------------------------------------------
+#include "ShellBase.h"
 
 namespace arangodb {
-  class Completer;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class LinenoiseShell
-// -----------------------------------------------------------------------------
+class Completer;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief LinenoiseShell
 ////////////////////////////////////////////////////////////////////////////////
 
-  class LinenoiseShell : public ShellImplementation {
+class LinenoiseShell : public ShellBase {
+ public:
+  LinenoiseShell(std::string const& history, Completer*);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+  ~LinenoiseShell();
 
-    public:
+ public:
+  bool open(bool autoComplete) override final;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  bool close() override final;
 
-    LinenoiseShell (std::string const& history, Completer*);
+  void addHistory(std::string const&) override final;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
+  bool writeHistory() override final;
 
-    virtual ~LinenoiseShell ();
+  std::string getLine(std::string const& prompt, bool& eof) override final;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                       ShellImplementation methods
-// -----------------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not the shell implementation supports colors
+  //////////////////////////////////////////////////////////////////////////////
 
-    public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-      bool open (bool autoComplete) override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-      bool close () override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-      std::string historyPath() override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-      void addHistory (const std::string&) override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-      bool writeHistory () override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-      std::string getLine (const std::string& prompt, bool& eof) override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the shell implementation supports colors
-////////////////////////////////////////////////////////////////////////////////
-
-      bool supportsColors () override final {
-        return false;
-      }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the shell supports a CTRL-C handler
-////////////////////////////////////////////////////////////////////////////////
-
-      bool supportsCtrlCHandler () override final {
-        return false;
-      }
-  };
+  bool supportsColors() const override final {
+#ifdef _WIN32
+    return false;
+#else
+    return true;
+#endif
+  }
+};
 }
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

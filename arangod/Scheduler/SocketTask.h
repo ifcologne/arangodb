@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief base class for input-output tasks from sockets
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,273 +20,101 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2009-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_SCHEDULER_SOCKET_TASK_H
-#define ARANGODB_SCHEDULER_SOCKET_TASK_H 1
-
-#include "Basics/Common.h"
+#ifndef ARANGOD_SCHEDULER_SOCKET_TASK_H
+#define ARANGOD_SCHEDULER_SOCKET_TASK_H 1
 
 #include "Scheduler/Task.h"
 
-#include "Basics/Mutex.h"
+#include "Basics/StringBuffer.h"
 #include "Basics/Thread.h"
+#include "Basics/socket-utils.h"
 #include "Statistics/StatisticsAgent.h"
 
-#ifdef _WIN32
-#include "Basics/win-utils.h"
-#endif
+namespace arangodb {
+namespace rest {
 
-#include "Basics/socket-utils.h"
+class SocketTask : virtual public Task, public ConnectionStatisticsAgent {
+  explicit SocketTask(SocketTask const&) = delete;
+  SocketTask& operator=(SocketTask const&) = delete;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              forward declarations
-// -----------------------------------------------------------------------------
+ private:
+  static size_t const READ_BLOCK_SIZE = 10000;
 
-namespace triagens {
-  namespace basics {
-    class StringBuffer;
+ public:
+  SocketTask(TRI_socket_t, ConnectionInfo&&, double);
+
+ protected:
+  ~SocketTask();
+
+ public:
+  void armKeepAliveTimeout();
+
+ protected:
+  virtual bool fillReadBuffer();
+
+  virtual bool handleRead();   // called by handleEvent
+  virtual bool handleWrite();  // called by handleEvent
+
+  virtual void handleTimeout() = 0;
+
+  // is called in a loop as long as it returns true.
+  // Return false if there is not enough data to do
+  // any more processing and all available data has
+  // been evaluated.
+  virtual bool processRead() = 0;
+
+ protected:
+  void addWriteBuffer(std::unique_ptr<basics::StringBuffer> buffer) {
+    addWriteBuffer(std::move(buffer), (RequestStatisticsAgent*)nullptr);
   }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  class SocketTask
-// -----------------------------------------------------------------------------
+  void addWriteBuffer(std::unique_ptr<basics::StringBuffer>,
+                      RequestStatisticsAgent*);
 
-  namespace rest {
+  void addWriteBuffer(basics::StringBuffer*, TRI_request_statistics_t*);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief base class for input-output tasks from sockets
-////////////////////////////////////////////////////////////////////////////////
+  void completedWriteBuffer();
 
-    class SocketTask : virtual public Task,
-                       public ConnectionStatisticsAgent {
-      private:
-        SocketTask (SocketTask const&);
-        SocketTask& operator= (SocketTask const&);
+ protected:
+  bool setup(Scheduler*, EventLoop) override;
+  void cleanup() override;
+  bool handleEvent(EventToken token, EventType) override;
 
-      private:
-        static size_t const READ_BLOCK_SIZE = 10000;
+ protected:
+  double const _keepAliveTimeout;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ protected:
+  // connection closed
+  bool _closed = false;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructs a new task with a given socket
-////////////////////////////////////////////////////////////////////////////////
+  // client has closed the connection, immediately close the underlying socket
+  bool _clientClosed = false;
 
-      public:
+  // the client has requested, close the connection after all data is written
+  bool _closeRequested = false;
 
-        explicit
-        SocketTask (TRI_socket_t, double);
+ protected:
+  TRI_socket_t _commSocket;
+  ConnectionInfo _connectionInfo;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief deletes a socket task
-///
-/// This method will close the underlying socket.
-////////////////////////////////////////////////////////////////////////////////
+  basics::StringBuffer _readBuffer;
 
-      protected:
+  basics::StringBuffer* _writeBuffer = nullptr;
+  TRI_request_statistics_t* _writeBufferStatistics = nullptr;
 
-        ~SocketTask ();
+  std::deque<std::pair<basics::StringBuffer*, TRI_request_statistics_t*>> _writeBuffers;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+  EventToken _keepAliveWatcher = nullptr;
+  EventToken _readWatcher = nullptr;
+  EventToken _writeWatcher = nullptr;
 
-////////////////////////////////////////////////////////////////////////////////
-/// set a request timeout
-////////////////////////////////////////////////////////////////////////////////
+  size_t _writeLength = 0;
 
-    public:
-
-        void setKeepAliveTimeout (double);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                         protected virtual methods
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief fills the read buffer
-///
-/// The function should be called by the input task if the scheduler has
-/// indicated that new data is available. It will return true, if data could
-/// be read and false if the connection has been closed.
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual bool fillReadBuffer ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief handles a read
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual bool handleRead () = 0;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief handles a write
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual bool handleWrite ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief called if write buffer has been sent
-///
-/// This called is called if the current write buffer has been sent
-/// completly to the client.
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual void completedWriteBuffer () = 0;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief handles a keep-alive timeout
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual void handleTimeout () = 0;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets an active write buffer
-////////////////////////////////////////////////////////////////////////////////
-
-        void setWriteBuffer (basics::StringBuffer*,
-                             TRI_request_statistics_t*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks for presence of an active write buffer
-////////////////////////////////////////////////////////////////////////////////
-
-        bool hasWriteBuffer () const;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      Task methods
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        bool setup (Scheduler*, EventLoop) override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief cleans up the task by unregistering all watchers
-////////////////////////////////////////////////////////////////////////////////
-
-        void cleanup () override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        bool handleEvent (EventToken token, EventType) override;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               protected variables
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief event for keep-alive timeout
-////////////////////////////////////////////////////////////////////////////////
-
-        EventToken _keepAliveWatcher;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief event for read
-////////////////////////////////////////////////////////////////////////////////
-
-        EventToken _readWatcher;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief event for write
-////////////////////////////////////////////////////////////////////////////////
-
-        EventToken _writeWatcher;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief event for async
-////////////////////////////////////////////////////////////////////////////////
-
-        EventToken _asyncWatcher;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief communication socket
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_socket_t _commSocket;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief keep-alive timeout in seconds
-////////////////////////////////////////////////////////////////////////////////
-
-        double _keepAliveTimeout;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the current write buffer
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::StringBuffer* _writeBuffer;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the current write buffer statistics
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_request_statistics_t* _writeBufferStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of bytes already written
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t _writeLength;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief read buffer
-///
-/// The function fillReadBuffer stores the data in this buffer.
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::StringBuffer* _readBuffer;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief client has closed the connection
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _clientClosed;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               protected variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief current thread identifier
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_tid_t _tid;
-
-    };
-  }
+  TRI_tid_t _tid = 0;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

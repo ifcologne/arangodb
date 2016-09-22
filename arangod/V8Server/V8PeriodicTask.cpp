@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief periodic V8 task
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,116 +19,81 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "V8PeriodicTask.h"
 
-#include "Basics/json.h"
+#include <velocypack/Builder.h>
+#include <velocypack/velocypack-aliases.h>
+
 #include "Dispatcher/Dispatcher.h"
-#include "Scheduler/Scheduler.h"
-#include "V8/v8-conv.h"
+#include "Dispatcher/DispatcherFeature.h"
 #include "V8Server/V8Job.h"
-#include "VocBase/server.h"
 
-using namespace std;
-using namespace triagens::rest;
-using namespace triagens::arango;
+using namespace arangodb;
+using namespace arangodb::application_features;
+using namespace arangodb::rest;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+std::unordered_set<Task*> V8PeriodicTask::RUNNING;
+Mutex V8PeriodicTask::RUNNING_LOCK;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-V8PeriodicTask::V8PeriodicTask (string const& id,
-                                string const& name,
-                                TRI_vocbase_t* vocbase,
-                                ApplicationV8* v8Dealer,
-                                Scheduler* scheduler,
-                                Dispatcher* dispatcher,
-                                double offset,
-                                double period,
-                                string const& command,
-                                TRI_json_t* parameters,
-                                bool allowUseDatabase)
-  : Task(id, name),
-    PeriodicTask(id, offset, period),
-    _vocbase(vocbase),
-    _v8Dealer(v8Dealer),
-    _dispatcher(dispatcher),
-    _command(command),
-    _parameters(parameters),
-    _created(TRI_microtime()),
-    _allowUseDatabase(allowUseDatabase) {
-
-  TRI_ASSERT(vocbase != nullptr);
-
-  // increase reference counter for the database used
-  TRI_UseVocBase(_vocbase);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-V8PeriodicTask::~V8PeriodicTask () {
-  // decrease reference counter for the database used
-  TRI_ReleaseVocBase(_vocbase);
-
-  if (_parameters != nullptr) {
-    TRI_FreeJson(TRI_UNKNOWN_MEM_ZONE, _parameters);
+void V8PeriodicTask::jobDone(Task* task) {
+  try {
+    MUTEX_LOCKER(guard, V8PeriodicTask::RUNNING_LOCK);
+    RUNNING.erase(task);
+  } catch (...) {
+    // ignore any memory error
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              PeriodicTask methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get a task specific description in JSON format
-////////////////////////////////////////////////////////////////////////////////
-
-void V8PeriodicTask::getDescription (TRI_json_t* json) const {
-  PeriodicTask::getDescription(json);
-
-  TRI_json_t* created = TRI_CreateNumberJson(TRI_UNKNOWN_MEM_ZONE, _created);
-  TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, json, "created", created);
-
-  TRI_json_t* cmd = TRI_CreateStringCopyJson(TRI_UNKNOWN_MEM_ZONE, _command.c_str(), _command.size());
-  TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, json, "command", cmd);
-
-  TRI_json_t* db = TRI_CreateStringCopyJson(TRI_UNKNOWN_MEM_ZONE, _vocbase->_name, strlen(_vocbase->_name));
-  TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, json, "database", db);
+V8PeriodicTask::V8PeriodicTask(std::string const& id, std::string const& name,
+                               TRI_vocbase_t* vocbase,
+                               double offset, double period,
+                               std::string const& command,
+                               std::shared_ptr<VPackBuilder> parameters,
+                               bool allowUseDatabase)
+    : Task(id, name),
+      PeriodicTask(id, offset, period),
+      _vocbaseGuard(vocbase),
+      _command(command),
+      _parameters(parameters),
+      _created(TRI_microtime()),
+      _allowUseDatabase(allowUseDatabase) {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief handles the next tick
-////////////////////////////////////////////////////////////////////////////////
+// get a task specific description in JSON format
+void V8PeriodicTask::getDescription(VPackBuilder& builder) const {
+  PeriodicTask::getDescription(builder);
+  TRI_ASSERT(builder.isOpenObject());
 
-bool V8PeriodicTask::handlePeriod () {
-  V8Job* job = new V8Job(
-    _vocbase,
-    _v8Dealer,
-    "(function (params) { " + _command + " } )(params);",
-    _parameters,
-    _allowUseDatabase);
+  builder.add("created", VPackValue(_created));
+  builder.add("command", VPackValue(_command));
+  builder.add("database", VPackValue(_vocbaseGuard.vocbase()->name()));
+}
 
-  if (_dispatcher->addJob(job) != TRI_ERROR_NO_ERROR) {
-    // just in case the dispatcher cannot accept the job (e.g. when shutting down)
-    delete job;
+// handles the next tick
+bool V8PeriodicTask::handlePeriod() {
+  if (DispatcherFeature::DISPATCHER == nullptr) {
+    LOG(WARN) << "could not add task " << _command << ", no dispatcher known";
+    return false;
   }
+
+  {
+    MUTEX_LOCKER(guard, V8PeriodicTask::RUNNING_LOCK);
+
+    if (RUNNING.find(this) != RUNNING.end()) {
+      LOG(DEBUG) << "old task still running, skipping";
+      return true;
+    }
+
+    RUNNING.insert(this);
+  }
+
+  std::unique_ptr<Job> job(new V8Job(
+      _vocbaseGuard.vocbase(), "(function (params) { " + _command + " } )(params);",
+      _parameters, _allowUseDatabase, this));
+
+  DispatcherFeature::DISPATCHER->addJob(job, false);
 
   return true;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

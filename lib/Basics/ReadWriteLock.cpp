@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Read-Write Lock
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,183 +20,118 @@
 ///
 /// @author Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "ReadWriteLock.h"
 
-using namespace triagens::basics;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb::basics;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructs a read-write lock
 ////////////////////////////////////////////////////////////////////////////////
 
-ReadWriteLock::ReadWriteLock ()
-  : _rwlock(),
-    _writeLocked(false) {
+ReadWriteLock::ReadWriteLock() : _rwlock(), _writeLocked(false) {
   TRI_InitReadWriteLock(&_rwlock);
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-  TRI_InitMutex(&_mutex);
-
-  _readLockedCounter = 0;
-  _writeLockedCounter = 0;
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief deletes read-write lock
 ////////////////////////////////////////////////////////////////////////////////
 
-ReadWriteLock::~ReadWriteLock () {
-  TRI_DestroyReadWriteLock(&_rwlock);
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-  TRI_DestroyMutex(&_mutex);
-#endif
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief check for read locked
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-
-bool ReadWriteLock::isReadLocked () const {
-  return _readLockedCounter > 0;
-}
-
-#endif
+ReadWriteLock::~ReadWriteLock() { TRI_DestroyReadWriteLock(&_rwlock); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief locks for reading
 ////////////////////////////////////////////////////////////////////////////////
 
-void ReadWriteLock::readLock () {
-  TRI_ReadLockReadWriteLock(&_rwlock);
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-
-  TRI_LockMutex(&_mutex);
-  _readLockedCounter++;
-  TRI_UnlockMutex(&_mutex);
-
-#endif
-}
+void ReadWriteLock::readLock() { TRI_ReadLockReadWriteLock(&_rwlock); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief tries to lock for reading
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ReadWriteLock::tryReadLock () {
-  if (! TRI_TryReadLockReadWriteLock(&_rwlock)) {
-    return false;
+bool ReadWriteLock::tryReadLock() {
+  return TRI_TryReadLockReadWriteLock(&_rwlock);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief tries to lock for reading, sleeping if the lock cannot be
+/// acquired instantly, sleepTime is in microseconds
+////////////////////////////////////////////////////////////////////////////////
+
+bool ReadWriteLock::tryReadLock(uint64_t sleepTime) {
+  while (true) {
+    if (tryReadLock()) {
+      return true;
+    }
+
+#ifdef _WIN32
+    usleep((unsigned long)sleepTime);
+#else
+    usleep((useconds_t)sleepTime);
+#endif
   }
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-
-  TRI_LockMutex(&_mutex);
-  _readLockedCounter++;
-  TRI_UnlockMutex(&_mutex);
-
-#endif
-  return true;
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief check for write locked
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-
-bool ReadWriteLock::isWriteLocked () const {
-  return _writeLockedCounter > 0;
-}
-
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief locks for writing
 ////////////////////////////////////////////////////////////////////////////////
 
-void ReadWriteLock::writeLock () {
+void ReadWriteLock::writeLock() {
   TRI_WriteLockReadWriteLock(&_rwlock);
 
   _writeLocked = true;
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-
-  TRI_LockMutex(&_mutex);
-  _writeLockedCounter++;
-  TRI_UnlockMutex(&_mutex);
-
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief tries to lock for writing
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ReadWriteLock::tryWriteLock () {
-  if (! TRI_TryWriteLockReadWriteLock(&_rwlock)) {
+bool ReadWriteLock::tryWriteLock() {
+  if (!TRI_TryWriteLockReadWriteLock(&_rwlock)) {
     return false;
   }
 
   _writeLocked = true;
-
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-
-  TRI_LockMutex(&_mutex);
-  _writeLockedCounter++;
-  TRI_UnlockMutex(&_mutex);
-
-#endif
   return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief tries to lock for writing, sleeping if the lock cannot be
+/// acquired instantly, sleepTime is in microseconds
+////////////////////////////////////////////////////////////////////////////////
+
+bool ReadWriteLock::tryWriteLock(uint64_t sleepTime) {
+  while (true) {
+    if (tryWriteLock()) {
+      return true;
+    }
+
+#ifdef _WIN32
+    usleep((unsigned long)sleepTime);
+#else
+    usleep((useconds_t)sleepTime);
+#endif
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief releases the read-lock or write-lock
 ////////////////////////////////////////////////////////////////////////////////
 
-void ReadWriteLock::unlock () {
-#ifdef TRI_READ_WRITE_LOCK_COUNTER
-
-  TRI_LockMutex(&_mutex);
-
-  if (_writeLocked) {
-    _writeLockedCounter--;
-  }
-  else {
-    _readLockedCounter--;
-  }
-
-  TRI_UnlockMutex(&_mutex);
-
-#endif
-
+void ReadWriteLock::unlock() {
   if (_writeLocked) {
     _writeLocked = false;
-    TRI_WriteUnlockReadWriteLock(&_rwlock);
-  }
-  else {
-    TRI_ReadUnlockReadWriteLock(&_rwlock);
+    unlockWrite();
+  } else {
+    unlockRead();
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+void ReadWriteLock::unlockRead() {
+  TRI_ReadUnlockReadWriteLock(&_rwlock);
+}
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+void ReadWriteLock::unlockWrite() {
+  TRI_WriteUnlockReadWriteLock(&_rwlock);
+}

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, AST variable
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,104 +19,56 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Aql/Variable.h"
-#include "Basics/JsonHelper.h"
+#include "Variable.h"
+#include "Basics/VelocyPackHelper.h"
 
-using namespace triagens::aql;
-using namespace triagens::basics;
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                               static initializers
-// -----------------------------------------------------------------------------
+using namespace arangodb::aql;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief name of $OLD variable
-////////////////////////////////////////////////////////////////////////////////
+char const* const Variable::NAME_OLD = "$OLD";
 
-char const* const Variable::NAME_OLD     = "$OLD";
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief name of $NEW variable
-////////////////////////////////////////////////////////////////////////////////
+char const* const Variable::NAME_NEW = "$NEW";
 
-char const* const Variable::NAME_NEW     = "$NEW";
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief name of $CURRENT variable
-////////////////////////////////////////////////////////////////////////////////
-
 char const* const Variable::NAME_CURRENT = "$CURRENT";
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief create the variable
-////////////////////////////////////////////////////////////////////////////////
+Variable::Variable(std::string const& name, VariableId id)
+    : name(name), value(nullptr), id(id) {}
 
-Variable::Variable (std::string const& name,
-                    VariableId id) 
-  : name(name),
-    value(nullptr),
-    id(id) {
-}
+Variable::Variable(arangodb::velocypack::Slice const& slice)
+    : Variable(arangodb::basics::VelocyPackHelper::checkAndGetStringValue(
+                   slice, "name"),
+               arangodb::basics::VelocyPackHelper::checkAndGetNumericValue<
+                   VariableId>(slice, "id")) {}
 
-Variable::Variable (triagens::basics::Json const& json)
-  : Variable(JsonHelper::checkAndGetStringValue(json.json(), "name"), JsonHelper::checkAndGetNumericValue<VariableId>(json.json(), "id")) {
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy the variable
-////////////////////////////////////////////////////////////////////////////////
+Variable::~Variable() {}
 
-Variable::~Variable () {
+/// @brief return a VelocyPack representation of the variable
+void Variable::toVelocyPack(VPackBuilder& builder) const {
+  VPackObjectBuilder b(&builder);
+  builder.add("id", VPackValue(static_cast<double>(id)));
+  builder.add("name", VPackValue(name));
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a JSON representation of the variable
-////////////////////////////////////////////////////////////////////////////////
-
-triagens::basics::Json Variable::toJson () const {
-  triagens::basics::Json json(triagens::basics::Json::Object, 2);
-  json("id", triagens::basics::Json(static_cast<double>(id)))
-      ("name", triagens::basics::Json(name));
-
-  return json;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief replace a variable by another
-////////////////////////////////////////////////////////////////////////////////
-
-Variable const* Variable::replace (Variable const* variable,
-                                   std::unordered_map<VariableId, Variable const*> const& replacements) {
+Variable const* Variable::replace(
+    Variable const* variable,
+    std::unordered_map<VariableId, Variable const*> const& replacements) {
   while (variable != nullptr) {
     auto it = replacements.find(variable->id);
     if (it != replacements.end()) {
       variable = (*it).second;
-    }
-    else {
+    } else {
       break;
     }
   }
 
   return variable;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

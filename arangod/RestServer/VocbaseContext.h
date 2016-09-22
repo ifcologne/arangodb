@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief vocbase context
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,12 +19,13 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_REST_SERVER_VOCBASE_CONTEXT_H
-#define ARANGODB_REST_SERVER_VOCBASE_CONTEXT_H 1
+#ifndef ARANGOD_REST_SERVER_VOCBASE_CONTEXT_H
+#define ARANGOD_REST_SERVER_VOCBASE_CONTEXT_H 1
+
+#include <velocypack/Builder.h>
+#include <velocypack/velocypack-aliases.h>
 
 #include "Basics/Common.h"
 
@@ -36,161 +33,53 @@
 #include "Rest/HttpResponse.h"
 #include "Rest/RequestContext.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              forward declarations
-// -----------------------------------------------------------------------------
+#include "Rest/GeneralRequest.h"
+#include "Rest/GeneralResponse.h"
 
-struct TRI_server_t;
 struct TRI_vocbase_t;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class VocbaseContext
-// -----------------------------------------------------------------------------
+namespace arangodb {
+class VocbaseContext : public arangodb::RequestContext {
+ public:
+  static double ServerSessionTtl;
 
-namespace triagens {
-  namespace arango {
+ public:
+  VocbaseContext(GeneralRequest*, TRI_vocbase_t*, std::string const&);
+  ~VocbaseContext();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief ArangoDB VocbaseContext
-////////////////////////////////////////////////////////////////////////////////
+ public:
+  TRI_vocbase_t* vocbase() const { return _vocbase; }
 
-    class VocbaseContext : public triagens::rest::RequestContext {
+ public:
+  rest::ResponseCode authenticate() override final;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                             static public methods
-// -----------------------------------------------------------------------------
+ private:
+  bool useClusterAuthentication() const;
 
-      public:
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief checks the authentication (basic)
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief defines a sid
-////////////////////////////////////////////////////////////////////////////////
+  rest::ResponseCode basicAuthentication(const char*);
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief checks the authentication (jwt)
+  //////////////////////////////////////////////////////////////////////////////
 
-        static void createSid (std::string const& database,
-                               std::string const& sid, 
-                               std::string const& username);
+  rest::ResponseCode jwtAuthentication(std::string const&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief clears all sid entries for a database
-////////////////////////////////////////////////////////////////////////////////
+ private: 
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief checks the authentication header and sets user if successful
+  //////////////////////////////////////////////////////////////////////////////
 
-        static void clearSid (std::string const& database);
+  rest::ResponseCode authenticateRequest(bool* forceOpen);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief clears a sid
-////////////////////////////////////////////////////////////////////////////////
-
-        static void clearSid (std::string const& database,
-                              std::string const& sid);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief gets the last access time
-////////////////////////////////////////////////////////////////////////////////
-
-        static double accessSid (std::string const& database,
-                                 std::string const& sid);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-        VocbaseContext (rest::HttpRequest*,
-                        TRI_server_t*,
-                        TRI_vocbase_t*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-        ~VocbaseContext ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get vocbase of context
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_vocbase_t* getVocbase () const {
-          return _vocbase;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not to use special cluster authentication
-////////////////////////////////////////////////////////////////////////////////
-
-        bool useClusterAuthentication () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return authentication realm
-////////////////////////////////////////////////////////////////////////////////
-
-        char const* getRealm () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks the authentication
-////////////////////////////////////////////////////////////////////////////////
-
-        rest::HttpResponse::HttpResponseCode authenticate ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public variables
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief time to live for server sessions
-/// @startDocuBlock SessionTimeout
-/// `--server.session-timeout value`
-///
-/// The timeout for web interface sessions, using for authenticating requests
-/// to the web interface (/_admin/aardvark) and related areas.
-///
-/// Sessions are only used when authentication is turned on.
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
-
-        static double ServerSessionTtl;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the server
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_server_t* TRI_UNUSED _server;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the vocbase
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_vocbase_t* _vocbase;
-
-    };
-  }
+ private:
+  TRI_vocbase_t* _vocbase;
+  std::string const _jwtSecret;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

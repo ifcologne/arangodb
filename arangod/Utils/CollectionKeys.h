@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief collection keys
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,156 +19,115 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_ARANGO_COLLECTION_KEYS_H
-#define ARANGODB_ARANGO_COLLECTION_KEYS_H 1
+#ifndef ARANGOD_UTILS_COLLECTION_KEYS_H
+#define ARANGOD_UTILS_COLLECTION_KEYS_H 1
 
 #include "Basics/Common.h"
-#include "Basics/JsonHelper.h"
 #include "Utils/CollectionNameResolver.h"
 #include "VocBase/voc-types.h"
 
-struct TRI_document_collection_t;
+#include <velocypack/Builder.h>
+#include <velocypack/Slice.h>
+#include <velocypack/velocypack-aliases.h>
+
+struct TRI_df_marker_t;
 struct TRI_vocbase_t;
 
-namespace triagens {
-  namespace arango {
+namespace arangodb {
+namespace velocypack {
+class Slice;
+}
 
-    class CollectionGuard;
-    class DocumentDitch;
-    
-    typedef TRI_voc_tick_t CollectionKeysId;
+class CollectionGuard;
+class DocumentDitch;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class CollectionKeys
-// -----------------------------------------------------------------------------
+typedef TRI_voc_tick_t CollectionKeysId;
 
-    class CollectionKeys {
+class CollectionKeys {
+ public:
+  CollectionKeys(CollectionKeys const&) = delete;
+  CollectionKeys& operator=(CollectionKeys const&) = delete;
 
-      public:
+  CollectionKeys(TRI_vocbase_t*, std::string const&, TRI_voc_tick_t,
+                 double ttl);
 
-        CollectionKeys (CollectionKeys const&) = delete;
-        CollectionKeys& operator= (CollectionKeys const&) = delete;
+  ~CollectionKeys();
 
-        CollectionKeys (TRI_vocbase_t*, 
-                        std::string const&,
-                        TRI_voc_tick_t,
-                        double ttl);
+ public:
+  CollectionKeysId id() const { return _id; }
 
-        ~CollectionKeys ();
+  double ttl() const { return _ttl; }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+  double expires() const { return _expires; }
 
-      public:
-        
-        CollectionKeysId id () const {
-          return _id;
-        }
-        
-        double ttl () const {
-          return _ttl;
-        }
-        
-        double expires () const {
-          return _expires;
-        }
+  bool isUsed() const { return _isUsed; }
 
-        bool isUsed () const {
-          return _isUsed;
-        }
+  bool isDeleted() const { return _isDeleted; }
 
-        bool isDeleted () const {
-          return _isDeleted;
-        }
-        
-        void deleted () {
-          _isDeleted = true;
-        }
-        
-        void use () {
-          TRI_ASSERT(! _isDeleted);
-          TRI_ASSERT(! _isUsed);
+  void deleted() { _isDeleted = true; }
 
-          _isUsed = true;
-          _expires = TRI_microtime() + _ttl;
-        }
+  void use() {
+    TRI_ASSERT(!_isDeleted);
+    TRI_ASSERT(!_isUsed);
 
-        void release () {
-          TRI_ASSERT(_isUsed);
-          _isUsed = false;
-        }
-        
-        size_t count () const {
-          TRI_ASSERT(_markers != nullptr);
-          return _markers->size();
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initially creates the list of keys
-////////////////////////////////////////////////////////////////////////////////
-
-        void create (TRI_voc_tick_t);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief hashes a chunk of keys
-////////////////////////////////////////////////////////////////////////////////
-
-        std::tuple<std::string, std::string, uint64_t> hashChunk (size_t, size_t) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief dumps keys into the JSON
-////////////////////////////////////////////////////////////////////////////////
-
-        void dumpKeys (triagens::basics::Json&,
-                       size_t,
-                       size_t) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief dumps documents into the JSON
-////////////////////////////////////////////////////////////////////////////////
-
-        void dumpDocs (triagens::basics::Json&,
-                       size_t,
-                       size_t,
-                       TRI_json_t const*) const;
-        
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-        struct TRI_vocbase_t*                        _vocbase;
-        triagens::arango::CollectionGuard*           _guard;
-        struct TRI_document_collection_t*            _document;
-        triagens::arango::DocumentDitch*             _ditch;
-        std::string const                            _name;
-        triagens::arango::CollectionNameResolver     _resolver;
-        TRI_voc_tick_t                               _blockerId;
-        std::vector<TRI_df_marker_t const*>*         _markers;
-        
-        CollectionKeysId                             _id;
-        double                                       _ttl;
-        double                                       _expires;
-        bool                                         _isDeleted;
-        bool                                         _isUsed;
-    };
-
+    _isUsed = true;
+    _expires = TRI_microtime() + _ttl;
   }
+
+  void release() {
+    TRI_ASSERT(_isUsed);
+    _isUsed = false;
+  }
+
+  size_t count() const {
+    TRI_ASSERT(_markers != nullptr);
+    return _markers->size();
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief initially creates the list of keys
+  //////////////////////////////////////////////////////////////////////////////
+
+  void create(TRI_voc_tick_t);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief hashes a chunk of keys
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::tuple<std::string, std::string, uint64_t> hashChunk(size_t,
+                                                           size_t) const;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief dumps keys into the result
+  //////////////////////////////////////////////////////////////////////////////
+
+  void dumpKeys(arangodb::velocypack::Builder&, size_t, size_t) const;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief dumps documents into the result
+  //////////////////////////////////////////////////////////////////////////////
+
+  void dumpDocs(arangodb::velocypack::Builder&, size_t, size_t,
+                arangodb::velocypack::Slice const&) const;
+
+ private:
+  struct TRI_vocbase_t* _vocbase;
+  arangodb::CollectionGuard* _guard;
+  arangodb::LogicalCollection* _collection;
+  arangodb::DocumentDitch* _ditch;
+  std::string const _name;
+  arangodb::CollectionNameResolver _resolver;
+  TRI_voc_tick_t _blockerId;
+  std::vector<void const*>* _markers;
+
+  CollectionKeysId _id;
+  double _ttl;
+  double _expires;
+  bool _isDeleted;
+  bool _isUsed;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

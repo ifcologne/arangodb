@@ -1,7 +1,7 @@
 # coding: utf-8
 
 require 'rubygems'
-require 'httparty'
+require 'persistent_httparty'
 require 'json'
 require 'rspec'
 require 'rspec/expectations'
@@ -54,6 +54,7 @@ end
 
 class ArangoDB
   include HTTParty
+  persistent_connection_adapter
 
   if $ssl == '1'
     base_uri "https://#{$address}"
@@ -67,8 +68,9 @@ class ArangoDB
   # expect json as output/response format
   format :json
 
-  # set timeout to 120 seconds
-  default_timeout 120 
+  # set timeout to 300 seconds - so we will see timeouts in the cluster with ther
+  # respective error messages from the coordinator.
+  default_timeout 300 
 
   # do not verify SSL
   default_options[:verify] = false

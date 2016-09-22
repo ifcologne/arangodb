@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief database usage guard
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,122 +19,78 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_UTILS_DATABASE_GUARD_H
-#define ARANGODB_UTILS_DATABASE_GUARD_H 1
+#ifndef ARANGOD_UTILS_vocbase_GUARD_H
+#define ARANGOD_UTILS_vocbase_GUARD_H 1
 
-#include "Basics/Common.h"
+#include "ApplicationFeatures/ApplicationServer.h"
 #include "Basics/Exceptions.h"
-#include "VocBase/server.h"
+#include "RestServer/DatabaseFeature.h"
 
 struct TRI_vocbase_t;
 
-namespace triagens {
-  namespace arango {
+namespace arangodb {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                               class DatabaseGuard
-// -----------------------------------------------------------------------------
+class DatabaseGuard {
+ public:
+  DatabaseGuard(DatabaseGuard const&) = delete;
+  DatabaseGuard& operator=(DatabaseGuard const&) = delete;
 
-    class DatabaseGuard {
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create the guard, using a database id
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
+  explicit DatabaseGuard(TRI_voc_tick_t id)
+      : _vocbase(nullptr) {
+    
+    auto databaseFeature = application_features::ApplicationServer::getFeature<DatabaseFeature>("Database");
+    _vocbase = databaseFeature->useDatabase(id);
 
-      public:
-
-        DatabaseGuard (DatabaseGuard const&) = delete;
-        DatabaseGuard& operator= (DatabaseGuard const&) = delete;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the guard, using a database id
-////////////////////////////////////////////////////////////////////////////////
-
-        DatabaseGuard (TRI_server_t* server,
-                       TRI_voc_tick_t id)
-          : _server(server),
-            _database(nullptr) {
-
-          _database = TRI_UseDatabaseByIdServer(server, id);
-
-          if (_database == nullptr) {
-            THROW_ARANGO_EXCEPTION(TRI_ERROR_ARANGO_DATABASE_NOT_FOUND);
-          }
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the guard, using a database name
-////////////////////////////////////////////////////////////////////////////////
-
-        DatabaseGuard (TRI_server_t* server,
-                       char const* name)
-          : _server(server),
-            _database(nullptr) {
-
-          _database = TRI_UseDatabaseServer(server, name);
-
-          if (_database == nullptr) {
-            THROW_ARANGO_EXCEPTION(TRI_ERROR_ARANGO_DATABASE_NOT_FOUND);
-          }
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the guard
-////////////////////////////////////////////////////////////////////////////////
-
-        ~DatabaseGuard () {
-          if (_database != nullptr) {
-            TRI_ReleaseDatabaseServer(_server, _database);
-          }
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the database pointer
-////////////////////////////////////////////////////////////////////////////////
-
-        inline TRI_vocbase_t* database () const {
-          return _database;
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief server
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_server_t* _server;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief pointer to database
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_vocbase_t* _database;
-
-    };
+    if (_vocbase == nullptr) {
+      THROW_ARANGO_EXCEPTION(TRI_ERROR_ARANGO_DATABASE_NOT_FOUND);
+    }
   }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create the guard, using a database name
+  //////////////////////////////////////////////////////////////////////////////
+
+  explicit DatabaseGuard(std::string const& name)
+      : _vocbase(nullptr) {
+      
+    auto databaseFeature = application_features::ApplicationServer::getFeature<DatabaseFeature>("Database");
+    _vocbase = databaseFeature->useDatabase(name);
+
+    if (_vocbase == nullptr) {
+      THROW_ARANGO_EXCEPTION(TRI_ERROR_ARANGO_DATABASE_NOT_FOUND);
+    }
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief destroy the guard
+  //////////////////////////////////////////////////////////////////////////////
+
+  ~DatabaseGuard() {
+    TRI_ASSERT(_vocbase != nullptr);
+    _vocbase->release();
+  }
+
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the database pointer
+  //////////////////////////////////////////////////////////////////////////////
+
+  inline TRI_vocbase_t* database() const { return _vocbase; }
+
+ private:
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief pointer to database
+  //////////////////////////////////////////////////////////////////////////////
+
+  TRI_vocbase_t* _vocbase;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

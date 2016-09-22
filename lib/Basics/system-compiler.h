@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief High-Performance Database Framework made by triagens
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,27 +19,31 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_BASICS_C_SYSTEM__COMPILER_H
-#define ARANGODB_BASICS_C_SYSTEM__COMPILER_H 1
+#ifndef ARANGODB_BASICS_SYSTEM__COMPILER_H
+#define ARANGODB_BASICS_SYSTEM__COMPILER_H 1
 
 #ifndef TRI_WITHIN_COMMON
 #error use <Basics/Common.h>
 #endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public defines
-// -----------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
+/// @brief GNU compiler
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef __GNUC__
+#define TRI_HAVE_GCC_UNUSED 1
+#define TRI_HAVE_GCC_ATTRIBUTE 1
+#define TRI_HAVE_GCC_BUILTIN 1
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief mark a value as unused
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef TRI_HAVE_GCC_UNUSED
-#define TRI_UNUSED __attribute__ ((unused))
+#define TRI_UNUSED __attribute__((unused))
 #else
 #define TRI_UNUSED /* unused */
 #endif
@@ -53,70 +53,21 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef TRI_HAVE_GCC_ATTRIBUTE
-#define TRI_WARN_UNUSED_RESULT __attribute__ ((warn_unused_result))
+#define TRI_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
 #else
 #define TRI_WARN_UNUSED_RESULT /* unused */
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief expect false
-///
-/// @param
-///    a        the value
+/// @brief sizetint_t
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifdef TRI_HAVE_GCC_BUILTIN
-#define EF(a) __builtin_expect(a, false)
+#if defined(TRI_OVERLOAD_FUNCS_SIZE_T)
+#if TRI_SIZEOF_SIZE_T == 8
+#define sizetint_t uint64_t
 #else
-#define EF(a) a
+#define sizetint_t uint32_t
 #endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief expect true
-///
-/// @param
-///    a        the value
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_HAVE_GCC_BUILTIN
-#define ET(a) __builtin_expect(a, true)
-#else
-#define ET(a) a
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief prefetch read
-///
-/// @param
-///    a        the value to prefetch
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_HAVE_GCC_BUILTIN
-#define PR(a) __builtin_prefetch(a, 0, 0)
-#else
-#define PR(a) /* prefetch read */
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief prefetch write
-///
-/// @param
-///    a        the value to prefetch
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_HAVE_GCC_BUILTIN
-#define PW(a) __builtin_prefetch(a, 1, 0)
-#else
-#define PW(a) /* prefetch write */
 #endif
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

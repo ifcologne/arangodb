@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief please upgrade handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,74 +19,45 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestPleaseUpgradeHandler.h"
 
-using namespace triagens::basics;
-using namespace triagens::rest;
-using namespace triagens::arango;
-using namespace std;
+#include "Rest/HttpResponse.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb;
+using namespace arangodb::basics;
+using namespace arangodb::rest;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+RestPleaseUpgradeHandler::RestPleaseUpgradeHandler(GeneralRequest* request,
+                                                   GeneralResponse* response)
+    : RestHandler(request, response) {}
 
-RestPleaseUpgradeHandler::RestPleaseUpgradeHandler (HttpRequest* request)
-  : HttpHandler(request) {
-}
+bool RestPleaseUpgradeHandler::isDirect() const { return true; }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
+RestHandler::status RestPleaseUpgradeHandler::execute() {
+  // TODO needs to generalized
+  auto response = dynamic_cast<HttpResponse*>(_response.get());
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
+  if (response == nullptr) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+  }
 
-bool RestPleaseUpgradeHandler::isDirect () const {
-  return true;
-}
+  resetResponse(rest::ResponseCode::OK);
+  response->setContentType(rest::ContentType::TEXT);
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-HttpHandler::status_t RestPleaseUpgradeHandler::execute () {
-  _response = createResponse(HttpResponse::OK);
-  _response->setContentType("text/plain; charset=utf-8");
-
-  auto& buffer = _response->body();
+  auto& buffer = response->body();
   buffer.appendText("Database: ");
   buffer.appendText(_request->databaseName());
   buffer.appendText("\r\n\r\n");
   buffer.appendText("It appears that your database must be upgraded. ");
   buffer.appendText("Normally this can be done using\r\n\r\n");
-  buffer.appendText("  /etc/init.d/arangodb stop\r\n");
-  buffer.appendText("  /etc/init.d/arangodb upgrade\r\n");
-  buffer.appendText("  /etc/init.d/arangodb start\r\n\r\n");
+  buffer.appendText("  /etc/init.d/arangodb3 stop\r\n");
+  buffer.appendText("  /etc/init.d/arangodb3 upgrade\r\n");
+  buffer.appendText("  /etc/init.d/arangodb3 start\r\n\r\n");
   buffer.appendText("Please check the log file for details.\r\n");
 
-  return status_t(HANDLER_DONE);
+  return status::DONE;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-void RestPleaseUpgradeHandler::handleError (const Exception&) {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+void RestPleaseUpgradeHandler::handleError(const Exception&) {}

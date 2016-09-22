@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief shutdown request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,79 +19,67 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestShutdownHandler.h"
 
-#include "Basics/json.h"
-#include "Basics/tri-strings.h"
 #include "Rest/HttpRequest.h"
+#include "Cluster/AgencyComm.h"
+#include "Cluster/ClusterFeature.h"
 
-using namespace std;
-using namespace triagens::admin;
-using namespace triagens::rest;
+#include <velocypack/Builder.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb;
+using namespace arangodb::application_features;
+using namespace arangodb::rest;
+
+RestShutdownHandler::RestShutdownHandler(GeneralRequest* request, GeneralResponse* response)
+  : RestBaseHandler(request, response) {}
+
+bool RestShutdownHandler::isDirect() const { return true; }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
+/// @brief was docuBlock JSF_get_api_initiate
 ////////////////////////////////////////////////////////////////////////////////
 
-RestShutdownHandler::RestShutdownHandler (triagens::rest::HttpRequest* request,
-                                          void* applicationServer)
-  : RestBaseHandler(request),
-    _applicationServer(
-      static_cast<triagens::rest::ApplicationServer*>(applicationServer)) {
+RestHandler::status RestShutdownHandler::execute() {
+  if (_request->requestType() != rest::RequestType::DELETE_REQ) {
+    generateError(rest::ResponseCode::METHOD_NOT_ALLOWED, 405);
+    return status::DONE;
+  }
+  bool removeFromCluster;
+  std::string const& remove = _request->value("remove_from_cluster", removeFromCluster);
+  removeFromCluster = removeFromCluster && remove == "1";
+
+  bool shutdownClusterFound;
+  std::string const& shutdownCluster = _request->value("shutdown_cluster", shutdownClusterFound);
+  if (shutdownClusterFound && shutdownCluster == "1") {
+    AgencyComm agency;
+
+    VPackBuilder builder;
+    builder.add(VPackValue(true));
+    AgencyCommResult result = agency.setValue("Shutdown", builder.slice(), 0.0);
+    if (!result.successful()) {
+      generateError(rest::ResponseCode::SERVER_ERROR, 500);
+      return status::DONE;
+    }
+    removeFromCluster = true;
+  }
+  if (removeFromCluster) {
+    ClusterFeature* clusterFeature = ApplicationServer::getFeature<ClusterFeature>("Cluster");
+    clusterFeature->setUnregisterOnShutdown(true);
+  }
+
+  ApplicationServer::server->beginShutdown();
+
+  try {
+    VPackBuilder result;
+    result.add(VPackValue("OK"));
+    generateResult(rest::ResponseCode::OK, result.slice());
+  } catch (...) {
+    // Ignore the error
+  }
+
+  return status::DONE;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-bool RestShutdownHandler::isDirect () const {
-  return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_get_api_initiate
-/// @brief initiates the shutdown sequence
-///
-/// @RESTHEADER{GET /_admin/shutdown, Initiate shutdown sequence}
-///
-/// @RESTDESCRIPTION
-/// This call initiates a clean shutdown sequence.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned in all cases.
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
-
-HttpHandler::status_t RestShutdownHandler::execute () {
-  _applicationServer->beginShutdown();
-
-  TRI_json_t result;
-  TRI_InitStringJson(&result, TRI_DuplicateStringZ(TRI_CORE_MEM_ZONE, "OK"), strlen("OK"));
-  generateResult(&result);
-  TRI_DestroyJson(TRI_CORE_MEM_ZONE, &result);
-
-  return status_t(HANDLER_DONE);
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

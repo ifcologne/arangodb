@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief replication dump functions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,121 +19,74 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "replication-dump.h"
-
-#include "Basics/conversions.h"
-#include "Basics/files.h"
-#include "Basics/json.h"
-#include "Basics/logging.h"
-#include "Basics/tri-strings.h"
-#include "Cluster/ServerState.h"
-#include "Utils/CollectionNameResolver.h"
-#include "VocBase/collection.h"
+#include "Basics/ReadLocker.h"
+#include "Basics/StaticStrings.h"
+#include "Basics/StringRef.h"
+#include "Basics/VPackStringBufferAdapter.h"
+#include "Logger/Logger.h"
+#include "VocBase/CompactionLocker.h"
+#include "VocBase/DatafileHelper.h"
+#include "VocBase/Ditch.h"
+#include "VocBase/LogicalCollection.h"
 #include "VocBase/datafile.h"
-#include "VocBase/document-collection.h"
-#include "VocBase/server.h"
-#include "VocBase/transaction.h"
 #include "VocBase/vocbase.h"
-#include "VocBase/VocShaper.h"
 #include "Wal/Logfile.h"
 #include "Wal/LogfileManager.h"
 #include "Wal/Marker.h"
 
-using namespace triagens;
+#include <velocypack/Dumper.h>
+#include <velocypack/Options.h>
+#include <velocypack/Slice.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       REPLICATION
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private defines
-// -----------------------------------------------------------------------------
+using namespace arangodb;
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief shortcut function
+/// @brief append values to a string buffer
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FAIL_IFNOT(func, buffer, val)                                     \
-  if (func(buffer, val) != TRI_ERROR_NO_ERROR) {                          \
-    return TRI_ERROR_OUT_OF_MEMORY;                                       \
+static void Append(TRI_replication_dump_t* dump, uint64_t value) {
+  int res = TRI_AppendUInt64StringBuffer(dump->_buffer, value);
+
+  if (res != TRI_ERROR_NO_ERROR) {
+    THROW_ARANGO_EXCEPTION(res);
   }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create a string-buffer function name
-////////////////////////////////////////////////////////////////////////////////
-
-#define APPEND_FUNC(name) TRI_ ## name ## StringBuffer
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief append a character to a string-buffer or fail
-////////////////////////////////////////////////////////////////////////////////
-
-#define APPEND_CHAR(buffer, c)      FAIL_IFNOT(APPEND_FUNC(AppendChar), buffer, c)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief append a string to a string-buffer or fail
-////////////////////////////////////////////////////////////////////////////////
-
-#define APPEND_STRING(buffer, str)  FAIL_IFNOT(APPEND_FUNC(AppendString), buffer, str)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief append uint64 to a string-buffer or fail
-////////////////////////////////////////////////////////////////////////////////
-
-#define APPEND_UINT64(buffer, val)  FAIL_IFNOT(APPEND_FUNC(AppendUInt64), buffer, val)
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                     private types
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief a datafile descriptor
-////////////////////////////////////////////////////////////////////////////////
-
-typedef struct df_entry_s {
-  TRI_datafile_t const* _data;
-  TRI_voc_tick_t  _dataMin;
-  TRI_voc_tick_t  _dataMax;
-  TRI_voc_tick_t  _tickMax;
-  bool            _isJournal;
 }
-df_entry_t;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private functions
-// -----------------------------------------------------------------------------
+static void Append(TRI_replication_dump_t* dump, char const* value) {
+  int res = TRI_AppendStringStringBuffer(dump->_buffer, value);
+
+  if (res != TRI_ERROR_NO_ERROR) {
+    THROW_ARANGO_EXCEPTION(res);
+  }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief translate a (local) collection id into a collection name
 ////////////////////////////////////////////////////////////////////////////////
-    
-static char const* NameFromCid (TRI_replication_dump_t* dump,
-                                TRI_voc_cid_t cid) {
+
+static char const* NameFromCid(TRI_replication_dump_t* dump,
+                               TRI_voc_cid_t cid) {
   auto it = dump->_collectionNames.find(cid);
 
   if (it != dump->_collectionNames.end()) {
     // collection name is in cache already
     return (*it).second.c_str();
   }
-    
-  // collection name not in cache yet
-  char* name = TRI_GetCollectionNameByIdVocBase(dump->_vocbase, cid);
 
-  if (name != nullptr) {
+  // collection name not in cache yet
+  std::string name(dump->_vocbase->collectionName(cid));
+
+  if (!name.empty()) {
     // insert into cache
     try {
-      dump->_collectionNames.emplace(std::make_pair(cid, std::string(name)));
-    }
-    catch (...) {
-      TRI_FreeString(TRI_UNKNOWN_MEM_ZONE, name);
+      dump->_collectionNames.emplace(cid, std::move(name));
+    } catch (...) {
       return nullptr;
     }
-
-    TRI_FreeString(TRI_UNKNOWN_MEM_ZONE, name);
 
     // and look it up again
     return NameFromCid(dump, cid);
@@ -147,978 +96,369 @@ static char const* NameFromCid (TRI_replication_dump_t* dump,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief append a collection name or id to a string buffer
-////////////////////////////////////////////////////////////////////////////////
-
-static int AppendCollection (TRI_replication_dump_t* dump,
-                             TRI_voc_cid_t cid,
-                             bool translateCollectionIds,
-                             triagens::arango::CollectionNameResolver* resolver) {
-  if (translateCollectionIds) {
-    if (cid > 0) {
-      std::string name;
-      if (triagens::arango::ServerState::instance()->isDBServer()) {
-        name = resolver->getCollectionNameCluster(cid);
-      }
-      else {
-        name = resolver->getCollectionName(cid);
-      }
-      APPEND_STRING(dump->_buffer, name.c_str());
-      return TRI_ERROR_NO_ERROR;
-    }
-
-    APPEND_STRING(dump->_buffer, "_unknown");
-  }
-  else {
-    APPEND_UINT64(dump->_buffer, (uint64_t) cid);
-  }
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief iterate over a vector of datafiles and pick those with a specific
-/// data range
-////////////////////////////////////////////////////////////////////////////////
-
-static void IterateDatafiles (TRI_vector_pointer_t const* datafiles,
-                              std::vector<df_entry_t>& result,
-                              TRI_voc_tick_t dataMin,
-                              TRI_voc_tick_t dataMax,
-                              bool isJournal) {
-
-  size_t const n = datafiles->_length;
-
-  for (size_t i = 0; i < n; ++i) {
-    auto df = static_cast<TRI_datafile_t const*>(TRI_AtVectorPointer(datafiles, i));
-
-    df_entry_t entry = {
-      df,
-      df->_dataMin,
-      df->_dataMax,
-      df->_tickMax,
-      isJournal
-    };
-
-    LOG_TRACE("checking datafile %llu with data range %llu - %llu, tick max: %llu",
-              (unsigned long long) df->_fid,
-              (unsigned long long) df->_dataMin,
-              (unsigned long long) df->_dataMax,
-              (unsigned long long) df->_tickMax);
-
-    if (df->_dataMin == 0 || df->_dataMax == 0) {
-      // datafile doesn't have any data
-      continue;
-    }
-
-    TRI_ASSERT(df->_tickMin <= df->_tickMax);
-    TRI_ASSERT(df->_dataMin <= df->_dataMax);
-
-    if (dataMax < df->_dataMin) {
-      // datafile is newer than requested range
-      continue;
-    }
-
-    if (dataMin > df->_dataMax) {
-      // datafile is older than requested range
-      continue;
-    }
-
-    result.emplace_back(entry);
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the datafiles of a collection for a specific tick range
-////////////////////////////////////////////////////////////////////////////////
-
-static std::vector<df_entry_t> GetRangeDatafiles (TRI_document_collection_t* document,
-                                                  TRI_voc_tick_t dataMin,
-                                                  TRI_voc_tick_t dataMax) {
-
-  LOG_TRACE("getting datafiles in data range %llu - %llu",
-            (unsigned long long) dataMin,
-            (unsigned long long) dataMax);
-
-  std::vector<df_entry_t> datafiles;
-
-  TRI_READ_LOCK_DATAFILES_DOC_COLLECTION(document);
-
-  try {
-    IterateDatafiles(&document->_datafiles, datafiles, dataMin, dataMax, false);
-    IterateDatafiles(&document->_journals, datafiles, dataMin, dataMax, true);
-  }
-  catch (...) {
-    TRI_READ_UNLOCK_DATAFILES_DOC_COLLECTION(document);
-    throw;
-  }
-
-  TRI_READ_UNLOCK_DATAFILES_DOC_COLLECTION(document);
-
-  return datafiles;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief append database id plus collection id 
-////////////////////////////////////////////////////////////////////////////////
-  
-static int AppendContext (TRI_replication_dump_t* dump,
-                          TRI_voc_tick_t databaseId,
-                          TRI_voc_cid_t collectionId) {
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"cid\":\"");
-  APPEND_UINT64(dump->_buffer, collectionId);
- 
-  // also include collection name 
-  char const* cname = NameFromCid(dump, collectionId);
-  if (cname != nullptr) {
-    APPEND_STRING(dump->_buffer, "\",\"cname\":\"");
-    APPEND_STRING(dump->_buffer, cname);
-  }
-
-  APPEND_STRING(dump->_buffer, "\",");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a raw marker from a datafile for a collection dump
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyMarkerDump (TRI_replication_dump_t* dump,
-                                TRI_document_collection_t* document,
-                                TRI_df_marker_t const* marker,
-                                bool withTicks,
-                                bool translateCollectionIds,
-                                triagens::arango::CollectionNameResolver* resolver) {
-  // This covers two cases:
-  //   1. document is not nullptr and marker points into a data file
-  //   2. document is a nullptr and marker points into a WAL file
-  // no other combinations are allowed.
-
-  TRI_string_buffer_t* buffer;
-  TRI_replication_operation_e type;
-  TRI_voc_key_t key;
-  TRI_voc_rid_t rid;
-  bool haveData = true;
-  bool isWal = false;
-
-  buffer = dump->_buffer;
-
-  if (buffer == nullptr) {
-    return TRI_ERROR_INTERNAL;
-  }
-
-  switch (marker->_type) {
-    case TRI_DOC_MARKER_KEY_DELETION: {
-      TRI_ASSERT(nullptr != document);
-      auto m = reinterpret_cast<TRI_doc_deletion_key_marker_t const*>(marker);
-      key = ((char*) m) + m->_offsetKey;
-      type = REPLICATION_MARKER_REMOVE;
-      rid = m->_rid;
-      haveData = false;
-      break;
-    }
-
-    case TRI_DOC_MARKER_KEY_DOCUMENT: {
-      TRI_ASSERT(nullptr != document);
-      auto m = reinterpret_cast<TRI_doc_document_key_marker_t const*>(marker);
-      key = ((char*) m) + m->_offsetKey;
-      type = REPLICATION_MARKER_DOCUMENT;
-      rid = m->_rid;
-      break;
-    }
-
-    case TRI_DOC_MARKER_KEY_EDGE: {
-      TRI_ASSERT(nullptr != document);
-      auto m = reinterpret_cast<TRI_doc_document_key_marker_t const*>(marker);
-      key = ((char*) m) + m->_offsetKey;
-      type = REPLICATION_MARKER_EDGE;
-      rid = m->_rid;
-      break;
-    }
-
-    case TRI_WAL_MARKER_REMOVE: {
-      TRI_ASSERT(nullptr == document);
-      auto m = static_cast<wal::remove_marker_t const*>(marker);
-      key = ((char*) m) + sizeof(wal::remove_marker_t);
-      type = REPLICATION_MARKER_REMOVE;
-      rid = m->_revisionId;
-      haveData = false;
-      isWal = true;
-      break;
-    }
-
-    case TRI_WAL_MARKER_DOCUMENT: {
-      TRI_ASSERT(nullptr == document);
-      auto m = static_cast<wal::document_marker_t const*>(marker);
-      key = ((char*) m) + m->_offsetKey;
-      type = REPLICATION_MARKER_DOCUMENT;
-      rid = m->_revisionId;
-      isWal = true;
-      break;
-    }
-
-    case TRI_WAL_MARKER_EDGE: {
-      TRI_ASSERT(nullptr == document);
-      auto m = static_cast<wal::edge_marker_t const*>(marker);
-      key = ((char*) m) + m->_offsetKey;
-      type = REPLICATION_MARKER_EDGE;
-      rid = m->_revisionId;
-      isWal = true;
-      break;
-    }
-
-    default: {
-      return TRI_ERROR_INTERNAL;
-    }
-  }
-
-  if (withTicks) {
-    APPEND_STRING(buffer, "{\"tick\":\"");
-    APPEND_UINT64(buffer, (uint64_t) marker->_tick);
-    APPEND_STRING(buffer, "\",\"type\":");
-  }
-  else {
-    APPEND_STRING(buffer, "{\"type\":");
-  }
-
-  APPEND_UINT64(buffer, (uint64_t) type);
-  APPEND_STRING(buffer, ",\"key\":\"");
-  // key is user-defined, but does not need escaping
-  APPEND_STRING(buffer, key);
-  APPEND_STRING(buffer, "\",\"rev\":\"");
-  APPEND_UINT64(buffer, (uint64_t) rid);
-
-  // document
-  if (haveData) {
-    APPEND_STRING(buffer, "\",\"data\":{");
-
-    // common document meta-data
-    APPEND_STRING(buffer, "\"" TRI_VOC_ATTRIBUTE_KEY "\":\"");
-    APPEND_STRING(buffer, key);
-    APPEND_STRING(buffer, "\",\"" TRI_VOC_ATTRIBUTE_REV "\":\"");
-    APPEND_UINT64(buffer, (uint64_t) rid);
-    APPEND_CHAR(buffer, '"');
-
-    // Is it an edge marker?
-    if (marker->_type == TRI_DOC_MARKER_KEY_EDGE ||
-        marker->_type == TRI_WAL_MARKER_EDGE) {
-      TRI_voc_key_t fromKey;
-      TRI_voc_key_t toKey;
-      TRI_voc_cid_t fromCid;
-      TRI_voc_cid_t toCid;
-
-      if (marker->_type == TRI_DOC_MARKER_KEY_EDGE) {
-        auto e = reinterpret_cast<TRI_doc_edge_key_marker_t const*>(marker);
-        fromKey = ((char*) e) + e->_offsetFromKey;
-        toKey = ((char*) e) + e->_offsetToKey;
-        fromCid = e->_fromCid;
-        toCid = e->_toCid;
-      }
-      else {  // TRI_WAL_MARKER_EDGE
-        auto e = reinterpret_cast<wal::edge_marker_t const*>(marker);
-        fromKey = ((char*) e) + e->_offsetFromKey;
-        toKey = ((char*) e) + e->_offsetToKey;
-        fromCid = e->_fromCid;
-        toCid = e->_toCid;
-      }
-
-      int res;
-      APPEND_STRING(buffer, ",\"" TRI_VOC_ATTRIBUTE_FROM "\":\"");
-      res = AppendCollection(dump, fromCid, translateCollectionIds, resolver);
-
-      if (res != TRI_ERROR_NO_ERROR) {
-        return res;
-      }
-
-      APPEND_STRING(buffer, "\\/");
-      APPEND_STRING(buffer, fromKey);
-      APPEND_STRING(buffer, "\",\"" TRI_VOC_ATTRIBUTE_TO "\":\"");
-      res = AppendCollection(dump, toCid, translateCollectionIds, resolver);
-
-      if (res != TRI_ERROR_NO_ERROR) {
-        return res;
-      }
-
-      APPEND_STRING(buffer, "\\/");
-      APPEND_STRING(buffer, toKey);
-      APPEND_CHAR(buffer, '"');
-    }
-
-    // the actual document data
-    TRI_shaped_json_t shaped;
-    if (! isWal) {
-      auto m = reinterpret_cast<TRI_doc_document_key_marker_t const*>(marker);
-      TRI_EXTRACT_SHAPED_JSON_MARKER(shaped, m);
-      TRI_StringifyArrayShapedJson(document->getShaper(), buffer, &shaped, true); // ONLY IN DUMP, PROTECTED by fake trx above
-    }
-    else {   // isWal == true
-      auto m = static_cast<wal::document_marker_t const*>(marker);
-      TRI_EXTRACT_SHAPED_JSON_MARKER(shaped, m);
-      char const* legend = reinterpret_cast<char const*>(m) + m->_offsetLegend;
-      if (m->_offsetJson - m->_offsetLegend == 8) {
-        auto p = reinterpret_cast<int64_t const*>(legend);
-        legend += *p;
-      }
-      basics::LegendReader legendReader(legend);
-      TRI_StringifyArrayShapedJson(&legendReader, buffer, &shaped, true);
-    }
-
-    APPEND_STRING(buffer, "}}\n");
-  }
-  else {  // deletion marker, so no data
-    APPEND_STRING(buffer, "\"}\n");
-  }
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief append the document attributes of a marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int AppendDocument (triagens::wal::document_marker_t const* marker,
-                           TRI_replication_dump_t* dump) {
-  TRI_shaped_json_t shaped;
-  shaped._sid         = marker->_shape;
-  shaped._data.length = marker->_size - marker->_offsetJson;
-  shaped._data.data   = (char*) marker + marker->_offsetJson;
-
-  // check if the marker contains a legend
-  char const* legend = reinterpret_cast<char const*>(marker) + marker->_offsetLegend;
-  if (*((uint64_t*) legend) == 0ULL) {
-    // marker has no legend
-
-    // create a fake transaction so no assertion fails
-    triagens::arango::TransactionBase trx(true);
-      
-    // try to open the collection and use the shaper
-    TRI_vocbase_t* vocbase = TRI_UseDatabaseByIdServer(dump->_vocbase->_server, marker->_databaseId);
-
-    if (vocbase == nullptr) {
-      // we'll not return an error in this case but an empty document
-      // this is intentional so the replication can still continue with documents of collections
-      // that survived
-      return TRI_ERROR_NO_ERROR;
-    }
-
-    TRI_vocbase_col_status_e status;
-    TRI_vocbase_col_t* collection = TRI_UseCollectionByIdVocBase(vocbase, marker->_collectionId, status);
-
-    int res = TRI_ERROR_NO_ERROR;
-
-    if (collection == nullptr) {
-      // we'll not return an error in this case but an empty document
-      // this is intentional so the replication can still continue with documents of collections
-      // that survived
-      res = TRI_ERROR_NO_ERROR;
-    }
-    else {
-      TRI_document_collection_t* document = collection->_collection;
-
-      if (! TRI_StringifyArrayShapedJson(document->getShaper(), dump->_buffer, &shaped, true)) {
-        res = TRI_ERROR_OUT_OF_MEMORY;
-      }
-    
-      TRI_ReleaseCollectionVocBase(vocbase, collection);
-    }
-
-    TRI_ReleaseDatabaseServer(dump->_vocbase->_server, vocbase);
-
-    return res;
-  }
-  else {
-    // marker has a legend, so use it
-    if (marker->_offsetJson - marker->_offsetLegend == 8) {
-      auto p = reinterpret_cast<int64_t const*>(legend);
-      legend += *p;
-    }
-    triagens::basics::LegendReader lr(legend);
-    if (! TRI_StringifyArrayShapedJson(&lr, dump->_buffer, &shaped, true)) {
-      return TRI_ERROR_OUT_OF_MEMORY;
-    }
-  
-    return TRI_ERROR_NO_ERROR;
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a document marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerDocument (TRI_replication_dump_t* dump,
-                                       TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::document_marker_t const*>(marker);
-  
-  int res = AppendContext(dump, m->_databaseId, m->_collectionId);
-
-  if (res != TRI_ERROR_NO_ERROR) {
-    return res;
-  }
-
-  APPEND_STRING(dump->_buffer, "\"tid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_transactionId);
-  APPEND_STRING(dump->_buffer, "\",\"key\":\"");
-  APPEND_STRING(dump->_buffer, (char const*) m + m->_offsetKey);
-  APPEND_STRING(dump->_buffer, "\",\"rev\":\"");
-  APPEND_UINT64(dump->_buffer, m->_revisionId);
-  APPEND_STRING(dump->_buffer, "\",\"data\":{");
-    
-  // common document meta-data
-  APPEND_STRING(dump->_buffer, "\"" TRI_VOC_ATTRIBUTE_KEY "\":\"");
-  APPEND_STRING(dump->_buffer, (char const*) m + m->_offsetKey);
-  APPEND_STRING(dump->_buffer, "\",\"" TRI_VOC_ATTRIBUTE_REV "\":\"");
-  APPEND_UINT64(dump->_buffer, (uint64_t) m->_revisionId);
-  APPEND_STRING(dump->_buffer, "\"");
-
-  res = AppendDocument(m, dump);
-
-  if (res != TRI_ERROR_NO_ERROR) {
-    return res;
-  }
-
-  APPEND_STRING(dump->_buffer, "}");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify an edge marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerEdge (TRI_replication_dump_t* dump,
-                                   TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::edge_marker_t const*>(marker);
-  
-  int res = AppendContext(dump, m->_databaseId, m->_collectionId);
-
-  if (res != TRI_ERROR_NO_ERROR) {
-    return res;
-  }
-
-  APPEND_STRING(dump->_buffer, "\"tid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_transactionId);
-  APPEND_STRING(dump->_buffer, "\",\"key\":\"");
-  APPEND_STRING(dump->_buffer, (char const*) m + m->_offsetKey);
-  APPEND_STRING(dump->_buffer, "\",\"rev\":\"");
-  APPEND_UINT64(dump->_buffer, m->_revisionId);
-  APPEND_STRING(dump->_buffer, "\",\"data\":{");
-    
-  // common document meta-data
-  APPEND_STRING(dump->_buffer, "\"" TRI_VOC_ATTRIBUTE_KEY "\":\"");
-  APPEND_STRING(dump->_buffer, (char const*) m + m->_offsetKey);
-  APPEND_STRING(dump->_buffer, "\",\"" TRI_VOC_ATTRIBUTE_REV "\":\"");
-  APPEND_UINT64(dump->_buffer, (uint64_t) m->_revisionId);
-
-  // from
-  APPEND_STRING(dump->_buffer, "\",\"" TRI_VOC_ATTRIBUTE_FROM "\":\"");
-  APPEND_UINT64(dump->_buffer, (uint64_t) m->_fromCid);
-  APPEND_STRING(dump->_buffer, "\\/");
-  APPEND_STRING(dump->_buffer, (char const*) m + m->_offsetFromKey);
-
-  // to
-  APPEND_STRING(dump->_buffer, "\",\"" TRI_VOC_ATTRIBUTE_TO "\":\"");
-  APPEND_UINT64(dump->_buffer, (uint64_t) m->_toCid);
-  APPEND_STRING(dump->_buffer, "\\/");
-  APPEND_STRING(dump->_buffer, (char const*) m + m->_offsetToKey);
-  APPEND_STRING(dump->_buffer, "\"");
-
-  res = AppendDocument(reinterpret_cast<triagens::wal::document_marker_t const*>(m), dump);
-
-  if (res != TRI_ERROR_NO_ERROR) {
-    return res;
-  }
-
-  APPEND_STRING(dump->_buffer, "}");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a remove marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerRemove (TRI_replication_dump_t* dump,
-                                     TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::remove_marker_t const*>(marker);
-
-  int res = AppendContext(dump, m->_databaseId, m->_collectionId);
-
-  if (res != TRI_ERROR_NO_ERROR) {
-    return res;
-  }
-  
-  APPEND_STRING(dump->_buffer, "\"tid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_transactionId);
-  APPEND_STRING(dump->_buffer, "\",\"key\":\"");
-  APPEND_STRING(dump->_buffer, (char const*) m + sizeof(triagens::wal::remove_marker_t));
-  APPEND_STRING(dump->_buffer, "\",\"rev\":\"");
-  APPEND_UINT64(dump->_buffer, m->_revisionId);
-  APPEND_STRING(dump->_buffer, "\"");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a transaction marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerTransaction (TRI_replication_dump_t* dump,
-                                          TRI_df_marker_t const* marker) {
-  // note: the data layout of begin / commit / abort markers is identical, so
-  // we cast to a begin transaction marker in all cases
-  auto m = reinterpret_cast<triagens::wal::transaction_begin_marker_t const*>(marker);
-  
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, m->_databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"tid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_transactionId);
-  APPEND_STRING(dump->_buffer, "\"");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a create collection marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerCreateCollection (TRI_replication_dump_t* dump,
-                                               TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::collection_create_marker_t const*>(marker);
-  
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, m->_databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"cid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_collectionId);
-  APPEND_STRING(dump->_buffer, "\",\"collection\":");
-  APPEND_STRING(dump->_buffer, (char const*) m + sizeof(triagens::wal::collection_create_marker_t)); 
-  char const* cname = NameFromCid(dump, m->_collectionId);
-  if (cname != nullptr) {
-    APPEND_STRING(dump->_buffer, ",\"cname\":\"");
-    APPEND_STRING(dump->_buffer, cname);
-    APPEND_STRING(dump->_buffer, "\"");
-  }
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a drop collection marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerDropCollection (TRI_replication_dump_t* dump,
-                                             TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::collection_drop_marker_t const*>(marker);
-  
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, m->_databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"cid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_collectionId);
-  char const* cname = NameFromCid(dump, m->_collectionId);
-  if (cname != nullptr) {
-    APPEND_STRING(dump->_buffer, "\",\"cname\":\"");
-    APPEND_STRING(dump->_buffer, cname);
-  }
-  APPEND_STRING(dump->_buffer, "\"");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a rename collection marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerRenameCollection (TRI_replication_dump_t* dump,
-                                               TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::collection_rename_marker_t const*>(marker);
-  
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, m->_databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"cid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_collectionId);
-  char const* cname = NameFromCid(dump, m->_collectionId);
-  if (cname != nullptr) {
-    APPEND_STRING(dump->_buffer, "\",\"cname\":\"");
-    APPEND_STRING(dump->_buffer, cname);
-  }
-  APPEND_STRING(dump->_buffer, "\",\"collection\":{\"name\":\"");
-  APPEND_STRING(dump->_buffer, (char const*) m + sizeof(triagens::wal::collection_rename_marker_t));
-  APPEND_STRING(dump->_buffer, "\"}");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a change collection marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerChangeCollection (TRI_replication_dump_t* dump,
-                                                TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::collection_change_marker_t const*>(marker);
-  
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, m->_databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"cid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_collectionId);
-  char const* cname = NameFromCid(dump, m->_collectionId);
-  if (cname != nullptr) {
-    APPEND_STRING(dump->_buffer, "\",\"cname\":\"");
-    APPEND_STRING(dump->_buffer, cname);
-  }
-  APPEND_STRING(dump->_buffer, "\",\"collection\":");
-  APPEND_STRING(dump->_buffer, (char const*) m + sizeof(triagens::wal::collection_change_marker_t)); 
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a create index marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerCreateIndex (TRI_replication_dump_t* dump,
-                                          TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::index_create_marker_t const*>(marker);
-  
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, m->_databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"cid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_collectionId);
-  char const* cname = NameFromCid(dump, m->_collectionId);
-  if (cname != nullptr) {
-    APPEND_STRING(dump->_buffer, "\",\"cname\":\"");
-    APPEND_STRING(dump->_buffer, cname);
-  }
-  APPEND_STRING(dump->_buffer, "\",\"id\":\"");
-  APPEND_UINT64(dump->_buffer, m->_indexId);
-  APPEND_STRING(dump->_buffer, "\",\"index\":");
-  APPEND_STRING(dump->_buffer, (char const*) m + sizeof(triagens::wal::index_create_marker_t)); 
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a drop index marker
-////////////////////////////////////////////////////////////////////////////////
-
-static int StringifyWalMarkerDropIndex (TRI_replication_dump_t* dump,
-                                        TRI_df_marker_t const* marker) {
-  auto m = reinterpret_cast<triagens::wal::index_drop_marker_t const*>(marker);
-  
-  APPEND_STRING(dump->_buffer, "\"database\":\"");
-  APPEND_UINT64(dump->_buffer, m->_databaseId);
-  APPEND_STRING(dump->_buffer, "\",\"cid\":\"");
-  APPEND_UINT64(dump->_buffer, m->_collectionId);
-  char const* cname = NameFromCid(dump, m->_collectionId);
-  if (cname != nullptr) {
-    APPEND_STRING(dump->_buffer, "\",\"cname\":\"");
-    APPEND_STRING(dump->_buffer, cname);
-  }
-  APPEND_STRING(dump->_buffer, "\",\"id\":\"");
-  APPEND_UINT64(dump->_buffer, m->_indexId);
-  APPEND_STRING(dump->_buffer, "\"");
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not a marker should be replicated
 ////////////////////////////////////////////////////////////////////////////////
-     
-static inline bool MustReplicateWalMarkerType (TRI_df_marker_t const* marker) { 
-  return (marker->_type == TRI_WAL_MARKER_DOCUMENT ||
-          marker->_type == TRI_WAL_MARKER_EDGE ||
-          marker->_type == TRI_WAL_MARKER_REMOVE ||
-          marker->_type == TRI_WAL_MARKER_BEGIN_TRANSACTION ||
-          marker->_type == TRI_WAL_MARKER_COMMIT_TRANSACTION ||
-          marker->_type == TRI_WAL_MARKER_ABORT_TRANSACTION ||
-          marker->_type == TRI_WAL_MARKER_CREATE_COLLECTION ||
-          marker->_type == TRI_WAL_MARKER_DROP_COLLECTION ||
-          marker->_type == TRI_WAL_MARKER_RENAME_COLLECTION ||
-          marker->_type == TRI_WAL_MARKER_CHANGE_COLLECTION ||
-          marker->_type == TRI_WAL_MARKER_CREATE_INDEX ||
-          marker->_type == TRI_WAL_MARKER_DROP_INDEX);
+
+static inline bool MustReplicateWalMarkerType(TRI_df_marker_t const* marker) {
+  TRI_df_marker_type_t type = marker->getType();
+  return (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+          type == TRI_DF_MARKER_VPACK_REMOVE ||
+          type == TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION ||
+          type == TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION ||
+          type == TRI_DF_MARKER_VPACK_ABORT_TRANSACTION ||
+          type == TRI_DF_MARKER_VPACK_CREATE_COLLECTION ||
+          type == TRI_DF_MARKER_VPACK_DROP_COLLECTION ||
+          type == TRI_DF_MARKER_VPACK_RENAME_COLLECTION ||
+          type == TRI_DF_MARKER_VPACK_CHANGE_COLLECTION ||
+          type == TRI_DF_MARKER_VPACK_CREATE_INDEX ||
+          type == TRI_DF_MARKER_VPACK_DROP_INDEX);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not a marker belongs to a transaction
 ////////////////////////////////////////////////////////////////////////////////
-     
-static inline bool IsTransactionWalMarkerType (TRI_df_marker_t const* marker) { 
-  return (marker->_type == TRI_WAL_MARKER_BEGIN_TRANSACTION ||
-          marker->_type == TRI_WAL_MARKER_COMMIT_TRANSACTION ||
-          marker->_type == TRI_WAL_MARKER_ABORT_TRANSACTION);
+
+static inline bool IsTransactionWalMarkerType(TRI_df_marker_t const* marker) {
+  TRI_df_marker_type_t type = marker->getType();
+  return (type == TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION ||
+          type == TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION ||
+          type == TRI_DF_MARKER_VPACK_ABORT_TRANSACTION);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief translate a marker type to a replication type
 ////////////////////////////////////////////////////////////////////////////////
 
-static TRI_replication_operation_e TranslateType (TRI_df_marker_t const* marker) {
-  switch (marker->_type) {
-    case TRI_WAL_MARKER_DOCUMENT: 
-      return REPLICATION_MARKER_DOCUMENT; 
-    case TRI_WAL_MARKER_EDGE:
-      return REPLICATION_MARKER_EDGE;
-    case TRI_WAL_MARKER_REMOVE:
+static TRI_replication_operation_e TranslateType(
+    TRI_df_marker_t const* marker) {
+  switch (marker->getType()) {
+    case TRI_DF_MARKER_VPACK_DOCUMENT:
+      return REPLICATION_MARKER_DOCUMENT;
+    case TRI_DF_MARKER_VPACK_REMOVE:
       return REPLICATION_MARKER_REMOVE;
-    case TRI_WAL_MARKER_BEGIN_TRANSACTION: 
+    case TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION:
       return REPLICATION_TRANSACTION_START;
-    case TRI_WAL_MARKER_COMMIT_TRANSACTION: 
+    case TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION:
       return REPLICATION_TRANSACTION_COMMIT;
-    case TRI_WAL_MARKER_ABORT_TRANSACTION: 
+    case TRI_DF_MARKER_VPACK_ABORT_TRANSACTION:
       return REPLICATION_TRANSACTION_ABORT;
-    case TRI_WAL_MARKER_CREATE_COLLECTION: 
+    case TRI_DF_MARKER_VPACK_CREATE_COLLECTION:
       return REPLICATION_COLLECTION_CREATE;
-    case TRI_WAL_MARKER_DROP_COLLECTION: 
+    case TRI_DF_MARKER_VPACK_DROP_COLLECTION:
       return REPLICATION_COLLECTION_DROP;
-    case TRI_WAL_MARKER_RENAME_COLLECTION: 
+    case TRI_DF_MARKER_VPACK_RENAME_COLLECTION:
       return REPLICATION_COLLECTION_RENAME;
-    case TRI_WAL_MARKER_CHANGE_COLLECTION: 
+    case TRI_DF_MARKER_VPACK_CHANGE_COLLECTION:
       return REPLICATION_COLLECTION_CHANGE;
-    case TRI_WAL_MARKER_CREATE_INDEX: 
+    case TRI_DF_MARKER_VPACK_CREATE_INDEX:
       return REPLICATION_INDEX_CREATE;
-    case TRI_WAL_MARKER_DROP_INDEX: 
+    case TRI_DF_MARKER_VPACK_DROP_INDEX:
       return REPLICATION_INDEX_DROP;
-       
-    default: 
+
+    default:
       return REPLICATION_INVALID;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief stringify a raw marker from a WAL logfile for a log dump
+/// @brief stringify a raw marker from a logfile for a log dump or logger
+/// follow command
 ////////////////////////////////////////////////////////////////////////////////
 
-static int StringifyWalMarker (TRI_replication_dump_t* dump,
-                               TRI_df_marker_t const* marker) {
-  TRI_ASSERT_EXPENSIVE(MustReplicateWalMarkerType(marker));
-    
-  APPEND_STRING(dump->_buffer, "{\"tick\":\"");
-  APPEND_UINT64(dump->_buffer, (uint64_t) marker->_tick);
-  APPEND_STRING(dump->_buffer, "\",\"type\":");
-  APPEND_UINT64(dump->_buffer, (uint64_t) TranslateType(marker)); 
-  APPEND_STRING(dump->_buffer, ",");
+static int StringifyMarker(TRI_replication_dump_t* dump,
+                           TRI_voc_tick_t databaseId,
+                           TRI_voc_cid_t collectionId,
+                           TRI_df_marker_t const* marker, bool isDump,
+                           bool withTicks, bool isEdgeCollection) {
+  TRI_ASSERT(MustReplicateWalMarkerType(marker));
+  TRI_df_marker_type_t const type = marker->getType();
 
-  int res = TRI_ERROR_INTERNAL;
+  if (!isDump) {
+    // logger-follow command
+    Append(dump, "{\"tick\":\"");
+    Append(dump, static_cast<uint64_t>(marker->getTick()));
+    // for debugging use the following
+    // Append(dump, "\",\"typeName\":\"");
+    // Append(dump, TRI_NameMarkerDatafile(marker));
 
-  switch (marker->_type) {
-    case TRI_WAL_MARKER_DOCUMENT: {
-      res = StringifyWalMarkerDocument(dump, marker);
+    if (dump->_compat28 && (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+                            type == TRI_DF_MARKER_VPACK_REMOVE)) {
+      // 2.8-compatible format
+      VPackSlice slice(reinterpret_cast<char const*>(marker) +
+                       DatafileHelper::VPackOffset(type));
+      arangodb::basics::VPackStringBufferAdapter adapter(dump->_buffer);
+      VPackDumper dumper(
+          &adapter,
+          &dump->_vpackOptions);  // note: we need the CustomTypeHandler here
+
+      // additionally dump "key" and "rev" attributes on the top-level
+      Append(dump, "\",\"key\":");
+      dumper.dump(slice.get(StaticStrings::KeyString));
+      if (slice.hasKey(StaticStrings::RevString)) {
+        Append(dump, ",\"rev\":");
+        dumper.dump(slice.get(StaticStrings::RevString));
+      }
+      // convert 2300 markers to 2301 markers for edges
+      Append(dump, ",\"type\":");
+      if (type == TRI_DF_MARKER_VPACK_DOCUMENT && isEdgeCollection) {
+        Append(dump, 2301);
+      } else {
+        Append(dump, static_cast<uint64_t>(TranslateType(marker)));
+      }
+    } else {
+      // 3.0 dump
+      Append(dump, "\",\"type\":");
+      Append(dump, static_cast<uint64_t>(TranslateType(marker)));
+    }
+
+    if (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+        type == TRI_DF_MARKER_VPACK_REMOVE ||
+        type == TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION ||
+        type == TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION ||
+        type == TRI_DF_MARKER_VPACK_ABORT_TRANSACTION) {
+      // transaction id
+      Append(dump, ",\"tid\":\"");
+      Append(dump, DatafileHelper::TransactionId(marker));
+      Append(dump, "\"");
+    }
+
+    if (databaseId > 0) {
+      Append(dump, ",\"database\":\"");
+      Append(dump, databaseId);
+      Append(dump, "\"");
+
+      if (collectionId > 0) {
+        Append(dump, ",\"cid\":\"");
+        Append(dump, collectionId);
+        Append(dump, "\"");
+        // also include collection name
+        char const* cname = NameFromCid(dump, collectionId);
+
+        if (cname != nullptr) {
+          Append(dump, ",\"cname\":\"");
+          Append(dump, cname);
+          Append(dump, "\"");
+        }
+      }
+    }
+  } else {
+    // collection dump
+    if (withTicks) {
+      Append(dump, "{\"tick\":\"");
+      Append(dump, static_cast<uint64_t>(marker->getTick()));
+      Append(dump, "\",");
+    } else {
+      Append(dump, "{");
+    }
+
+    if (dump->_compat28 && (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+                            type == TRI_DF_MARKER_VPACK_REMOVE)) {
+      // 2.8-compatible format
+      VPackSlice slice(reinterpret_cast<char const*>(marker) +
+                       DatafileHelper::VPackOffset(type));
+      arangodb::basics::VPackStringBufferAdapter adapter(dump->_buffer);
+      VPackDumper dumper(
+          &adapter,
+          &dump->_vpackOptions);  // note: we need the CustomTypeHandler here
+
+      // additionally dump "key" and "rev" attributes on the top-level
+      Append(dump, "\"key\":");
+      dumper.dump(slice.get(StaticStrings::KeyString));
+      if (slice.hasKey(StaticStrings::RevString)) {
+        Append(dump, ",\"rev\":");
+        dumper.dump(slice.get(StaticStrings::RevString));
+      }
+      // convert 2300 markers to 2301 markers for edges
+      Append(dump, ",\"type\":");
+      if (type == TRI_DF_MARKER_VPACK_DOCUMENT && isEdgeCollection) {
+        Append(dump, 2301);
+      } else {
+        Append(dump, static_cast<uint64_t>(TranslateType(marker)));
+      }
+    } else {
+      Append(dump, "\"type\":");
+      Append(dump, static_cast<uint64_t>(TranslateType(marker)));
+    }
+  }
+
+  switch (type) {
+    case TRI_DF_MARKER_VPACK_DOCUMENT:
+    case TRI_DF_MARKER_VPACK_REMOVE:
+    case TRI_DF_MARKER_VPACK_CREATE_DATABASE:
+    case TRI_DF_MARKER_VPACK_CREATE_COLLECTION:
+    case TRI_DF_MARKER_VPACK_CREATE_INDEX:
+    case TRI_DF_MARKER_VPACK_RENAME_COLLECTION:
+    case TRI_DF_MARKER_VPACK_CHANGE_COLLECTION:
+    case TRI_DF_MARKER_VPACK_DROP_DATABASE:
+    case TRI_DF_MARKER_VPACK_DROP_COLLECTION:
+    case TRI_DF_MARKER_VPACK_DROP_INDEX: {
+      Append(dump, ",\"data\":");
+
+      VPackSlice slice(reinterpret_cast<char const*>(marker) +
+                       DatafileHelper::VPackOffset(type));
+      arangodb::basics::VPackStringBufferAdapter adapter(dump->_buffer);
+      VPackDumper dumper(
+          &adapter,
+          &dump->_vpackOptions);  // note: we need the CustomTypeHandler here
+      dumper.dump(slice);
       break;
     }
 
-    case TRI_WAL_MARKER_EDGE: {
-      res = StringifyWalMarkerEdge(dump, marker);
+    case TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION:
+    case TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION:
+    case TRI_DF_MARKER_VPACK_ABORT_TRANSACTION: {
+      // nothing to do
       break;
     }
 
-    case TRI_WAL_MARKER_REMOVE: {
-      res = StringifyWalMarkerRemove(dump, marker);
-      break;
-    }
-
-    case TRI_WAL_MARKER_BEGIN_TRANSACTION: 
-    case TRI_WAL_MARKER_COMMIT_TRANSACTION: 
-    case TRI_WAL_MARKER_ABORT_TRANSACTION: {
-      res = StringifyWalMarkerTransaction(dump, marker);
-      break;
-    }
-
-    case TRI_WAL_MARKER_CREATE_COLLECTION: {
-      res = StringifyWalMarkerCreateCollection(dump, marker);
-      break;
-    }
-
-    case TRI_WAL_MARKER_DROP_COLLECTION: {
-      res = StringifyWalMarkerDropCollection(dump, marker);
-      break;
-    }
-
-    case TRI_WAL_MARKER_RENAME_COLLECTION: {
-      res = StringifyWalMarkerRenameCollection(dump, marker);
-      break;
-    }
-
-    case TRI_WAL_MARKER_CHANGE_COLLECTION: {
-      res = StringifyWalMarkerChangeCollection(dump, marker);
-      break;
-    }
-
-    case TRI_WAL_MARKER_CREATE_INDEX: {
-      res = StringifyWalMarkerCreateIndex(dump, marker);
-      break;
-    }
-
-    case TRI_WAL_MARKER_DROP_INDEX: {
-      res = StringifyWalMarkerDropIndex(dump, marker);
-      break;
-    }
-    
-    case TRI_WAL_MARKER_BEGIN_REMOTE_TRANSACTION:
-    case TRI_WAL_MARKER_COMMIT_REMOTE_TRANSACTION:
-    case TRI_WAL_MARKER_ABORT_REMOTE_TRANSACTION:
-    case TRI_WAL_MARKER_ATTRIBUTE:
-    case TRI_WAL_MARKER_SHAPE: {
+    default: {
       TRI_ASSERT(false);
       return TRI_ERROR_INTERNAL;
     }
   }
-    
-  APPEND_STRING(dump->_buffer, "}\n");
-  return res;
+
+  Append(dump, "}\n");
+  return TRI_ERROR_NO_ERROR;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief helper function to extract a database id from a marker
-////////////////////////////////////////////////////////////////////////////////
+static int SliceifyMarker(TRI_replication_dump_t* dump,
+                          TRI_voc_tick_t databaseId, TRI_voc_cid_t collectionId,
+                          TRI_df_marker_t const* marker, bool isDump,
+                          bool withTicks, bool isEdgeCollection) {
+  TRI_ASSERT(MustReplicateWalMarkerType(marker));
+  TRI_df_marker_type_t const type = marker->getType();
 
-template<typename T>
-static TRI_voc_tick_t GetDatabaseId (TRI_df_marker_t const* marker) {
-  T const* m = reinterpret_cast<T const*>(marker);
-  return m->_databaseId;
-}
+  VPackBuffer<uint8_t> buffer;
+  std::shared_ptr<VPackBuffer<uint8_t>> bufferPtr;
+  bufferPtr.reset(&buffer, arangodb::velocypack::BufferNonDeleter<uint8_t>());
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the database id from a marker
-////////////////////////////////////////////////////////////////////////////////
+  VPackBuilder builder(bufferPtr, &dump->_vpackOptions);
+  builder.openObject();
 
-static TRI_voc_tick_t GetDatabaseFromWalMarker (TRI_df_marker_t const* marker) {
-  TRI_ASSERT_EXPENSIVE(MustReplicateWalMarkerType(marker));
+  if (!isDump) {
+    // logger-follow command
+    builder.add("tick", VPackValue(static_cast<uint64_t>(marker->getTick())));
 
-  switch (marker->_type) {
-    case TRI_WAL_MARKER_ATTRIBUTE: 
-      return GetDatabaseId<triagens::wal::attribute_marker_t>(marker);
-    case TRI_WAL_MARKER_SHAPE: 
-      return GetDatabaseId<triagens::wal::shape_marker_t>(marker);
-    case TRI_WAL_MARKER_DOCUMENT: 
-      return GetDatabaseId<triagens::wal::document_marker_t>(marker);
-    case TRI_WAL_MARKER_EDGE: 
-      return GetDatabaseId<triagens::wal::edge_marker_t>(marker);
-    case TRI_WAL_MARKER_REMOVE: 
-      return GetDatabaseId<triagens::wal::remove_marker_t>(marker);
-    case TRI_WAL_MARKER_BEGIN_TRANSACTION: 
-      return GetDatabaseId<triagens::wal::transaction_begin_marker_t>(marker);
-    case TRI_WAL_MARKER_COMMIT_TRANSACTION: 
-      return GetDatabaseId<triagens::wal::transaction_commit_marker_t>(marker);
-    case TRI_WAL_MARKER_ABORT_TRANSACTION: 
-      return GetDatabaseId<triagens::wal::transaction_abort_marker_t>(marker);
-    case TRI_WAL_MARKER_CREATE_COLLECTION: 
-      return GetDatabaseId<triagens::wal::collection_create_marker_t>(marker);
-    case TRI_WAL_MARKER_DROP_COLLECTION: 
-      return GetDatabaseId<triagens::wal::collection_drop_marker_t>(marker);
-    case TRI_WAL_MARKER_RENAME_COLLECTION: 
-      return GetDatabaseId<triagens::wal::collection_rename_marker_t>(marker);
-    case TRI_WAL_MARKER_CHANGE_COLLECTION: 
-      return GetDatabaseId<triagens::wal::collection_change_marker_t>(marker);
-    case TRI_WAL_MARKER_CREATE_INDEX: 
-      return GetDatabaseId<triagens::wal::index_create_marker_t>(marker);
-    case TRI_WAL_MARKER_DROP_INDEX: 
-      return GetDatabaseId<triagens::wal::index_drop_marker_t>(marker);
-    case TRI_WAL_MARKER_CREATE_DATABASE: 
-      return GetDatabaseId<triagens::wal::database_create_marker_t>(marker);
-    case TRI_WAL_MARKER_DROP_DATABASE: 
-      return GetDatabaseId<triagens::wal::database_drop_marker_t>(marker);
-    default: {
-      return 0;
+    if (dump->_compat28 && (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+                            type == TRI_DF_MARKER_VPACK_REMOVE)) {
+      // 2.8-compatible format
+      VPackSlice slice(reinterpret_cast<char const*>(marker) +
+                       DatafileHelper::VPackOffset(type));
+      // additionally dump "key" and "rev" attributes on the top-level
+      builder.add("key", slice.get(StaticStrings::KeyString));
+      if (slice.hasKey(StaticStrings::RevString)) {
+        builder.add("rev", slice.get(StaticStrings::RevString));
+      }
+      // convert 2300 markers to 2301 markers for edges
+      if (type == TRI_DF_MARKER_VPACK_DOCUMENT && isEdgeCollection) {
+        builder.add("type", VPackValue(2301));
+      } else {
+        builder.add("type",
+                    VPackValue(static_cast<uint64_t>(TranslateType(marker))));
+      }
+    } else {
+      // 3.0 dump
+      builder.add("type",
+                  VPackValue(static_cast<uint64_t>(TranslateType(marker))));
+    }
+
+    if (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+        type == TRI_DF_MARKER_VPACK_REMOVE ||
+        type == TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION ||
+        type == TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION ||
+        type == TRI_DF_MARKER_VPACK_ABORT_TRANSACTION) {
+      // transaction id
+      builder.add("tid", VPackValue(DatafileHelper::TransactionId(marker)));
+    }
+    if (databaseId > 0) {
+      builder.add("database", VPackValue(databaseId));
+      if (collectionId > 0) {
+        builder.add("cid", VPackValue(collectionId));
+        // also include collection name
+        char const* cname = NameFromCid(dump, collectionId);
+        if (cname != nullptr) {
+          builder.add("cname", VPackValue(cname));
+        }
+      }
+    }
+  } else {
+    // collection dump
+    if (withTicks) {
+      builder.add("tick", VPackValue(static_cast<uint64_t>(marker->getTick())));
+    }
+
+    if (dump->_compat28 && (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+                            type == TRI_DF_MARKER_VPACK_REMOVE)) {
+      // 2.8-compatible format
+      VPackSlice slice(reinterpret_cast<char const*>(marker) +
+                       DatafileHelper::VPackOffset(type));
+      builder.add("key", slice.get(StaticStrings::KeyString));
+      if (slice.hasKey(StaticStrings::RevString)) {
+        builder.add("rev", slice.get(StaticStrings::RevString));
+      }
+      // convert 2300 markers to 2301 markers for edges
+      Append(dump, ",\"type\":");
+      if (type == TRI_DF_MARKER_VPACK_DOCUMENT && isEdgeCollection) {
+        builder.add("type", VPackValue(2301));
+      } else {
+        builder.add("type",
+                    VPackValue(static_cast<uint64_t>(TranslateType(marker))));
+      }
+    } else {
+      builder.add("type",
+                  VPackValue(static_cast<uint64_t>(TranslateType(marker))));
     }
   }
-}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief helper function to extract a collection id from a marker
-////////////////////////////////////////////////////////////////////////////////
+  switch (type) {
+    case TRI_DF_MARKER_VPACK_DOCUMENT:
+    case TRI_DF_MARKER_VPACK_REMOVE:
+    case TRI_DF_MARKER_VPACK_CREATE_DATABASE:
+    case TRI_DF_MARKER_VPACK_CREATE_COLLECTION:
+    case TRI_DF_MARKER_VPACK_CREATE_INDEX:
+    case TRI_DF_MARKER_VPACK_RENAME_COLLECTION:
+    case TRI_DF_MARKER_VPACK_CHANGE_COLLECTION:
+    case TRI_DF_MARKER_VPACK_DROP_DATABASE:
+    case TRI_DF_MARKER_VPACK_DROP_COLLECTION:
+    case TRI_DF_MARKER_VPACK_DROP_INDEX: {
+      VPackSlice slice(reinterpret_cast<char const*>(marker) +
+                       DatafileHelper::VPackOffset(type));
+      builder.add("data", slice);
+      break;
+    }
 
-template<typename T>
-static TRI_voc_tick_t GetCollectionId (TRI_df_marker_t const* marker) {
-  T const* m = reinterpret_cast<T const*>(marker);
-  return m->_collectionId;
-}
+    case TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION:
+    case TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION:
+    case TRI_DF_MARKER_VPACK_ABORT_TRANSACTION: {
+      // nothing to do
+      break;
+    }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the collection id from a marker
-////////////////////////////////////////////////////////////////////////////////
-
-static TRI_voc_tick_t GetCollectionFromWalMarker (TRI_df_marker_t const* marker) {
-  switch (marker->_type) {
-    case TRI_WAL_MARKER_ATTRIBUTE: 
-      return GetCollectionId<triagens::wal::attribute_marker_t>(marker);
-    case TRI_WAL_MARKER_SHAPE: 
-      return GetCollectionId<triagens::wal::shape_marker_t>(marker);
-    case TRI_WAL_MARKER_DOCUMENT: 
-      return GetCollectionId<triagens::wal::document_marker_t>(marker);
-    case TRI_WAL_MARKER_EDGE: 
-      return GetCollectionId<triagens::wal::edge_marker_t>(marker);
-    case TRI_WAL_MARKER_REMOVE: 
-      return GetCollectionId<triagens::wal::remove_marker_t>(marker);
-    case TRI_WAL_MARKER_CREATE_COLLECTION: 
-      return GetCollectionId<triagens::wal::collection_create_marker_t>(marker);
-    case TRI_WAL_MARKER_DROP_COLLECTION: 
-      return GetCollectionId<triagens::wal::collection_drop_marker_t>(marker);
-    case TRI_WAL_MARKER_RENAME_COLLECTION: 
-      return GetCollectionId<triagens::wal::collection_rename_marker_t>(marker);
-    case TRI_WAL_MARKER_CHANGE_COLLECTION: 
-      return GetCollectionId<triagens::wal::collection_change_marker_t>(marker);
-    case TRI_WAL_MARKER_CREATE_INDEX: 
-      return GetCollectionId<triagens::wal::index_create_marker_t>(marker);
-    case TRI_WAL_MARKER_DROP_INDEX: 
-      return GetCollectionId<triagens::wal::index_drop_marker_t>(marker);
     default: {
-      return 0;
+      TRI_ASSERT(false);
+      return TRI_ERROR_INTERNAL;
     }
   }
+
+  builder.close();
+
+  dump->_slices.push_back(std::move(buffer));
+
+  return TRI_ERROR_NO_ERROR;
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief helper function to extract a transaction id from a marker
-////////////////////////////////////////////////////////////////////////////////
-
-template<typename T>
-static TRI_voc_tid_t GetTransactionId (TRI_df_marker_t const* marker) {
-  T const* m = reinterpret_cast<T const*>(marker);
-  return m->_transactionId;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get the transaction id from a marker
-////////////////////////////////////////////////////////////////////////////////
-
-static TRI_voc_tid_t GetTransactionFromWalMarker (TRI_df_marker_t const* marker) {
-  TRI_ASSERT_EXPENSIVE(MustReplicateWalMarkerType(marker));
-
-  switch (marker->_type) {
-    case TRI_WAL_MARKER_DOCUMENT: 
-      return GetTransactionId<triagens::wal::document_marker_t>(marker);
-    case TRI_WAL_MARKER_EDGE: 
-      return GetTransactionId<triagens::wal::edge_marker_t>(marker);
-    case TRI_WAL_MARKER_REMOVE: 
-      return GetTransactionId<triagens::wal::remove_marker_t>(marker);
-    case TRI_WAL_MARKER_BEGIN_TRANSACTION: 
-      return GetTransactionId<triagens::wal::transaction_begin_marker_t>(marker);
-    case TRI_WAL_MARKER_COMMIT_TRANSACTION: 
-      return GetTransactionId<triagens::wal::transaction_commit_marker_t>(marker);
-    case TRI_WAL_MARKER_ABORT_TRANSACTION: 
-      return GetTransactionId<triagens::wal::transaction_abort_marker_t>(marker);
-    default: {
-      return 0;
-    }
-  }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not a marker belongs to a transaction
 ////////////////////////////////////////////////////////////////////////////////
-     
-static bool IsTransactionWalMarker (TRI_replication_dump_t* dump,
-                                    TRI_df_marker_t const* marker) { 
+
+static bool IsTransactionWalMarker(TRI_replication_dump_t* dump,
+                                   TRI_df_marker_t const* marker) {
   // first check the marker type
-  if (! IsTransactionWalMarkerType(marker)) {
+  if (!IsTransactionWalMarkerType(marker)) {
     return false;
   }
 
   // then check if the marker belongs to the "correct" database
-  if (dump->_vocbase->_id != GetDatabaseFromWalMarker(marker)) {
+  if (dump->_vocbase->id() != DatafileHelper::DatabaseId(marker)) {
     return false;
   }
 
@@ -1128,39 +468,48 @@ static bool IsTransactionWalMarker (TRI_replication_dump_t* dump,
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not a marker is replicated
 ////////////////////////////////////////////////////////////////////////////////
-     
-static bool MustReplicateWalMarker (TRI_replication_dump_t* dump,
-                                    TRI_df_marker_t const* marker,
-                                    TRI_voc_tick_t firstRegularTick,
-                                    std::unordered_set<TRI_voc_tid_t> const& transactionIds) { 
+
+static bool MustReplicateWalMarker(
+    TRI_replication_dump_t* dump, TRI_df_marker_t const* marker,
+    TRI_voc_tick_t databaseId, TRI_voc_cid_t collectionId,
+    TRI_voc_tick_t firstRegularTick,
+    std::unordered_set<TRI_voc_tid_t> const& transactionIds) {
   // first check the marker type
-  if (! MustReplicateWalMarkerType(marker)) {
+  if (!MustReplicateWalMarkerType(marker)) {
     return false;
   }
 
   // then check if the marker belongs to the "correct" database
-  if (dump->_vocbase->_id != GetDatabaseFromWalMarker(marker)) {
+  if (dump->_vocbase->id() != databaseId) {
     return false;
   }
 
   // finally check if the marker is for a collection that we want to ignore
-  TRI_voc_cid_t cid = GetCollectionFromWalMarker(marker);
+  TRI_voc_cid_t cid = collectionId;
+
   if (cid != 0) {
     char const* name = NameFromCid(dump, cid);
 
-    if (name != nullptr && TRI_ExcludeCollectionReplication(name, dump->_includeSystem)) {
+    if (name != nullptr &&
+        TRI_ExcludeCollectionReplication(name, dump->_includeSystem)) {
       return false;
     }
   }
 
-  if (marker->_tick >= firstRegularTick) {
+  if (dump->_restrictCollection > 0 &&
+      (cid != dump->_restrictCollection &&
+       !IsTransactionWalMarker(dump, marker))) {
+    // restrict output to a single collection, but a different one
+    return false;
+  }
+
+  if (marker->getTick() >= firstRegularTick) {
     return true;
   }
 
-  if (! transactionIds.empty()) {
-    TRI_voc_tid_t tid = GetTransactionFromWalMarker(marker);
-    if (tid == 0 ||
-        transactionIds.find(tid) == transactionIds.end()) {
+  if (!transactionIds.empty()) {
+    TRI_voc_tid_t tid = DatafileHelper::TransactionId(marker);
+    if (tid == 0 || transactionIds.find(tid) == transactionIds.end()) {
       return false;
     }
   }
@@ -1172,259 +521,109 @@ static bool MustReplicateWalMarker (TRI_replication_dump_t* dump,
 /// @brief dump data from a collection
 ////////////////////////////////////////////////////////////////////////////////
 
-static int DumpCollection (TRI_replication_dump_t* dump,
-                           TRI_document_collection_t* document,
-                           TRI_voc_tick_t dataMin,
-                           TRI_voc_tick_t dataMax,
-                           bool withTicks,
-                           bool translateCollectionIds,
-                           triagens::arango::CollectionNameResolver* resolver) {
-  TRI_string_buffer_t* buffer;
-  TRI_voc_tick_t lastFoundTick;
-  TRI_voc_tid_t lastTid;
-  int res;
-  bool hasMore;
-  bool bufferFull;
-  bool ignoreMarkers;
+static int DumpCollection(TRI_replication_dump_t* dump,
+                          LogicalCollection* collection,
+                          TRI_voc_tick_t databaseId, TRI_voc_cid_t collectionId,
+                          TRI_voc_tick_t dataMin, TRI_voc_tick_t dataMax,
+                          bool withTicks, bool useVpp = false) {
+  LOG(TRACE) << "dumping collection " << collection->cid() << ", tick range "
+             << dataMin << " - " << dataMax;
 
-  // The following fake transaction allows us to access data pointers
-  // and shapers, essentially disabling the runtime checks. This is OK,
-  // since the dump only considers data files (and not WAL files), so
-  // the collector has no trouble. Also, the data files of the collection
-  // are protected from the compactor by a barrier and the dump only goes
-  // until a certain tick.
-  triagens::arango::TransactionBase trx(true);
-
-  LOG_TRACE("dumping collection %llu, tick range %llu - %llu",
-            (unsigned long long) document->_info._cid,
-            (unsigned long long) dataMin,
-            (unsigned long long) dataMax);
-
-  buffer = dump->_buffer;
-
-  std::vector<df_entry_t> datafiles;
-
-  try {
-    datafiles = GetRangeDatafiles(document, dataMin, dataMax);
-  }
-  catch (...) {
-    return TRI_ERROR_OUT_OF_MEMORY;
-  }
+  bool const isEdgeCollection = (collection->type() == TRI_COL_TYPE_EDGE);
 
   // setup some iteration state
-  lastFoundTick  = 0;
-  lastTid        = 0;
-  res            = TRI_ERROR_NO_ERROR;
-  hasMore        = true;
-  bufferFull     = false;
-  ignoreMarkers  = false;
+  TRI_voc_tick_t lastFoundTick = 0;
+  bool bufferFull = false;
 
-  size_t const n = datafiles.size();
+  auto callback = [&dump, &lastFoundTick, &databaseId, &collectionId,
+                   &withTicks, &isEdgeCollection, &bufferFull, &useVpp](
+      TRI_voc_tick_t foundTick, TRI_df_marker_t const* marker) {
+    // note the last tick we processed
+    lastFoundTick = foundTick;
 
-  for (size_t i = 0; i < n; ++i) {
-    df_entry_t const& e = datafiles[i];
-    TRI_datafile_t const* datafile = e._data;
-    char const* ptr;
-    char const* end;
-
-    // we are reading from a journal that might be modified in parallel
-    // so we must read-lock it
-    if (e._isJournal) {
-      TRI_READ_LOCK_DOCUMENTS_INDEXES_PRIMARY_COLLECTION(document);
-    }
-    else {
-      TRI_ASSERT(datafile->_isSealed);
+    int res;
+    if (useVpp) {
+      res = SliceifyMarker(dump, databaseId, collectionId, marker, true,
+                           withTicks, isEdgeCollection);
+    } else {
+      res = StringifyMarker(dump, databaseId, collectionId, marker, true,
+                            withTicks, isEdgeCollection);
     }
 
-    ptr = datafile->_data;
-
-    if (res == TRI_ERROR_NO_ERROR) {
-      // no error so far. start iterating
-      end = ptr + datafile->_currentSize;
-    }
-    else {
-      // some error occurred. don't iterate
-      end = ptr;
+    if (res != TRI_ERROR_NO_ERROR) {
+      THROW_ARANGO_EXCEPTION(res);
     }
 
-    while (ptr < end) {
-      TRI_df_marker_t* marker = (TRI_df_marker_t*) ptr;
-      TRI_voc_tick_t foundTick;
-      TRI_voc_tid_t tid;
-
-      if (marker->_size == 0 || marker->_type <= TRI_MARKER_MIN) {
-        // end of datafile
-        break;
-      }
-
-      ptr += TRI_DF_ALIGN_BLOCK(marker->_size);
-
-      if (marker->_type == TRI_DF_MARKER_ATTRIBUTE ||
-          marker->_type == TRI_DF_MARKER_SHAPE ||
-          marker->_type == TRI_DF_MARKER_BLANK) {
-        // fully ignore these marker types. they don't need to be replicated,
-        // but we also cannot stop iteration if we find one of these
-        continue;
-      }
-
-      // get the marker's tick and check whether we should include it
-      foundTick = marker->_tick;
-
-      if (foundTick <= dataMin) {
-        // marker too old
-        continue;
-      }
-
-      if (foundTick > dataMax) {
-        // marker too new
-        hasMore = false;
-        goto NEXT_DF;
-      }
-
-      if (marker->_type != TRI_DOC_MARKER_KEY_DOCUMENT &&
-          marker->_type != TRI_DOC_MARKER_KEY_EDGE &&
-          marker->_type != TRI_DOC_MARKER_KEY_DELETION) {
-
-        // found a non-data marker...
-
-        // check if we can abort searching
-        if (foundTick >= dataMax ||
-            (foundTick >= e._tickMax && i == (n - 1))) {
-          // fetched the last available marker
-          hasMore = false;
-          goto NEXT_DF;
-        }
-
-        continue;
-      }
-
-      // note the last tick we processed
-      lastFoundTick = foundTick;
-
-
-      // handle aborted/unfinished transactions
-
-      if (document->_failedTransactions == nullptr) {
-        // there are no failed transactions
-        ignoreMarkers = false;
-      }
-      else {
-        // get transaction id of marker
-        if (marker->_type == TRI_DOC_MARKER_KEY_DELETION) {
-          tid = ((TRI_doc_deletion_key_marker_t const*) marker)->_tid;
-        }
-        else {
-          tid = ((TRI_doc_document_key_marker_t const*) marker)->_tid;
-        }
-
-        // check if marker is from an aborted transaction
-        if (tid > 0) {
-          if (tid != lastTid) {
-            ignoreMarkers = (document->_failedTransactions->find(tid) != document->_failedTransactions->end());
-          }
-
-          lastTid = tid;
-        }
-
-        if (ignoreMarkers) {
-          continue;
-        }
-      }
-
-
-      res = StringifyMarkerDump(dump, document, marker, withTicks, translateCollectionIds, resolver);
-
-      if (res != TRI_ERROR_NO_ERROR) {
-        break; // will go to NEXT_DF
-      }
-
-      if (foundTick >= dataMax ||
-          (foundTick >= e._tickMax && i == (n - 1))) {
-        // fetched the last available marker
-        hasMore = false;
-        goto NEXT_DF;
-      }
-
-      if ((uint64_t) TRI_LengthStringBuffer(buffer) > dump->_chunkSize) {
-        // abort the iteration
-        bufferFull = true;
-
-        goto NEXT_DF;
-      }
+    // TODO if vppcase find out slice lenght of _slices.back()
+    if (static_cast<uint64_t>(TRI_LengthStringBuffer(dump->_buffer)) >
+        dump->_chunkSize) {
+      // abort the iteration
+      bufferFull = true;
+      return false;  // stop iterating
     }
 
-NEXT_DF:
-    if (e._isJournal) {
-      // read-unlock the journal
-      TRI_READ_UNLOCK_DOCUMENTS_INDEXES_PRIMARY_COLLECTION(document);
-    }
+    return true;  // continue iterating
+  };
 
-    if (res != TRI_ERROR_NO_ERROR || ! hasMore || bufferFull) {
-      break;
-    }
-  }
+  try {
+    bool hasMore = collection->applyForTickRange(dataMin, dataMax, callback);
 
-  if (res == TRI_ERROR_NO_ERROR) {
     if (lastFoundTick > 0) {
       // data available for requested range
       dump->_lastFoundTick = lastFoundTick;
-      dump->_hasMore       = hasMore;
-      dump->_bufferFull    = bufferFull;
-    }
-    else {
+      dump->_hasMore = hasMore;
+      dump->_bufferFull = bufferFull;
+    } else {
       // no data available for requested range
       dump->_lastFoundTick = 0;
-      dump->_hasMore       = false;
-      dump->_bufferFull    = false;
+      dump->_hasMore = false;
+      dump->_bufferFull = false;
     }
+
+    return TRI_ERROR_NO_ERROR;
+  } catch (basics::Exception const& ex) {
+    return ex.code();
+  } catch (...) {
+    return TRI_ERROR_INTERNAL;
   }
-
-  return res;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief dump data from a collection
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_DumpCollectionReplication (TRI_replication_dump_t* dump,
-                                   TRI_vocbase_col_t* col,
-                                   TRI_voc_tick_t dataMin,
-                                   TRI_voc_tick_t dataMax,
-                                   bool withTicks,
-                                   bool translateCollectionIds) {
-  TRI_ASSERT(col != nullptr);
-  TRI_ASSERT(col->_collection != nullptr);
+int TRI_DumpCollectionReplication(TRI_replication_dump_t* dump,
+                                  arangodb::LogicalCollection* collection,
+                                  TRI_voc_tick_t dataMin,
+                                  TRI_voc_tick_t dataMax, bool withTicks) {
+  TRI_ASSERT(collection != nullptr);
 
-  triagens::arango::CollectionNameResolver resolver(col->_vocbase);
-  TRI_document_collection_t* document = col->_collection;
+  // get a custom type handler
+  auto customTypeHandler = dump->_transactionContext->orderCustomTypeHandler();
+  dump->_vpackOptions.customTypeHandler = customTypeHandler.get();
 
   // create a barrier so the underlying collection is not unloaded
-  auto b = document->ditches()->createReplicationDitch(__FILE__, __LINE__);
+  auto b = collection->ditches()->createReplicationDitch(__FILE__, __LINE__);
 
   if (b == nullptr) {
     return TRI_ERROR_OUT_OF_MEMORY;
   }
 
   // block compaction
-  TRI_ReadLockReadWriteLock(&document->_compactionLock);
-
   int res;
+  {
+    CompactionPreventer compactionPreventer(collection);
 
-  try {
-    res = DumpCollection(dump, document, dataMin, dataMax, withTicks, 
-                         translateCollectionIds, &resolver);
-  }
-  catch (...) {
-    res = TRI_ERROR_INTERNAL;
+    try {
+      res = DumpCollection(dump, collection, collection->vocbase()->id(),
+                           collection->cid(), dataMin, dataMax, withTicks);
+    } catch (...) {
+      res = TRI_ERROR_INTERNAL;
+    }
   }
 
   // always execute this
-  TRI_ReadUnlockReadWriteLock(&document->_compactionLock);
-  document->ditches()->freeDitch(b);
+  collection->ditches()->freeDitch(b);
 
   return res;
 }
@@ -1433,55 +632,91 @@ int TRI_DumpCollectionReplication (TRI_replication_dump_t* dump,
 /// @brief dump data from the replication log
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_DumpLogReplication (TRI_replication_dump_t* dump,
-                            std::unordered_set<TRI_voc_tid_t> const& transactionIds,
-                            TRI_voc_tick_t firstRegularTick,
-                            TRI_voc_tick_t tickMin,
-                            TRI_voc_tick_t tickMax,
-                            bool outputAsArray) {
-  LOG_TRACE("dumping log, tick range %llu - %llu",
-            (unsigned long long) tickMin,
-            (unsigned long long) tickMax);
+int TRI_DumpLogReplication(
+    TRI_replication_dump_t* dump,
+    std::unordered_set<TRI_voc_tid_t> const& transactionIds,
+    TRI_voc_tick_t firstRegularTick, TRI_voc_tick_t tickMin,
+    TRI_voc_tick_t tickMax, bool outputAsArray) {
+  LOG(TRACE) << "dumping log, tick range " << tickMin << " - " << tickMax;
+
+  // get a custom type handler
+  auto customTypeHandler = dump->_transactionContext->orderCustomTypeHandler();
+  dump->_vpackOptions.customTypeHandler = customTypeHandler.get();
 
   // ask the logfile manager which datafiles qualify
   bool fromTickIncluded = false;
-  std::vector<triagens::wal::Logfile*> logfiles = triagens::wal::LogfileManager::instance()->getLogfilesForTickRange(tickMin, tickMax, fromTickIncluded);
-    
+  std::vector<arangodb::wal::Logfile*> logfiles =
+      arangodb::wal::LogfileManager::instance()->getLogfilesForTickRange(
+          tickMin, tickMax, fromTickIncluded);
+
   // setup some iteration state
   int res = TRI_ERROR_NO_ERROR;
   TRI_voc_tick_t lastFoundTick = 0;
-  bool hasMore    = true;
+  TRI_voc_tick_t lastDatabaseId = 0;
+  TRI_voc_cid_t lastCollectionId = 0;
+  bool hasMore = true;
   bool bufferFull = false;
 
-  if (outputAsArray) {
-    TRI_AppendStringStringBuffer(dump->_buffer, "[\n");
-  }
-
   try {
+    if (outputAsArray) {
+      Append(dump, "[");
+    }
     bool first = true;
 
     // iterate over the datafiles found
     size_t const n = logfiles.size();
 
     for (size_t i = 0; i < n; ++i) {
-      triagens::wal::Logfile* logfile = logfiles[i];
+      arangodb::wal::Logfile* logfile = logfiles[i];
 
       char const* ptr;
       char const* end;
-      triagens::wal::LogfileManager::instance()->getActiveLogfileRegion(logfile, ptr, end);
+      arangodb::wal::LogfileManager::instance()->getActiveLogfileRegion(
+          logfile, ptr, end);
 
       while (ptr < end) {
-        TRI_df_marker_t const* marker = reinterpret_cast<TRI_df_marker_t const*>(ptr);
+        auto const* marker = reinterpret_cast<TRI_df_marker_t const*>(ptr);
 
-        if (marker->_size == 0 || marker->_type <= TRI_MARKER_MIN) {
+        if (marker->getSize() == 0) {
           // end of datafile
           break;
         }
 
-        ptr += TRI_DF_ALIGN_BLOCK(marker->_size);
+        TRI_df_marker_type_t type = marker->getType();
+
+        if (type <= TRI_DF_MARKER_MIN || type >= TRI_DF_MARKER_MAX) {
+          break;
+        }
+
+        // handle special markers
+        if (type == TRI_DF_MARKER_PROLOGUE) {
+          lastDatabaseId = DatafileHelper::DatabaseId(marker);
+          lastCollectionId = DatafileHelper::CollectionId(marker);
+        } else if (type == TRI_DF_MARKER_HEADER ||
+                   type == TRI_DF_MARKER_FOOTER) {
+          lastDatabaseId = 0;
+          lastCollectionId = 0;
+        } else if (type == TRI_DF_MARKER_VPACK_CREATE_COLLECTION) {
+          // fill collection name cache
+          TRI_voc_tick_t databaseId = DatafileHelper::DatabaseId(marker);
+          TRI_ASSERT(databaseId != 0);
+          TRI_voc_cid_t collectionId = DatafileHelper::CollectionId(marker);
+          TRI_ASSERT(collectionId != 0);
+
+          if (dump->_vocbase->id() == databaseId) {
+            VPackSlice slice(reinterpret_cast<char const*>(marker) +
+                             DatafileHelper::VPackOffset(type));
+            VPackSlice name = slice.get("name");
+            if (name.isString()) {
+              dump->_collectionNames[collectionId] = name.copyString();
+            }
+          }
+        }
+
+        ptr += DatafileHelper::AlignedMarkerSize<size_t>(marker);
 
         // get the marker's tick and check whether we should include it
-        TRI_voc_tick_t foundTick = marker->_tick;
+        TRI_voc_tick_t foundTick = marker->getTick();
 
         if (foundTick <= tickMin) {
           // marker too old
@@ -1490,60 +725,77 @@ int TRI_DumpLogReplication (TRI_replication_dump_t* dump,
 
         if (foundTick >= tickMax) {
           hasMore = false;
-        
+
           if (foundTick > tickMax) {
             // marker too new
             break;
           }
         }
 
-        if (! MustReplicateWalMarker(dump, marker, firstRegularTick, transactionIds)) {
+        TRI_voc_tick_t databaseId;
+        TRI_voc_cid_t collectionId;
+
+        if (type == TRI_DF_MARKER_VPACK_DOCUMENT ||
+            type == TRI_DF_MARKER_VPACK_REMOVE) {
+          databaseId = lastDatabaseId;
+          collectionId = lastCollectionId;
+        } else {
+          databaseId = DatafileHelper::DatabaseId(marker);
+          collectionId = DatafileHelper::CollectionId(marker);
+        }
+
+        if (!MustReplicateWalMarker(dump, marker, databaseId, collectionId,
+                                    firstRegularTick, transactionIds)) {
           continue;
         }
 
         // note the last tick we processed
         lastFoundTick = foundTick;
-    
+
         if (outputAsArray) {
-          if (! first) {
-            TRI_AppendStringStringBuffer(dump->_buffer, ", ");
-          }
-          else {
+          if (!first) {
+            Append(dump, ",");
+          } else {
             first = false;
           }
         }
-  
-        res = StringifyWalMarker(dump, marker);
+
+        if (dump->_useVpp) {
+          res = SliceifyMarker(dump, databaseId, collectionId, marker, false,
+                               true, false);
+        } else {
+          res = StringifyMarker(dump, databaseId, collectionId, marker, false,
+                                true, false);
+        }
 
         if (res != TRI_ERROR_NO_ERROR) {
           THROW_ARANGO_EXCEPTION(res);
         }
-        
-        if ((uint64_t) TRI_LengthStringBuffer(dump->_buffer) >= dump->_chunkSize) {
+
+        if (static_cast<uint64_t>(TRI_LengthStringBuffer(dump->_buffer)) >=
+            dump->_chunkSize) {
           // abort the iteration
           bufferFull = true;
           break;
         }
       }
 
-      if (! hasMore || bufferFull) {
+      if (!hasMore || bufferFull) {
         break;
       }
     }
-  }
-  catch (triagens::basics::Exception const& ex) {
+
+    if (outputAsArray) {
+      Append(dump, "]");
+    }
+  } catch (arangodb::basics::Exception const& ex) {
     res = ex.code();
-  }
-  catch (...) {
+  } catch (...) {
     res = TRI_ERROR_INTERNAL;
   }
 
   // always return the logfiles we have used
-  triagens::wal::LogfileManager::instance()->returnLogfiles(logfiles);
- 
-  if (outputAsArray) {
-    TRI_AppendStringStringBuffer(dump->_buffer, "\n]");
-  }
+  arangodb::wal::LogfileManager::instance()->returnLogfiles(logfiles);
 
   dump->_fromTickIncluded = fromTickIncluded;
 
@@ -1551,14 +803,13 @@ int TRI_DumpLogReplication (TRI_replication_dump_t* dump,
     if (lastFoundTick > 0) {
       // data available for requested range
       dump->_lastFoundTick = lastFoundTick;
-      dump->_hasMore       = hasMore;
-      dump->_bufferFull    = bufferFull;
-    }
-    else {
+      dump->_hasMore = hasMore;
+      dump->_bufferFull = bufferFull;
+    } else {
       // no data available for requested range
       dump->_lastFoundTick = 0;
-      dump->_hasMore       = false;
-      dump->_bufferFull    = false;
+      dump->_hasMore = false;
+      dump->_bufferFull = false;
     }
   }
 
@@ -1569,49 +820,58 @@ int TRI_DumpLogReplication (TRI_replication_dump_t* dump,
 /// @brief determine the transactions that were open at a given point in time
 ////////////////////////////////////////////////////////////////////////////////
 
-int TRI_DetermineOpenTransactionsReplication (TRI_replication_dump_t* dump,
-                                              TRI_voc_tick_t tickMin,
-                                              TRI_voc_tick_t tickMax) {
-    
-  LOG_TRACE("determining transactions, tick range %llu - %llu",
-            (unsigned long long) tickMin,
-            (unsigned long long) tickMax);
+int TRI_DetermineOpenTransactionsReplication(TRI_replication_dump_t* dump,
+                                             TRI_voc_tick_t tickMin,
+                                             TRI_voc_tick_t tickMax,
+                                             bool useVpp) {
+  LOG(TRACE) << "determining transactions, tick range " << tickMin << " - "
+             << tickMax;
 
   std::unordered_map<TRI_voc_tid_t, TRI_voc_tick_t> transactions;
 
   // ask the logfile manager which datafiles qualify
   bool fromTickIncluded = false;
-  std::vector<triagens::wal::Logfile*> logfiles = triagens::wal::LogfileManager::instance()->getLogfilesForTickRange(tickMin, tickMax, fromTickIncluded);
-    
+  std::vector<arangodb::wal::Logfile*> logfiles =
+      arangodb::wal::LogfileManager::instance()->getLogfilesForTickRange(
+          tickMin, tickMax, fromTickIncluded);
+
   // setup some iteration state
   TRI_voc_tick_t lastFoundTick = 0;
   int res = TRI_ERROR_NO_ERROR;
 
-  // LOG_INFO("found logfiles: %d", (int) logfiles.size());
+  // LOG(INFO) << "found logfiles: " << logfiles.size();
 
   try {
     // iterate over the datafiles found
     size_t const n = logfiles.size();
     for (size_t i = 0; i < n; ++i) {
-      triagens::wal::Logfile* logfile = logfiles[i];
+      arangodb::wal::Logfile* logfile = logfiles[i];
 
       char const* ptr;
       char const* end;
-      triagens::wal::LogfileManager::instance()->getActiveLogfileRegion(logfile, ptr, end);
+      arangodb::wal::LogfileManager::instance()->getActiveLogfileRegion(
+          logfile, ptr, end);
 
-      // LOG_INFO("scanning logfile %d", (int) i);
+      // LOG(INFO) << "scanning logfile " << i;
       while (ptr < end) {
-        TRI_df_marker_t const* marker = reinterpret_cast<TRI_df_marker_t const*>(ptr);
+        auto const* marker = reinterpret_cast<TRI_df_marker_t const*>(ptr);
 
-        if (marker->_size == 0 || marker->_type <= TRI_MARKER_MIN) {
+        if (marker->getSize() == 0) {
           // end of datafile
           break;
         }
 
-        ptr += TRI_DF_ALIGN_BLOCK(marker->_size);
+        TRI_df_marker_type_t const type = marker->getType();
+
+        if (type <= TRI_DF_MARKER_MIN || type >= TRI_DF_MARKER_MAX) {
+          // somehow invalid
+          break;
+        }
+
+        ptr += DatafileHelper::AlignedMarkerSize<size_t>(marker);
 
         // get the marker's tick and check whether we should include it
-        TRI_voc_tick_t foundTick = marker->_tick;
+        TRI_voc_tick_t const foundTick = marker->getTick();
 
         if (foundTick <= tickMin) {
           // marker too old
@@ -1620,89 +880,91 @@ int TRI_DetermineOpenTransactionsReplication (TRI_replication_dump_t* dump,
 
         if (foundTick > tickMax) {
           // marker too new
-          // LOG_INFO("marker too new. aborting logfile %d", (int) i);
           break;
-        }
-
-        if (! IsTransactionWalMarker(dump, marker)) {
-          continue;
-        }
-
-        // LOG_INFO("found transaction marker");
-
-        if (marker->_type == TRI_WAL_MARKER_BEGIN_TRANSACTION) {
-          auto m = reinterpret_cast<triagens::wal::transaction_begin_marker_t const*>(marker);
-          transactions.emplace(m->_transactionId, foundTick);
-          // LOG_INFO("found begin: %llu", m->_transactionId);
-        }
-        else if (marker->_type == TRI_WAL_MARKER_COMMIT_TRANSACTION) {
-          auto m = reinterpret_cast<triagens::wal::transaction_commit_marker_t const*>(marker);
-          transactions.erase(m->_transactionId);
-          // LOG_INFO("found commit: %llu", m->_transactionId);
-        }
-        else if (marker->_type == TRI_WAL_MARKER_ABORT_TRANSACTION) {
-          auto m = reinterpret_cast<triagens::wal::transaction_abort_marker_t const*>(marker);
-          transactions.erase(m->_transactionId);
-          // LOG_INFO("found abort: %llu", m->_transactionId);
         }
 
         // note the last tick we processed
         if (foundTick > lastFoundTick) {
           lastFoundTick = foundTick;
         }
+
+        if (!IsTransactionWalMarker(dump, marker)) {
+          continue;
+        }
+
+        TRI_voc_tid_t tid = DatafileHelper::TransactionId(marker);
+        TRI_ASSERT(tid > 0);
+
+        if (type == TRI_DF_MARKER_VPACK_BEGIN_TRANSACTION) {
+          transactions.emplace(tid, foundTick);
+        } else if (type == TRI_DF_MARKER_VPACK_COMMIT_TRANSACTION ||
+                   type == TRI_DF_MARKER_VPACK_ABORT_TRANSACTION) {
+          transactions.erase(tid);
+        } else {
+          THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_INTERNAL,
+                                         "found invalid marker type");
+        }
       }
     }
 
-    // LOG_INFO("found transactions: %d", (int) transactions.size());
-    // LOG_INFO("last tick: %llu", lastFoundTick);
+    // LOG(INFO) << "found transactions: " << transactions.size();
+    // LOG(INFO) << "last tick: " << lastFoundTick;
 
-    if (transactions.empty()) {
-      TRI_AppendStringStringBuffer(dump->_buffer, "[]");
-    }
-    else {
-      bool first = true;
-      TRI_AppendStringStringBuffer(dump->_buffer, "[\"");
-
-      for (auto const& it : transactions) {
-        if (it.second - 1 < lastFoundTick) {
-          lastFoundTick = it.second - 1;
+    VPackBuffer<uint8_t> buffer;
+    VPackBuilder builder(buffer);
+    if (useVpp) {
+      if (transactions.empty()) {
+        builder.add(VPackSlice::emptyArraySlice());
+      } else {
+        builder.openArray();
+        for (auto const& it : transactions) {
+          if (it.second - 1 < lastFoundTick) {
+            lastFoundTick = it.second - 1;
+          }
+          builder.add(VPackValue(it.first));
         }
-     
-        if (first) { 
-          first = false;
-        }
-        else {
-          TRI_AppendStringStringBuffer(dump->_buffer, "\",\"");
-        }
-
-        TRI_AppendUInt64StringBuffer(dump->_buffer, it.first);
+        builder.close();
       }
 
-      TRI_AppendStringStringBuffer(dump->_buffer, "\"]");
+    } else {
+      if (transactions.empty()) {
+        Append(dump, "[]");
+      } else {
+        bool first = true;
+        Append(dump, "[\"");
+
+        for (auto const& it : transactions) {
+          if (it.second - 1 < lastFoundTick) {
+            lastFoundTick = it.second - 1;
+          }
+
+          if (first) {
+            first = false;
+          } else {
+            Append(dump, "\",\"");
+          }
+
+          Append(dump, it.first);
+        }
+
+        Append(dump, "\"]");
+      }
     }
 
     dump->_fromTickIncluded = fromTickIncluded;
     dump->_lastFoundTick = lastFoundTick;
-    // LOG_INFO("last tick2: %llu", lastFoundTick);
-  }
-  catch (triagens::basics::Exception const& ex) {
+    // LOG(INFO) << "last tick2: " << lastFoundTick;
+
+    dump->_slices.push_back(std::move(buffer));
+
+  } catch (arangodb::basics::Exception const& ex) {
     res = ex.code();
-  }
-  catch (...) {
+  } catch (...) {
     res = TRI_ERROR_INTERNAL;
   }
 
   // always return the logfiles we have used
-  triagens::wal::LogfileManager::instance()->returnLogfiles(logfiles);
- 
+  arangodb::wal::LogfileManager::instance()->returnLogfiles(logfiles);
+
   return res;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

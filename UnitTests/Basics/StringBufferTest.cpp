@@ -25,12 +25,15 @@
 /// @author Copyright 2007-2012, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "Basics/Common.h"
+
+#define BOOST_TEST_INCLUDED
 #include <boost/test/unit_test.hpp>
 
 #include "Basics/StringBuffer.h"
 
-using namespace triagens;
-using namespace triagens::basics;
+using namespace arangodb;
+using namespace arangodb::basics;
 using namespace std;
 
 // -----------------------------------------------------------------------------

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief list of collection keys present in database
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,37 +19,22 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Utils/CollectionKeysRepository.h"
-#include "Basics/json.h"
-#include "Basics/logging.h"
+#include "CollectionKeysRepository.h"
+#include "Logger/Logger.h"
 #include "Basics/MutexLocker.h"
-#include "VocBase/server.h"
 #include "VocBase/vocbase.h"
 
-using namespace triagens::arango;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                          CollectionKeysRepository
-// -----------------------------------------------------------------------------
+using namespace arangodb;
 
 size_t const CollectionKeysRepository::MaxCollectCount = 32;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create a collection keys repository
 ////////////////////////////////////////////////////////////////////////////////
 
-CollectionKeysRepository::CollectionKeysRepository () 
-  : _lock(),
-    _keys() {
-
+CollectionKeysRepository::CollectionKeysRepository() : _lock(), _keys() {
   _keys.reserve(64);
 }
 
@@ -61,26 +42,24 @@ CollectionKeysRepository::CollectionKeysRepository ()
 /// @brief destroy a collection keys repository
 ////////////////////////////////////////////////////////////////////////////////
 
-CollectionKeysRepository::~CollectionKeysRepository () {
+CollectionKeysRepository::~CollectionKeysRepository() {
   try {
     garbageCollect(true);
-  }
-  catch (...) {
+  } catch (...) {
   }
 
   // wait until all used entries have vanished
   int tries = 0;
 
   while (true) {
-    if (! containsUsed()) {
+    if (!containsUsed()) {
       break;
     }
 
     if (tries == 0) {
-      LOG_INFO("waiting for used keys to become unused");
-    }
-    else if (tries == 120) {
-      LOG_WARNING("giving up waiting for unused keys");
+      LOG(INFO) << "waiting for used keys to become unused";
+    } else if (tries == 120) {
+      LOG(WARN) << "giving up waiting for unused keys";
     }
 
     usleep(500000);
@@ -88,7 +67,7 @@ CollectionKeysRepository::~CollectionKeysRepository () {
   }
 
   {
-    MUTEX_LOCKER(_lock);
+    MUTEX_LOCKER(mutexLocker, _lock);
 
     for (auto it : _keys) {
       delete it.second;
@@ -98,16 +77,12 @@ CollectionKeysRepository::~CollectionKeysRepository () {
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief stores collection keys in the repository
 ////////////////////////////////////////////////////////////////////////////////
 
-void CollectionKeysRepository::store (triagens::arango::CollectionKeys* keys) {
-  MUTEX_LOCKER(_lock);
+void CollectionKeysRepository::store(arangodb::CollectionKeys* keys) {
+  MUTEX_LOCKER(mutexLocker, _lock);
   _keys.emplace(keys->id(), keys);
 }
 
@@ -115,11 +90,11 @@ void CollectionKeysRepository::store (triagens::arango::CollectionKeys* keys) {
 /// @brief remove collection keys by id
 ////////////////////////////////////////////////////////////////////////////////
 
-bool CollectionKeysRepository::remove (CollectionKeysId id) {
-  triagens::arango::CollectionKeys* collectionKeys = nullptr;
-  
+bool CollectionKeysRepository::remove(CollectionKeysId id) {
+  arangodb::CollectionKeys* collectionKeys = nullptr;
+
   {
-    MUTEX_LOCKER(_lock);
+    MUTEX_LOCKER(mutexLocker, _lock);
 
     auto it = _keys.find(id);
 
@@ -134,7 +109,7 @@ bool CollectionKeysRepository::remove (CollectionKeysId id) {
       // already deleted
       return false;
     }
-   
+
     if (collectionKeys->isUsed()) {
       // keys are in use by someone else. now mark as deleted
       collectionKeys->deleted();
@@ -153,15 +128,15 @@ bool CollectionKeysRepository::remove (CollectionKeysId id) {
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief find an existing keys entry by id
-/// if found, the keys will be returned with the usage flag set to true. 
-/// they must be returned later using release() 
+/// if found, the keys will be returned with the usage flag set to true.
+/// they must be returned later using release()
 ////////////////////////////////////////////////////////////////////////////////
 
-CollectionKeys* CollectionKeysRepository::find (CollectionKeysId id) {
-  triagens::arango::CollectionKeys* collectionKeys = nullptr;
+CollectionKeys* CollectionKeysRepository::find(CollectionKeysId id) {
+  arangodb::CollectionKeys* collectionKeys = nullptr;
 
   {
-    MUTEX_LOCKER(_lock);
+    MUTEX_LOCKER(mutexLocker, _lock);
 
     auto it = _keys.find(id);
 
@@ -172,7 +147,7 @@ CollectionKeys* CollectionKeysRepository::find (CollectionKeysId id) {
 
     collectionKeys = (*it).second;
 
-    if (collectionKeys->isDeleted()) { 
+    if (collectionKeys->isDeleted()) {
       // already deleted
       return nullptr;
     }
@@ -187,14 +162,14 @@ CollectionKeys* CollectionKeysRepository::find (CollectionKeysId id) {
 /// @brief return collection keys
 ////////////////////////////////////////////////////////////////////////////////
 
-void CollectionKeysRepository::release (CollectionKeys* collectionKeys) {
+void CollectionKeysRepository::release(CollectionKeys* collectionKeys) {
   {
-    MUTEX_LOCKER(_lock);
-  
+    MUTEX_LOCKER(mutexLocker, _lock);
+
     TRI_ASSERT(collectionKeys->isUsed());
     collectionKeys->release();
 
-    if (! collectionKeys->isDeleted()) {
+    if (!collectionKeys->isDeleted()) {
       return;
     }
 
@@ -210,9 +185,9 @@ void CollectionKeysRepository::release (CollectionKeys* collectionKeys) {
 /// @brief whether or not the repository contains a used keys entry
 ////////////////////////////////////////////////////////////////////////////////
 
-bool CollectionKeysRepository::containsUsed () {
-  MUTEX_LOCKER(_lock);
-    
+bool CollectionKeysRepository::containsUsed() {
+  MUTEX_LOCKER(mutexLocker, _lock);
+
   for (auto it : _keys) {
     if (it.second->isUsed()) {
       return true;
@@ -226,14 +201,14 @@ bool CollectionKeysRepository::containsUsed () {
 /// @brief run a garbage collection on the data
 ////////////////////////////////////////////////////////////////////////////////
 
-bool CollectionKeysRepository::garbageCollect (bool force) {
-  std::vector<triagens::arango::CollectionKeys*> found;
+bool CollectionKeysRepository::garbageCollect(bool force) {
+  std::vector<arangodb::CollectionKeys*> found;
   found.reserve(MaxCollectCount);
 
   auto const now = TRI_microtime();
 
   {
-    MUTEX_LOCKER(_lock);
+    MUTEX_LOCKER(mutexLocker, _lock);
 
     for (auto it = _keys.begin(); it != _keys.end(); /* no hoisting */) {
       auto collectionKeys = (*it).second;
@@ -242,28 +217,25 @@ bool CollectionKeysRepository::garbageCollect (bool force) {
         // must not destroy anything currently in use
         ++it;
         continue;
-      } 
-   
+      }
+
       if (force || collectionKeys->expires() < now) {
         collectionKeys->deleted();
-      }  
+      }
 
       if (collectionKeys->isDeleted()) {
         try {
           found.emplace_back(collectionKeys);
           it = _keys.erase(it);
-        }
-        catch (...) {
+        } catch (...) {
           // stop iteration
           break;
         }
 
-        if (! force &&
-            found.size() >= MaxCollectCount) {
+        if (!force && found.size() >= MaxCollectCount) {
           break;
         }
-      }
-      else {
+      } else {
         ++it;
       }
     }
@@ -274,14 +246,5 @@ bool CollectionKeysRepository::garbageCollect (bool force) {
     delete it;
   }
 
-  return (! found.empty());
+  return (!found.empty());
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

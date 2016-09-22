@@ -1,3 +1,52 @@
+
+
+#notification_menu {
+  .innerDropdownInnerUL {
+    margin-left: 0;
+  }
+}
+
+#noty_bottom_layout_container {
+  li {
+    border: 0 !important;
+  }
+}
+
+.noty_type_error {
+  .arango_message {
+    top: 2px;
+  }
+}
+
+.noty_bar {
+
+  .noty_buttons {
+    background-color: rgba(0, 0, 0, 0) !important;
+    border: 0 !important;
+    bottom: 0;
+    height: 1px;
+    margin-bottom: 30px !important;
+    margin-top: -35px !important;
+    position: relative;
+    right: -23px;
+
+    button {
+      margin-bottom: 2px;
+      margin-right: -1px;
+    }
+  }
+
+  .arango_message {
+    font-weight: 400 !important;
+
+    div {
+      float: right;
+      width: 20px;
+    }
+  }
+
+}
+
 .fixedDropdown {
   background: $c-white !important;
   border-color: $c-content-border !important;
@@ -30,12 +79,13 @@
 
   .notificationItemContent {
     @extend %pull-left;
+    font-size: .9em;
     font-weight: 300;
     margin-left: 15px;
-    max-width: 155px;
+    max-width: 180px;
     min-height: 15px;
     white-space: normal;
-    width: 155px;
+    width: 180px;
     word-wrap: break-word;
   }
 
@@ -63,13 +113,13 @@
     }
 
     i {
-      @extend %pull-left;
+      @extend %pull-right;
       @extend %clickable;
       color: $c-semi-transp;
       font-size: 20px;
+      padding-left: 5px;
       position: relative;
-      right: 4px;
-      top: -9px;
+      right: 2px;
 
       &:hover {
         color: $c-black;
@@ -102,10 +152,11 @@
 
 #stat_hd {
   @include border-radius(3px);
-  background-color: $c-white;
+  //background-color: $c-white;
   border: 1px solid $c-content-border;
   height: 25px;
-  margin-top: 3px;
+  margin-left: -10px;
+  margin-top: 8px;
   position: relative;
   right: 3px;
   text-align: center;

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief import request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,222 +19,178 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_REST_HANDLER_REST_IMPORT_HANDLER_H
-#define ARANGODB_REST_HANDLER_REST_IMPORT_HANDLER_H 1
+#ifndef ARANGOD_REST_HANDLER_REST_IMPORT_HANDLER_H
+#define ARANGOD_REST_HANDLER_REST_IMPORT_HANDLER_H 1
 
 #include "Basics/Common.h"
-
 #include "RestHandler/RestVocbaseBaseHandler.h"
-#include "Utils/transactions.h"
 
-#define RestImportTransaction triagens::arango::SingleCollectionWriteTransaction<UINT64_MAX>
+#include <velocypack/Builder.h>
+#include <velocypack/Slice.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 RestImportHandler
-// -----------------------------------------------------------------------------
+namespace arangodb {
+struct OperationOptions;
+class SingleCollectionTransaction;
 
-namespace triagens {
-  namespace arango {
+struct RestImportResult {
+ public:
+  RestImportResult()
+      : _numErrors(0),
+        _numEmpty(0),
+        _numCreated(0),
+        _numIgnored(0),
+        _numUpdated(0),
+        _errors() {}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  RestImportResult
-// -----------------------------------------------------------------------------
+  ~RestImportResult() {}
 
-    struct RestImportResult {
+  size_t _numErrors;
+  size_t _numEmpty;
+  size_t _numCreated;
+  size_t _numIgnored;
+  size_t _numUpdated;
 
-      public:
-        RestImportResult () :
-          _numErrors(0),
-          _numEmpty(0),
-          _numCreated(0),
-          _numIgnored(0),
-          _numUpdated(0),
-          _errors() {
-        }
-
-        ~RestImportResult () { }
-
-        size_t _numErrors;
-        size_t _numEmpty;
-        size_t _numCreated;
-        size_t _numIgnored;
-        size_t _numUpdated;
-
-        std::vector<std::string> _errors;
-    };
+  std::vector<std::string> _errors;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief import request handler
 ////////////////////////////////////////////////////////////////////////////////
 
-    class RestImportHandler : public RestVocbaseBaseHandler {
+class RestImportHandler : public RestVocbaseBaseHandler {
+ public:
+  explicit RestImportHandler(GeneralRequest*, GeneralResponse*);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ public:
+  status execute() override final;
 
-      public:
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create a position string
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  std::string positionize(size_t) const;
 
-        RestImportHandler (rest::HttpRequest*);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief register an error
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
+  void registerError(RestImportResult&, std::string const&);
 
-      public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief construct an error message
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
+  std::string buildParseError(size_t, char const*);
 
-        status_t execute ();
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief process a single VelocyPack document
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
+  int handleSingleDocument(SingleCollectionTransaction& trx,
+                           RestImportResult& result,
+                           arangodb::velocypack::Builder& babies,
+                           arangodb::velocypack::Slice slice,
+                           bool isEdgeCollection, size_t);
 
-      private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief creates documents by JSON objects
+  /// each line of the input stream contains an individual JSON object
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extracts the "overwrite" value
-////////////////////////////////////////////////////////////////////////////////
+  bool createFromJson(std::string const&);
+  bool createFromVPack(std::string const&);
 
-        bool extractOverwrite () const;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief creates documents by JSON objects
+  /// the input stream is one big JSON array containing all documents
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief extracts the "complete" value
-////////////////////////////////////////////////////////////////////////////////
+  bool createByDocumentsList();
 
-        bool extractComplete () const;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief creates a documents from key/value lists
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create a position string
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string positionise (size_t) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief register an error
-////////////////////////////////////////////////////////////////////////////////
-
-        void registerError (RestImportResult&,
-                            std::string const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief construct an error message
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string buildParseError (size_t,
-                                     char const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief process a single JSON document
-////////////////////////////////////////////////////////////////////////////////
-
-        int handleSingleDocument (RestImportTransaction&,
-                                  RestImportResult&, 
-                                  char const*,
-                                  TRI_json_t const*,
-                                  bool,
-                                  bool,
-                                  size_t);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creates documents by JSON objects
-/// each line of the input stream contains an individual JSON object
-////////////////////////////////////////////////////////////////////////////////
-
-        bool createFromJson (std::string const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creates documents by JSON objects
-/// the input stream is one big JSON array containing all documents
-////////////////////////////////////////////////////////////////////////////////
-
-        bool createByDocumentsList ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creates a documents from key/value lists
-////////////////////////////////////////////////////////////////////////////////
-
-        bool createFromKeyValueList ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creates the result
-////////////////////////////////////////////////////////////////////////////////
-
-        void generateDocumentsCreated (RestImportResult const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief parses a string
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t* parseJsonLine (std::string const&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief parses a string
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t* parseJsonLine (char const*,
-                                   char const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief builds a TRI_json_t object from a key and value list
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t* createJsonObject (TRI_json_t const*,
-                                      TRI_json_t const*,
-                                      std::string&,
-                                      size_t);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks the keys, returns true if all values in the list are strings.
-////////////////////////////////////////////////////////////////////////////////
-
-        bool checkKeys (TRI_json_t const*) const;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief enumeration for unique constraint handling
-////////////////////////////////////////////////////////////////////////////////
-
-        enum OnDuplicateActionType {
-          DUPLICATE_ERROR,       // fail on unique constraint violation
-          DUPLICATE_UPDATE,      // try updating existing document on unique constraint violation
-          DUPLICATE_REPLACE,     // try replacing existing document on unique constraint violation
-          DUPLICATE_IGNORE       // ignore document on unique constraint violation
-        };
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief unique constraint handling
-////////////////////////////////////////////////////////////////////////////////
-
-        OnDuplicateActionType _onDuplicateAction;
-
-    };
+  bool createFromKeyValueList();
+  bool createFromKeyValueListVPack() {
+    LOG(ERR) << " not implemened";
+    return false;
   }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief perform the actual import (insert/update/replace) operations
+  //////////////////////////////////////////////////////////////////////////////
+
+  int performImport(SingleCollectionTransaction& trx, RestImportResult& result,
+                    std::string const& collectionName,
+                    VPackBuilder const& babies, bool complete,
+                    OperationOptions const& opOptions);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief creates the result
+  //////////////////////////////////////////////////////////////////////////////
+
+  void generateDocumentsCreated(RestImportResult const&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief parses a string
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<VPackBuilder> parseVelocyPackLine(std::string const&, bool&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief parses a string
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<VPackBuilder> parseVelocyPackLine(char const*, char const*,
+                                                    bool&);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief builds a VPackBuilder object from a key and value list
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::shared_ptr<arangodb::velocypack::Builder> createVelocyPackObject(
+      arangodb::velocypack::Slice const&, arangodb::velocypack::Slice const&,
+      std::string&, size_t);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief checks the keys, returns true if all values in the list are
+  /// strings.
+  //////////////////////////////////////////////////////////////////////////////
+
+  bool checkKeys(arangodb::velocypack::Slice const&) const;
+
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief enumeration for unique constraint handling
+  //////////////////////////////////////////////////////////////////////////////
+
+  enum OnDuplicateActionType {
+    DUPLICATE_ERROR,    // fail on unique constraint violation
+    DUPLICATE_UPDATE,   // try updating existing document on unique constraint
+                        // violation
+    DUPLICATE_REPLACE,  // try replacing existing document on unique constraint
+                        // violation
+    DUPLICATE_IGNORE    // ignore document on unique constraint violation
+  };
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief unique constraint handling
+  //////////////////////////////////////////////////////////////////////////////
+
+  OnDuplicateActionType _onDuplicateAction;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief prefixes for edge collections
+  //////////////////////////////////////////////////////////////////////////////
+
+  std::string _fromPrefix;
+  std::string _toPrefix;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief AQL EnumerateCollectionBlock
-///
-/// @file 
-///
 /// DISCLAIMER
 ///
-/// Copyright 2010-2014 triagens GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,130 +16,78 @@
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
 ///
-/// Copyright holder is triAGENS GmbH, Cologne, Germany
+/// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_ENUMERATE_COLLECTION_BLOCK_H
-#define ARANGODB_AQL_ENuMERATE_COLLECTION_BLOCK_H 1
+#ifndef ARANGOD_AQL_ENUMERATE_COLLECTION_BLOCK_H
+#define ARANGOD_AQL_ENUMERATE_COLLECTION_BLOCK_H 1
 
-#include "Aql/Collection.h"
+#include "Aql/CollectionScanner.h"
 #include "Aql/ExecutionBlock.h"
 #include "Aql/ExecutionNode.h"
 
-struct TRI_doc_mptr_copy_t;
+#include <velocypack/Iterator.h>
+#include <velocypack/Slice.h>
 
-namespace triagens {
-  namespace aql {
+struct TRI_doc_mptr_t;
 
-    class AqlItemBlock;
+namespace arangodb {
+namespace aql {
+class AqlItemBlock;
+struct Collection;
+class CollectionScanner;
+class ExecutionEngine;
 
-    struct CollectionScanner;
+class EnumerateCollectionBlock : public ExecutionBlock {
+ public:
+  EnumerateCollectionBlock(ExecutionEngine* engine,
+                           EnumerateCollectionNode const* ep);
 
-    class ExecutionEngine;
+  ~EnumerateCollectionBlock() = default;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                          EnumerateCollectionBlock
-// -----------------------------------------------------------------------------
+  /// @brief initialize fetching of documents
+  void initializeDocuments();
 
-    class EnumerateCollectionBlock : public ExecutionBlock {
+  /// @brief skip instead of fetching
+  bool skipDocuments(size_t toSkip, size_t& skipped);
 
-      public:
+  /// @brief continue fetching of documents
+  bool moreDocuments(size_t hint);
 
-        EnumerateCollectionBlock (ExecutionEngine* engine,
-                                  EnumerateCollectionNode const* ep);
+  /// @brief initialize, here we fetch all docs from the database
+  int initialize() override final;
 
-        ~EnumerateCollectionBlock ();
+  /// @brief initializeCursor
+  int initializeCursor(AqlItemBlock* items, size_t pos) override;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initialize fetching of documents
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief getSome
+  AqlItemBlock* getSome(size_t atLeast, size_t atMost) override final;
 
-        void initializeDocuments ();
+  // skip between atLeast and atMost, returns the number actually skipped . . .
+  // will only return less than atLeast if there aren't atLeast many
+  // things to skip overall.
+  size_t skipSome(size_t atLeast, size_t atMost) override final;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief continue fetching of documents
-////////////////////////////////////////////////////////////////////////////////
+ private:
+  /// @brief collection
+  Collection* _collection;
 
-        bool moreDocuments (size_t hint);
+  /// @brief collection scanner
+  CollectionScanner _scanner;
+  
+  /// @brief iterator over documents
+  arangodb::velocypack::ArrayIterator _iterator;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initialize, here we fetch all docs from the database
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief document buffer
+  arangodb::velocypack::Slice _documents;
 
-        int initialize () override;
+  /// @brief whether or not the enumerated documents need to be stored
+  bool _mustStoreResult;
+};
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initializeCursor
-////////////////////////////////////////////////////////////////////////////////
-
-        int initializeCursor (AqlItemBlock* items, size_t pos) override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief getSome
-////////////////////////////////////////////////////////////////////////////////
-
-        AqlItemBlock* getSome (size_t atLeast, size_t atMost) override final;
-
-////////////////////////////////////////////////////////////////////////////////
-// skip between atLeast and atMost, returns the number actually skipped . . .
-// will only return less than atLeast if there aren't atLeast many
-// things to skip overall.
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t skipSome (size_t atLeast, size_t atMost) override final;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection
-////////////////////////////////////////////////////////////////////////////////
-
-        Collection* _collection;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection scanner
-////////////////////////////////////////////////////////////////////////////////
-
-        CollectionScanner* _scanner;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief document buffer
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<TRI_doc_mptr_copy_t> _documents;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief current position in _documents
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t _posInDocuments;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not we're doing random iteration
-////////////////////////////////////////////////////////////////////////////////
-
-        bool const _random;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the enumerated documents need to be stored
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _mustStoreResult;
-    };
-
-  }  // namespace triagens::aql
-}  // namespace triagens
+}  // namespace arangodb::aql
+}  // namespace arangodb
 
 #endif
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "^\\(/// @brief\\|/// {@inheritDoc}\\|/// @addtogroup\\|// --SECTION--\\|/// @\\}\\)"
-// End:

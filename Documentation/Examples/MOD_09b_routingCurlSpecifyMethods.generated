@@ -1,7 +1,7 @@
 shell> curl --dump - http://localhost:8529/hello/world
 
 HTTP/<span class="hljs-number">1.1</span> <span class="hljs-number">200</span> OK
-content-type: application/json; charset=utf-<span class="hljs-number">8</span>
+content-type: application/json; charset=utf<span class="hljs-number">-8</span>
 
 { 
   <span class="hljs-string">"request"</span> : { 
@@ -10,30 +10,29 @@ content-type: application/json; charset=utf-<span class="hljs-number">8</span>
     <span class="hljs-string">"url"</span> : <span class="hljs-string">"/hello/world"</span>, 
     <span class="hljs-string">"protocol"</span> : <span class="hljs-string">"http"</span>, 
     <span class="hljs-string">"server"</span> : { 
-      <span class="hljs-string">"address"</span> : <span class="hljs-string">"0.0.0.0"</span>, 
-      <span class="hljs-string">"port"</span> : <span class="hljs-number">8529</span> 
+      <span class="hljs-string">"address"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
+      <span class="hljs-string">"port"</span> : <span class="hljs-number">16070</span> 
     }, 
     <span class="hljs-string">"client"</span> : { 
       <span class="hljs-string">"address"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
-      <span class="hljs-string">"port"</span> : <span class="hljs-number">8343</span>, 
-      <span class="hljs-string">"id"</span> : <span class="hljs-string">"10"</span> 
+      <span class="hljs-string">"port"</span> : <span class="hljs-number">57026</span>, 
+      <span class="hljs-string">"id"</span> : <span class="hljs-string">"146641305612813"</span> 
     }, 
     <span class="hljs-string">"internals"</span> : { 
     }, 
     <span class="hljs-string">"headers"</span> : { 
-      <span class="hljs-string">"accept-encoding"</span> : <span class="hljs-string">"deflate"</span>, 
       <span class="hljs-string">"authorization"</span> : <span class="hljs-string">"Basic cm9vdDo="</span>, 
-      <span class="hljs-string">"connection"</span> : <span class="hljs-string">"Keep-Alive"</span>, 
+      <span class="hljs-string">"user-agent"</span> : <span class="hljs-string">"ArangoDB"</span>, 
       <span class="hljs-string">"content-length"</span> : <span class="hljs-string">"0"</span>, 
-      <span class="hljs-string">"host"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
-      <span class="hljs-string">"user-agent"</span> : <span class="hljs-string">"ArangoDB"</span> 
+      <span class="hljs-string">"connection"</span> : <span class="hljs-string">"Keep-Alive"</span>, 
+      <span class="hljs-string">"accept-encoding"</span> : <span class="hljs-string">"deflate"</span>, 
+      <span class="hljs-string">"host"</span> : <span class="hljs-string">"127.0.0.1"</span> 
     }, 
     <span class="hljs-string">"requestType"</span> : <span class="hljs-string">"GET"</span>, 
     <span class="hljs-string">"parameters"</span> : { 
     }, 
     <span class="hljs-string">"cookies"</span> : { 
     }, 
-    <span class="hljs-string">"compatibility"</span> : <span class="hljs-number">20700</span>, 
     <span class="hljs-string">"urlParameters"</span> : { 
     } 
   }, 
@@ -45,7 +44,7 @@ shell> curl -X POST --data-binary @- --dump - http://localhost:8529/hello/world 
 EOF
 
 HTTP/<span class="hljs-number">1.1</span> <span class="hljs-number">200</span> OK
-content-type: application/json; charset=utf-<span class="hljs-number">8</span>
+content-type: application/json; charset=utf<span class="hljs-number">-8</span>
 
 { 
   <span class="hljs-string">"request"</span> : { 
@@ -54,23 +53,23 @@ content-type: application/json; charset=utf-<span class="hljs-number">8</span>
     <span class="hljs-string">"url"</span> : <span class="hljs-string">"/hello/world"</span>, 
     <span class="hljs-string">"protocol"</span> : <span class="hljs-string">"http"</span>, 
     <span class="hljs-string">"server"</span> : { 
-      <span class="hljs-string">"address"</span> : <span class="hljs-string">"0.0.0.0"</span>, 
-      <span class="hljs-string">"port"</span> : <span class="hljs-number">8529</span> 
+      <span class="hljs-string">"address"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
+      <span class="hljs-string">"port"</span> : <span class="hljs-number">16070</span> 
     }, 
     <span class="hljs-string">"client"</span> : { 
       <span class="hljs-string">"address"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
-      <span class="hljs-string">"port"</span> : <span class="hljs-number">8343</span>, 
-      <span class="hljs-string">"id"</span> : <span class="hljs-string">"10"</span> 
+      <span class="hljs-string">"port"</span> : <span class="hljs-number">57026</span>, 
+      <span class="hljs-string">"id"</span> : <span class="hljs-string">"146641305612813"</span> 
     }, 
     <span class="hljs-string">"internals"</span> : { 
     }, 
     <span class="hljs-string">"headers"</span> : { 
-      <span class="hljs-string">"accept-encoding"</span> : <span class="hljs-string">"deflate"</span>, 
       <span class="hljs-string">"authorization"</span> : <span class="hljs-string">"Basic cm9vdDo="</span>, 
-      <span class="hljs-string">"connection"</span> : <span class="hljs-string">"Keep-Alive"</span>, 
+      <span class="hljs-string">"user-agent"</span> : <span class="hljs-string">"ArangoDB"</span>, 
       <span class="hljs-string">"content-length"</span> : <span class="hljs-string">"16"</span>, 
-      <span class="hljs-string">"host"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
-      <span class="hljs-string">"user-agent"</span> : <span class="hljs-string">"ArangoDB"</span> 
+      <span class="hljs-string">"connection"</span> : <span class="hljs-string">"Keep-Alive"</span>, 
+      <span class="hljs-string">"accept-encoding"</span> : <span class="hljs-string">"deflate"</span>, 
+      <span class="hljs-string">"host"</span> : <span class="hljs-string">"127.0.0.1"</span> 
     }, 
     <span class="hljs-string">"requestType"</span> : <span class="hljs-string">"POST"</span>, 
     <span class="hljs-string">"requestBody"</span> : <span class="hljs-string">"{hello: 'world'}"</span>, 
@@ -78,7 +77,6 @@ content-type: application/json; charset=utf-<span class="hljs-number">8</span>
     }, 
     <span class="hljs-string">"cookies"</span> : { 
     }, 
-    <span class="hljs-string">"compatibility"</span> : <span class="hljs-number">20700</span>, 
     <span class="hljs-string">"urlParameters"</span> : { 
     } 
   }, 
@@ -90,7 +88,7 @@ shell> curl -X PUT --data-binary @- --dump - http://localhost:8529/hello/world &
 EOF
 
 HTTP/<span class="hljs-number">1.1</span> <span class="hljs-number">200</span> OK
-content-type: application/json; charset=utf-<span class="hljs-number">8</span>
+content-type: application/json; charset=utf<span class="hljs-number">-8</span>
 
 { 
   <span class="hljs-string">"request"</span> : { 
@@ -99,23 +97,23 @@ content-type: application/json; charset=utf-<span class="hljs-number">8</span>
     <span class="hljs-string">"url"</span> : <span class="hljs-string">"/hello/world"</span>, 
     <span class="hljs-string">"protocol"</span> : <span class="hljs-string">"http"</span>, 
     <span class="hljs-string">"server"</span> : { 
-      <span class="hljs-string">"address"</span> : <span class="hljs-string">"0.0.0.0"</span>, 
-      <span class="hljs-string">"port"</span> : <span class="hljs-number">8529</span> 
+      <span class="hljs-string">"address"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
+      <span class="hljs-string">"port"</span> : <span class="hljs-number">16070</span> 
     }, 
     <span class="hljs-string">"client"</span> : { 
       <span class="hljs-string">"address"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
-      <span class="hljs-string">"port"</span> : <span class="hljs-number">8343</span>, 
-      <span class="hljs-string">"id"</span> : <span class="hljs-string">"10"</span> 
+      <span class="hljs-string">"port"</span> : <span class="hljs-number">57026</span>, 
+      <span class="hljs-string">"id"</span> : <span class="hljs-string">"146641305612813"</span> 
     }, 
     <span class="hljs-string">"internals"</span> : { 
     }, 
     <span class="hljs-string">"headers"</span> : { 
-      <span class="hljs-string">"accept-encoding"</span> : <span class="hljs-string">"deflate"</span>, 
       <span class="hljs-string">"authorization"</span> : <span class="hljs-string">"Basic cm9vdDo="</span>, 
-      <span class="hljs-string">"connection"</span> : <span class="hljs-string">"Keep-Alive"</span>, 
+      <span class="hljs-string">"user-agent"</span> : <span class="hljs-string">"ArangoDB"</span>, 
       <span class="hljs-string">"content-length"</span> : <span class="hljs-string">"16"</span>, 
-      <span class="hljs-string">"host"</span> : <span class="hljs-string">"127.0.0.1"</span>, 
-      <span class="hljs-string">"user-agent"</span> : <span class="hljs-string">"ArangoDB"</span> 
+      <span class="hljs-string">"connection"</span> : <span class="hljs-string">"Keep-Alive"</span>, 
+      <span class="hljs-string">"accept-encoding"</span> : <span class="hljs-string">"deflate"</span>, 
+      <span class="hljs-string">"host"</span> : <span class="hljs-string">"127.0.0.1"</span> 
     }, 
     <span class="hljs-string">"requestType"</span> : <span class="hljs-string">"PUT"</span>, 
     <span class="hljs-string">"requestBody"</span> : <span class="hljs-string">"{hello: 'world'}"</span>, 
@@ -123,7 +121,6 @@ content-type: application/json; charset=utf-<span class="hljs-number">8</span>
     }, 
     <span class="hljs-string">"cookies"</span> : { 
     }, 
-    <span class="hljs-string">"compatibility"</span> : <span class="hljs-number">20700</span>, 
     <span class="hljs-string">"urlParameters"</span> : { 
     } 
   }, 
@@ -133,7 +130,7 @@ content-type: application/json; charset=utf-<span class="hljs-number">8</span>
 shell> curl -X DELETE --dump - http://localhost:8529/hello/world
 
 HTTP/<span class="hljs-number">1.1</span> <span class="hljs-number">404</span> Not Found
-content-type: application/json; charset=utf-<span class="hljs-number">8</span>
+content-type: application/json; charset=utf<span class="hljs-number">-8</span>
 
 { 
   <span class="hljs-string">"error"</span> : <span class="hljs-literal">true</span>, 

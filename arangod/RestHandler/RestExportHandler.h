@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief export request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,109 +19,56 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_REST_HANDLER_REST_EXPORT_HANDLER_H
-#define ARANGODB_REST_HANDLER_REST_EXPORT_HANDLER_H 1
+#ifndef ARANGOD_REST_HANDLER_REST_EXPORT_HANDLER_H
+#define ARANGOD_REST_HANDLER_REST_EXPORT_HANDLER_H 1
 
 #include "Basics/Common.h"
 #include "Basics/Mutex.h"
-#include "Utils/CollectionExport.h"
 #include "RestHandler/RestVocbaseBaseHandler.h"
+#include "Utils/CollectionExport.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                           class RestExportHandler
-// -----------------------------------------------------------------------------
+namespace arangodb {
+class RestExportHandler : public RestVocbaseBaseHandler {
+ public:
+  explicit RestExportHandler(GeneralRequest*, GeneralResponse*);
 
-namespace triagens {
+ public:
+  status execute() override;
 
-  namespace arango {
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief build options for the query as JSON
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief document request handler
-////////////////////////////////////////////////////////////////////////////////
+  VPackBuilder buildOptions(VPackSlice const&);
 
-    class RestExportHandler : public RestVocbaseBaseHandler {
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create an export cursor and return the first results
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+  void createCursor();
 
-      public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the next results from an existing cursor
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  void modifyCursor();
 
-        RestExportHandler (rest::HttpRequest*);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief dispose an existing cursor
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
+  void deleteCursor();
 
-      public:
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief restrictions for export
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        status_t execute () override;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief build options for the query as JSON
-////////////////////////////////////////////////////////////////////////////////
-
-        triagens::basics::Json buildOptions (TRI_json_t const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create an export cursor and return the first results
-////////////////////////////////////////////////////////////////////////////////
-
-        void createCursor ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the next results from an existing cursor
-////////////////////////////////////////////////////////////////////////////////
-
-        void modifyCursor ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief dispose an existing cursor
-////////////////////////////////////////////////////////////////////////////////
-
-        void deleteCursor ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief restrictions for export
-////////////////////////////////////////////////////////////////////////////////
-
-        CollectionExport::Restrictions _restrictions; 
-
-    };
-  }
+  CollectionExport::Restrictions _restrictions;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

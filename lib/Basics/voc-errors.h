@@ -53,21 +53,20 @@
 ///   Will be raised when a request is canceled by the user.
 /// - 22: @LIT{intentional debug error}
 ///   Will be raised intentionally during debugging.
-/// - 23: @LIT{internal error with attribute ID in shaper}
-///   Will be raised if an attribute ID is not found in the shaper but should
-///   have been.
-/// - 24: @LIT{internal error if a legend could not be created}
-///   Will be raised if the legend generator was only given access to the shape
-///   and some sids are in the data object (inhomogeneous lists).
 /// - 25: @LIT{IP address is invalid}
 ///   Will be raised when the structure of an IP address is invalid.
-/// - 26: @LIT{internal error if a legend for a marker does not yet exist in the same WAL file}
-///   Will be raised internally, then fixed internally, and never come out to
-///   the user.
 /// - 27: @LIT{file exists}
 ///   Will be raised when a file already exists.
 /// - 28: @LIT{locked}
 ///   Will be raised when a resource or an operation is locked.
+/// - 29: @LIT{deadlock detected}
+///   Will be raised when a deadlock is detected when accessing collections.
+/// - 30: @LIT{shutdown in progress}
+///   Will be raised when a call cannot succeed because a server shutdown is
+///   already in progress.
+/// - 31: @LIT{only enterprise version}
+///   Will be raised when an enterprise-feature is requested from the community
+///   edition.
 /// - 400: @LIT{bad parameter}
 ///   Will be raised when the HTTP request does not fulfill the requirements.
 /// - 401: @LIT{unauthorized}
@@ -90,13 +89,8 @@
 /// - 1000: @LIT{illegal state}
 ///   Internal error that will be raised when the datafile is not in the
 ///   required state.
-/// - 1001: @LIT{could not shape document}
-///   Internal error that will be raised when the shaper encountered a problem.
 /// - 1002: @LIT{datafile sealed}
 ///   Internal error that will be raised when trying to write to a datafile.
-/// - 1003: @LIT{unknown type}
-///   Internal error that will be raised when an unknown collection type is
-///   encountered.
 /// - 1004: @LIT{read only}
 ///   Internal error that will be raised when trying to write to a read-only
 ///   datafile or collection.
@@ -109,6 +103,8 @@
 ///   Internal error that will be raised when a datafile is empty.
 /// - 1008: @LIT{logfile recovery error}
 ///   Will be raised when an error occurred during WAL log file recovery.
+/// - 1009: @LIT{datafile statistics not found}
+///   Will be raised when a required datafile statistics object was not found.
 /// - 1100: @LIT{corrupted datafile}
 ///   Will be raised when a corruption is detected in a datafile.
 /// - 1101: @LIT{illegal or unreadable parameter file}
@@ -171,8 +167,6 @@
 ///   Will be raised when a cross-collection is requested.
 /// - 1214: @LIT{illegal index handle}
 ///   Will be raised when a index handle is corrupt.
-/// - 1215: @LIT{cap constraint already defined}
-///   Will be raised when a cap constraint was already defined.
 /// - 1216: @LIT{document too large}
 ///   Will be raised when the document cannot fit into any datafile because of
 ///   it is too large.
@@ -183,8 +177,8 @@
 ///   Will be raised when an invalid collection type is used in a request.
 /// - 1219: @LIT{validator failed}
 ///   Will be raised when the validation of an attribute of a structure failed.
-/// - 1220: @LIT{parser failed}
-///   Will be raised when the parsing of an attribute of a structure failed.
+/// - 1220: @LIT{parsing attribute name definition failed}
+///   Will be raised when parsing an attribute name definition failed.
 /// - 1221: @LIT{illegal document key}
 ///   Will be raised when a document key is corrupt.
 /// - 1222: @LIT{unexpected document key}
@@ -211,7 +205,7 @@
 ///   Will be raised when there is an attempt to delete a non-existing endpoint.
 /// - 1232: @LIT{invalid key generator}
 ///   Will be raised when an invalid key generator description is used.
-/// - 1233: @LIT{edge attribute missing}
+/// - 1233: @LIT{edge attribute missing or invalid}
 ///   will be raised when the _from or _to values of an edge are undefined or
 ///   contain an invalid value.
 /// - 1234: @LIT{index insertion warning - attribute missing in document}
@@ -228,6 +222,9 @@
 ///   expected.
 /// - 1238: @LIT{collection not loaded}
 ///   Will be raised when a collection is accessed that is not yet loaded.
+/// - 1239: @LIT{illegal document revision}
+///   Will be raised when a document revision is corrupt or is missing where
+///   needed.
 /// - 1300: @LIT{datafile full}
 ///   Will be raised when the datafile reaches its limit.
 /// - 1301: @LIT{server database directory is empty}
@@ -356,6 +353,15 @@
 /// - 1476: @LIT{could not determine my ID from my local info}
 ///   Will be raised if a cluster server at startup could not determine its own
 ///   ID from the local info provided.
+/// - 1477: @LIT{this operation is only valid on a DBserver in a cluster}
+///   Will be raised if there is an attempt to run a DBserver-only operation on
+///   a different type of node.
+/// - 1478: @LIT{A cluster backend which was required for the operation could not be reached}
+///   Will be raised if a required db server can't be reached.
+/// - 1479: @LIT{An endpoint couldn't be found}
+///   An endpoint couldn't be found
+/// - 1480: @LIT{Invalid agency structure}
+///   The structure in the agency is invalid
 /// - 1500: @LIT{query killed}
 ///   Will be raised when a running query is killed by an explicit admin
 ///   command.
@@ -425,26 +431,25 @@
 /// - 1572: @LIT{invalid date value}
 ///   Will be raised when a value cannot be converted to a date.
 /// - 1573: @LIT{multi-modify query}
-///    "Will be raised when an AQL query contains more than one data-modifying
-///   operation."
-/// - 1574: @LIT{modify operation in subquery}
-///    "Will be raised when an AQL query contains a data-modifying operation
-///   inside a subquery."
+///   Will be raised when an AQL query contains more than one data-modifying
+///   operation.
+/// - 1574: @LIT{invalid aggregate expression}
+///   Will be raised when an AQL query contains an invalid aggregate expression.
 /// - 1575: @LIT{query options must be readable at query compile time}
-///    "Will be raised when an AQL data-modification query contains options
-///   that cannot be figured out at query compile time."
+///   Will be raised when an AQL data-modification query contains options that
+///   cannot be figured out at query compile time.
 /// - 1576: @LIT{query options expected}
-///    "Will be raised when an AQL data-modification query contains an invalid
-///   options specification."
+///   Will be raised when an AQL data-modification query contains an invalid
+///   options specification.
 /// - 1577: @LIT{collection '\%s' used as expression operand}
-///    "Will be raised when a collection is used as an operand in an AQL
-///   expression."
+///   Will be raised when a collection is used as an operand in an AQL
+///   expression.
 /// - 1578: @LIT{disallowed dynamic call to '\%s'}
-///    "Will be raised when a dynamic function call is made to a function that
-///   cannot be called dynamically."
-/// - 1579: @LIT{access after data-modification}
-///    "Will be raised when collection data is accessed after a
-///   data-modification query part."
+///   Will be raised when a dynamic function call is made to a function that
+///   cannot be called dynamically.
+/// - 1579: @LIT{access after data-modification by \%s}
+///   Will be raised when collection data are accessed after a
+///   data-modification operation.
 /// - 1580: @LIT{invalid user function name}
 ///   Will be raised when a user function with an invalid name is registered.
 /// - 1581: @LIT{invalid user function code}
@@ -454,12 +459,12 @@
 /// - 1583: @LIT{user function runtime error: \%s}
 ///   Will be raised when a user function throws a runtime exception.
 /// - 1590: @LIT{bad execution plan JSON}
-///    "Will be raised when an HTTP API for a query got an invalid JSON object."
+///   Will be raised when an HTTP API for a query got an invalid JSON object.
 /// - 1591: @LIT{query ID not found}
-///    "Will be raised when an Id of a query is not found by the HTTP API."
+///   Will be raised when an Id of a query is not found by the HTTP API.
 /// - 1592: @LIT{query with this ID is in use}
-///    "Will be raised when an Id of a query is found by the HTTP API but the
-///   query is in use."
+///   Will be raised when an Id of a query is found by the HTTP API but the
+///   query is in use.
 /// - 1600: @LIT{cursor not found}
 ///   Will be raised when a cursor is requested via its id but a cursor with
 ///   that id cannot be found.
@@ -489,30 +494,15 @@
 ///   Will be raised when a user name is updated that does not exist.
 /// - 1704: @LIT{user must change his password}
 ///   Will be raised when the user must change his password.
-/// - 1750: @LIT{invalid application name}
-///   Will be raised when an invalid application name is specified.
+/// - 1750: @LIT{invalid service name}
+///   Will be raised when an invalid service name is specified.
 /// - 1751: @LIT{invalid mount}
 ///   Will be raised when an invalid mount is specified.
-/// - 1752: @LIT{application download failed}
-///   Will be raised when an application download from the central repository
-///   failed.
-/// - 1753: @LIT{application upload failed}
-///   Will be raised when an application upload from the client to the ArangoDB
+/// - 1752: @LIT{service download failed}
+///   Will be raised when a service download from the central repository failed.
+/// - 1753: @LIT{service upload failed}
+///   Will be raised when a service upload from the client to the ArangoDB
 ///   server failed.
-/// - 1800: @LIT{invalid key declaration}
-///   Will be raised when an invalid key specification is passed to the server
-/// - 1801: @LIT{key already exists}
-///   Will be raised when a key is to be created that already exists
-/// - 1802: @LIT{key not found}
-///   Will be raised when the specified key is not found
-/// - 1803: @LIT{key is not unique}
-///   Will be raised when the specified key is not unique
-/// - 1804: @LIT{key value not changed}
-///   Will be raised when updating the value for a key does not work
-/// - 1805: @LIT{key value not removed}
-///   Will be raised when deleting a key/value pair does not work
-/// - 1806: @LIT{missing value}
-///   Will be raised when the value is missing
 /// - 1850: @LIT{invalid task id}
 ///   Will be raised when a task is created with an invalid id.
 /// - 1851: @LIT{duplicate task id}
@@ -583,6 +573,8 @@
 ///   The collection is already used in the orphans of the graph.
 /// - 1939: @LIT{edge collection does not exist or is not part of the graph}
 ///   the specified edge collection does not exist or is not part of the graph.
+/// - 1940: @LIT{empty graph}
+///   The requested graph has no edge collections.
 /// - 1950: @LIT{unknown session}
 ///   Will be raised when an invalid/unknown session id is passed to the server.
 /// - 1951: @LIT{session expired}
@@ -598,60 +590,21 @@
 /// - 3000: @LIT{malformed manifest file}
 ///   The manifest file is malformed. It is not in a valid JSON format.
 /// - 3001: @LIT{manifest file is invalid}
-///   The manifest file of this application is invalid.
-/// - 3002: @LIT{missing manifest attribute}
-///   The manifest file is incomplete. A required attribute is missing.
-/// - 3003: @LIT{unable to extract app root path}
-///   The root path of the application could not be found.
+///   The manifest file of this service is invalid.
 /// - 3004: @LIT{invalid foxx options}
 ///   The options used to configure the foxx are invalid.
-/// - 3005: @LIT{failed to execute script}
-///   The script provided contains errors.
-/// - 3006: @LIT{syntax error in script}
-///    contains a syntax error: 
 /// - 3007: @LIT{mountpoint is invalid}
 ///   mountpoint is invalid
-/// - 3008: @LIT{No foxx found at this location}
-///   No foxx found at this location
-/// - 3009: @LIT{App not found}
-///   No app found at this mountpoint
-/// - 3010: @LIT{App not configured}
-///   The app has to be configured before it can be used
+/// - 3009: @LIT{Service not found}
+///   No service found at this mountpoint
+/// - 3010: @LIT{Service not configured}
+///   The service has to be configured before it can be used
+/// - 3011: @LIT{mountpoint already in use}
+///   A service has already been installed at this mountpoint
 /// - 3100: @LIT{cannot locate module}
 ///   The module path could not be resolved.
-/// - 3101: @LIT{syntax error in module}
-///   The module could not be parsed because of a syntax error.
-/// - 3102: @LIT{failed to wrap module}
-///   The module wrapper could not be generated. This may indicate a problem
-///   with some of the names of the module's context variables.
 /// - 3103: @LIT{failed to invoke module}
 ///   Failed to invoke the module in its context.
-/// - 3110: @LIT{unknown file type}
-///   The module path resolves to a file of an unknown type.
-/// - 3111: @LIT{path must be absolute}
-///   The module path must be absolute.
-/// - 3112: @LIT{cannot use '..' to escape top-level-directory}
-///   The relative module path can not escape the module's top-level directory.
-/// - 3113: @LIT{drive local path is not supported}
-///   The module path contains a Windows drive letter, which is not supported.
-/// - 3120: @LIT{corrupted module origin}
-///   The module origin is invalid.
-/// - 3121: @LIT{corrupted package origin}
-///   The package origin is invalid.
-/// - 3125: @LIT{no content}
-///   The module resolves to a document which is empty or malformed.
-/// - 3130: @LIT{cannot read main file}
-///   The module's main file is not readable.
-/// - 3131: @LIT{main file is not of type 'js'}
-///   The module's main file is not a JavaScript file.
-/// - 10000: @LIT{element not inserted into structure, because it already exists}
-///   Will be returned if the element was not insert because it already exists.
-/// - 10001: @LIT{element not found in structure}
-///   Will be returned if the element was not found in the structure.
-/// - 20000: @LIT{newest version of app already installed}
-///   newest version of app already installed
-/// - 21000: @LIT{named queue already exists}
-///    "Will be returned if a queue with this name already exists."
 /// - 21001: @LIT{dispatcher stopped}
 ///   Will be returned if a shutdown is in progress.
 /// - 21002: @LIT{named queue does not exist}
@@ -903,28 +856,6 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_DEBUG                                                   (22)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 23: ERROR_AID_NOT_FOUND
-///
-/// internal error with attribute ID in shaper
-///
-/// Will be raised if an attribute ID is not found in the shaper but should
-/// have been.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_AID_NOT_FOUND                                           (23)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 24: ERROR_LEGEND_INCOMPLETE
-///
-/// internal error if a legend could not be created
-///
-/// Will be raised if the legend generator was only given access to the shape
-/// and some sids are in the data object (inhomogeneous lists).
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_LEGEND_INCOMPLETE                                       (24)
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief 25: ERROR_IP_ADDRESS_INVALID
 ///
 /// IP address is invalid
@@ -933,18 +864,6 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_IP_ADDRESS_INVALID                                      (25)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 26: ERROR_LEGEND_NOT_IN_WAL_FILE
-///
-/// internal error if a legend for a marker does not yet exist in the same WAL
-/// file
-///
-/// Will be raised internally, then fixed internally, and never come out to the
-/// user.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_LEGEND_NOT_IN_WAL_FILE                                  (26)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 27: ERROR_FILE_EXISTS
@@ -965,6 +884,38 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_LOCKED                                                  (28)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 29: ERROR_DEADLOCK
+///
+/// deadlock detected
+///
+/// Will be raised when a deadlock is detected when accessing collections.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_DEADLOCK                                                (29)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 30: ERROR_SHUTTING_DOWN
+///
+/// shutdown in progress
+///
+/// Will be raised when a call cannot succeed because a server shutdown is
+/// already in progress.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_SHUTTING_DOWN                                           (30)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 31: ERROR_ONLY_ENTERPRISE
+///
+/// only enterprise version
+///
+/// Will be raised when an enterprise-feature is requested from the community
+/// edition.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_ONLY_ENTERPRISE                                         (31)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 400: ERROR_HTTP_BAD_PARAMETER
@@ -1069,16 +1020,6 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_ARANGO_ILLEGAL_STATE                                    (1000)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 1001: ERROR_ARANGO_SHAPER_FAILED
-///
-/// could not shape document
-///
-/// Internal error that will be raised when the shaper encountered a problem.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_ARANGO_SHAPER_FAILED                                    (1001)
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief 1002: ERROR_ARANGO_DATAFILE_SEALED
 ///
 /// datafile sealed
@@ -1087,17 +1028,6 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_ARANGO_DATAFILE_SEALED                                  (1002)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1003: ERROR_ARANGO_UNKNOWN_COLLECTION_TYPE
-///
-/// unknown type
-///
-/// Internal error that will be raised when an unknown collection type is
-/// encountered.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_ARANGO_UNKNOWN_COLLECTION_TYPE                          (1003)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1004: ERROR_ARANGO_READ_ONLY
@@ -1149,6 +1079,16 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_ARANGO_RECOVERY                                         (1008)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 1009: ERROR_ARANGO_DATAFILE_STATISTICS_NOT_FOUND
+///
+/// datafile statistics not found
+///
+/// Will be raised when a required datafile statistics object was not found.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_ARANGO_DATAFILE_STATISTICS_NOT_FOUND                    (1009)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1100: ERROR_ARANGO_CORRUPTED_DATAFILE
@@ -1417,16 +1357,6 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_ARANGO_INDEX_HANDLE_BAD                                 (1214)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 1215: ERROR_ARANGO_CAP_CONSTRAINT_ALREADY_DEFINED
-///
-/// cap constraint already defined
-///
-/// Will be raised when a cap constraint was already defined.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_ARANGO_CAP_CONSTRAINT_ALREADY_DEFINED                   (1215)
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief 1216: ERROR_ARANGO_DOCUMENT_TOO_LARGE
 ///
 /// document too large
@@ -1469,14 +1399,14 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_ARANGO_VALIDATION_FAILED                                (1219)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 1220: ERROR_ARANGO_PARSER_FAILED
+/// @brief 1220: ERROR_ARANGO_ATTRIBUTE_PARSER_FAILED
 ///
-/// parser failed
+/// parsing attribute name definition failed
 ///
-/// Will be raised when the parsing of an attribute of a structure failed.
+/// Will be raised when parsing an attribute name definition failed.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_ARANGO_PARSER_FAILED                                    (1220)
+#define TRI_ERROR_ARANGO_ATTRIBUTE_PARSER_FAILED                          (1220)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1221: ERROR_ARANGO_DOCUMENT_KEY_BAD
@@ -1595,7 +1525,7 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1233: ERROR_ARANGO_INVALID_EDGE_ATTRIBUTE
 ///
-/// edge attribute missing
+/// edge attribute missing or invalid
 ///
 /// will be raised when the _from or _to values of an edge are undefined or
 /// contain an invalid value.
@@ -1656,6 +1586,17 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_ARANGO_COLLECTION_NOT_LOADED                            (1238)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 1239: ERROR_ARANGO_DOCUMENT_REV_BAD
+///
+/// illegal document revision
+///
+/// Will be raised when a document revision is corrupt or is missing where
+/// needed.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_ARANGO_DOCUMENT_REV_BAD                                 (1239)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1300: ERROR_ARANGO_DATAFILE_FULL
@@ -2129,6 +2070,47 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_CLUSTER_COULD_NOT_DETERMINE_ID                          (1476)
 
 ////////////////////////////////////////////////////////////////////////////////
+/// @brief 1477: ERROR_CLUSTER_ONLY_ON_DBSERVER
+///
+/// this operation is only valid on a DBserver in a cluster
+///
+/// Will be raised if there is an attempt to run a DBserver-only operation on a
+/// different type of node.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_CLUSTER_ONLY_ON_DBSERVER                                (1477)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 1478: ERROR_CLUSTER_BACKEND_UNAVAILABLE
+///
+/// A cluster backend which was required for the operation could not be reached
+///
+/// Will be raised if a required db server can't be reached.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_CLUSTER_BACKEND_UNAVAILABLE                             (1478)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 1479: ERROR_CLUSTER_UNKNOWN_CALLBACK_ENDPOINT
+///
+/// An endpoint couldn't be found
+///
+/// An endpoint couldn't be found
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_CLUSTER_UNKNOWN_CALLBACK_ENDPOINT                       (1479)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 1480: ERROR_CLUSTER_AGENCY_STRUCTURE_INVALID
+///
+/// Invalid agency structure
+///
+/// The structure in the agency is invalid
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_CLUSTER_AGENCY_STRUCTURE_INVALID                        (1480)
+
+////////////////////////////////////////////////////////////////////////////////
 /// @brief 1500: ERROR_QUERY_KILLED
 ///
 /// query killed
@@ -2415,30 +2397,29 @@ void TRI_InitializeErrorMessages ();
 ///
 /// multi-modify query
 ///
-///  "Will be raised when an AQL query contains more than one data-modifying
-/// operation."
+/// Will be raised when an AQL query contains more than one data-modifying
+/// operation.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_MULTI_MODIFY                                      (1573)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 1574: ERROR_QUERY_MODIFY_IN_SUBQUERY
+/// @brief 1574: ERROR_QUERY_INVALID_AGGREGATE_EXPRESSION
 ///
-/// modify operation in subquery
+/// invalid aggregate expression
 ///
-///  "Will be raised when an AQL query contains a data-modifying operation
-/// inside a subquery."
+/// Will be raised when an AQL query contains an invalid aggregate expression.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_QUERY_MODIFY_IN_SUBQUERY                                (1574)
+#define TRI_ERROR_QUERY_INVALID_AGGREGATE_EXPRESSION                      (1574)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1575: ERROR_QUERY_COMPILE_TIME_OPTIONS
 ///
 /// query options must be readable at query compile time
 ///
-///  "Will be raised when an AQL data-modification query contains options that
-/// cannot be figured out at query compile time."
+/// Will be raised when an AQL data-modification query contains options that
+/// cannot be figured out at query compile time.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_COMPILE_TIME_OPTIONS                              (1575)
@@ -2448,8 +2429,8 @@ void TRI_InitializeErrorMessages ();
 ///
 /// query options expected
 ///
-///  "Will be raised when an AQL data-modification query contains an invalid
-/// options specification."
+/// Will be raised when an AQL data-modification query contains an invalid
+/// options specification.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_EXCEPTION_OPTIONS                                 (1576)
@@ -2459,8 +2440,7 @@ void TRI_InitializeErrorMessages ();
 ///
 /// collection '%s' used as expression operand
 ///
-///  "Will be raised when a collection is used as an operand in an AQL
-/// expression."
+/// Will be raised when a collection is used as an operand in an AQL expression.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_COLLECTION_USED_IN_EXPRESSION                     (1577)
@@ -2470,8 +2450,8 @@ void TRI_InitializeErrorMessages ();
 ///
 /// disallowed dynamic call to '%s'
 ///
-///  "Will be raised when a dynamic function call is made to a function that
-/// cannot be called dynamically."
+/// Will be raised when a dynamic function call is made to a function that
+/// cannot be called dynamically.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_DISALLOWED_DYNAMIC_CALL                           (1578)
@@ -2479,10 +2459,10 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1579: ERROR_QUERY_ACCESS_AFTER_MODIFICATION
 ///
-/// access after data-modification
+/// access after data-modification by %s
 ///
-///  "Will be raised when collection data is accessed after a data-modification
-/// query part."
+/// Will be raised when collection data are accessed after a data-modification
+/// operation.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_ACCESS_AFTER_MODIFICATION                         (1579)
@@ -2532,7 +2512,7 @@ void TRI_InitializeErrorMessages ();
 ///
 /// bad execution plan JSON
 ///
-///  "Will be raised when an HTTP API for a query got an invalid JSON object."
+/// Will be raised when an HTTP API for a query got an invalid JSON object.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_BAD_JSON_PLAN                                     (1590)
@@ -2542,7 +2522,7 @@ void TRI_InitializeErrorMessages ();
 ///
 /// query ID not found
 ///
-///  "Will be raised when an Id of a query is not found by the HTTP API."
+/// Will be raised when an Id of a query is not found by the HTTP API.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_NOT_FOUND                                         (1591)
@@ -2552,8 +2532,8 @@ void TRI_InitializeErrorMessages ();
 ///
 /// query with this ID is in use
 ///
-///  "Will be raised when an Id of a query is found by the HTTP API but the
-/// query is in use."
+/// Will be raised when an Id of a query is found by the HTTP API but the query
+/// is in use.
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_QUERY_IN_USE                                            (1592)
@@ -2683,116 +2663,45 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_USER_CHANGE_PASSWORD                                    (1704)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 1750: ERROR_APPLICATION_INVALID_NAME
+/// @brief 1750: ERROR_SERVICE_INVALID_NAME
 ///
-/// invalid application name
+/// invalid service name
 ///
-/// Will be raised when an invalid application name is specified.
+/// Will be raised when an invalid service name is specified.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_APPLICATION_INVALID_NAME                                (1750)
+#define TRI_ERROR_SERVICE_INVALID_NAME                                    (1750)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 1751: ERROR_APPLICATION_INVALID_MOUNT
+/// @brief 1751: ERROR_SERVICE_INVALID_MOUNT
 ///
 /// invalid mount
 ///
 /// Will be raised when an invalid mount is specified.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_APPLICATION_INVALID_MOUNT                               (1751)
+#define TRI_ERROR_SERVICE_INVALID_MOUNT                                   (1751)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 1752: ERROR_APPLICATION_DOWNLOAD_FAILED
+/// @brief 1752: ERROR_SERVICE_DOWNLOAD_FAILED
 ///
-/// application download failed
+/// service download failed
 ///
-/// Will be raised when an application download from the central repository
+/// Will be raised when a service download from the central repository failed.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_SERVICE_DOWNLOAD_FAILED                                 (1752)
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief 1753: ERROR_SERVICE_UPLOAD_FAILED
+///
+/// service upload failed
+///
+/// Will be raised when a service upload from the client to the ArangoDB server
 /// failed.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_APPLICATION_DOWNLOAD_FAILED                             (1752)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1753: ERROR_APPLICATION_UPLOAD_FAILED
-///
-/// application upload failed
-///
-/// Will be raised when an application upload from the client to the ArangoDB
-/// server failed.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_APPLICATION_UPLOAD_FAILED                               (1753)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1800: ERROR_KEYVALUE_INVALID_KEY
-///
-/// invalid key declaration
-///
-/// Will be raised when an invalid key specification is passed to the server
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_KEYVALUE_INVALID_KEY                                    (1800)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1801: ERROR_KEYVALUE_KEY_EXISTS
-///
-/// key already exists
-///
-/// Will be raised when a key is to be created that already exists
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_KEYVALUE_KEY_EXISTS                                     (1801)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1802: ERROR_KEYVALUE_KEY_NOT_FOUND
-///
-/// key not found
-///
-/// Will be raised when the specified key is not found
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_KEYVALUE_KEY_NOT_FOUND                                  (1802)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1803: ERROR_KEYVALUE_KEY_NOT_UNIQUE
-///
-/// key is not unique
-///
-/// Will be raised when the specified key is not unique
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_KEYVALUE_KEY_NOT_UNIQUE                                 (1803)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1804: ERROR_KEYVALUE_KEY_NOT_CHANGED
-///
-/// key value not changed
-///
-/// Will be raised when updating the value for a key does not work
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_KEYVALUE_KEY_NOT_CHANGED                                (1804)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1805: ERROR_KEYVALUE_KEY_NOT_REMOVED
-///
-/// key value not removed
-///
-/// Will be raised when deleting a key/value pair does not work
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_KEYVALUE_KEY_NOT_REMOVED                                (1805)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 1806: ERROR_KEYVALUE_NO_VALUE
-///
-/// missing value
-///
-/// Will be raised when the value is missing
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_KEYVALUE_NO_VALUE                                       (1806)
+#define TRI_ERROR_SERVICE_UPLOAD_FAILED                                   (1753)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 1850: ERROR_TASK_INVALID_ID
@@ -3127,6 +3036,16 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_GRAPH_EDGE_COL_DOES_NOT_EXIST                           (1939)
 
 ////////////////////////////////////////////////////////////////////////////////
+/// @brief 1940: ERROR_GRAPH_EMPTY
+///
+/// empty graph
+///
+/// The requested graph has no edge collections.
+////////////////////////////////////////////////////////////////////////////////
+
+#define TRI_ERROR_GRAPH_EMPTY                                             (1940)
+
+////////////////////////////////////////////////////////////////////////////////
 /// @brief 1950: ERROR_SESSION_UNKNOWN
 ///
 /// unknown session
@@ -3197,34 +3116,14 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_MALFORMED_MANIFEST_FILE                                 (3000)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 3001: ERROR_INVALID_APPLICATION_MANIFEST
+/// @brief 3001: ERROR_INVALID_SERVICE_MANIFEST
 ///
 /// manifest file is invalid
 ///
-/// The manifest file of this application is invalid.
+/// The manifest file of this service is invalid.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_INVALID_APPLICATION_MANIFEST                            (3001)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3002: ERROR_MANIFEST_FILE_ATTRIBUTE_MISSING
-///
-/// missing manifest attribute
-///
-/// The manifest file is incomplete. A required attribute is missing.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MANIFEST_FILE_ATTRIBUTE_MISSING                         (3002)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3003: ERROR_CANNOT_EXTRACT_APPLICATION_ROOT
-///
-/// unable to extract app root path
-///
-/// The root path of the application could not be found.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_CANNOT_EXTRACT_APPLICATION_ROOT                         (3003)
+#define TRI_ERROR_INVALID_SERVICE_MANIFEST                                (3001)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 3004: ERROR_INVALID_FOXX_OPTIONS
@@ -3237,26 +3136,6 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_INVALID_FOXX_OPTIONS                                    (3004)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 3005: ERROR_FAILED_TO_EXECUTE_SCRIPT
-///
-/// failed to execute script
-///
-/// The script provided contains errors.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_FAILED_TO_EXECUTE_SCRIPT                                (3005)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3006: ERROR_SYNTAX_ERROR_IN_SCRIPT
-///
-/// syntax error in script
-///
-///  contains a syntax error: 
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_SYNTAX_ERROR_IN_SCRIPT                                  (3006)
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief 3007: ERROR_INVALID_MOUNTPOINT
 ///
 /// mountpoint is invalid
@@ -3267,34 +3146,34 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_INVALID_MOUNTPOINT                                      (3007)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 3008: ERROR_NO_FOXX_FOUND
+/// @brief 3009: ERROR_SERVICE_NOT_FOUND
 ///
-/// No foxx found at this location
+/// Service not found
 ///
-/// No foxx found at this location
+/// No service found at this mountpoint
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_NO_FOXX_FOUND                                           (3008)
+#define TRI_ERROR_SERVICE_NOT_FOUND                                       (3009)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 3009: ERROR_APP_NOT_FOUND
+/// @brief 3010: ERROR_SERVICE_NEEDS_CONFIGURATION
 ///
-/// App not found
+/// Service not configured
 ///
-/// No app found at this mountpoint
+/// The service has to be configured before it can be used
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_APP_NOT_FOUND                                           (3009)
+#define TRI_ERROR_SERVICE_NEEDS_CONFIGURATION                             (3010)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 3010: ERROR_APP_NEEDS_CONFIGURATION
+/// @brief 3011: ERROR_SERVICE_MOUNTPOINT_CONFLICT
 ///
-/// App not configured
+/// mountpoint already in use
 ///
-/// The app has to be configured before it can be used
+/// A service has already been installed at this mountpoint
 ////////////////////////////////////////////////////////////////////////////////
 
-#define TRI_ERROR_APP_NEEDS_CONFIGURATION                                 (3010)
+#define TRI_ERROR_SERVICE_MOUNTPOINT_CONFLICT                             (3011)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 3100: ERROR_MODULE_NOT_FOUND
@@ -3307,27 +3186,6 @@ void TRI_InitializeErrorMessages ();
 #define TRI_ERROR_MODULE_NOT_FOUND                                        (3100)
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 3101: ERROR_MODULE_SYNTAX_ERROR
-///
-/// syntax error in module
-///
-/// The module could not be parsed because of a syntax error.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_SYNTAX_ERROR                                     (3101)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3102: ERROR_MODULE_BAD_WRAPPER
-///
-/// failed to wrap module
-///
-/// The module wrapper could not be generated. This may indicate a problem with
-/// some of the names of the module's context variables.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_BAD_WRAPPER                                      (3102)
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief 3103: ERROR_MODULE_FAILURE
 ///
 /// failed to invoke module
@@ -3336,136 +3194,6 @@ void TRI_InitializeErrorMessages ();
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_ERROR_MODULE_FAILURE                                          (3103)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3110: ERROR_MODULE_UNKNOWN_FILE_TYPE
-///
-/// unknown file type
-///
-/// The module path resolves to a file of an unknown type.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_UNKNOWN_FILE_TYPE                                (3110)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3111: ERROR_MODULE_PATH_MUST_BE_ABSOLUTE
-///
-/// path must be absolute
-///
-/// The module path must be absolute.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_PATH_MUST_BE_ABSOLUTE                            (3111)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3112: ERROR_MODULE_CAN_NOT_ESCAPE
-///
-/// cannot use '..' to escape top-level-directory
-///
-/// The relative module path can not escape the module's top-level directory.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_CAN_NOT_ESCAPE                                   (3112)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3113: ERROR_MODULE_DRIVE_LETTER
-///
-/// drive local path is not supported
-///
-/// The module path contains a Windows drive letter, which is not supported.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_DRIVE_LETTER                                     (3113)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3120: ERROR_MODULE_BAD_MODULE_ORIGIN
-///
-/// corrupted module origin
-///
-/// The module origin is invalid.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_BAD_MODULE_ORIGIN                                (3120)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3121: ERROR_MODULE_BAD_PACKAGE_ORIGIN
-///
-/// corrupted package origin
-///
-/// The package origin is invalid.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_BAD_PACKAGE_ORIGIN                               (3121)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3125: ERROR_MODULE_DOCUMENT_IS_EMPTY
-///
-/// no content
-///
-/// The module resolves to a document which is empty or malformed.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_DOCUMENT_IS_EMPTY                                (3125)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3130: ERROR_MODULE_MAIN_NOT_READABLE
-///
-/// cannot read main file
-///
-/// The module's main file is not readable.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_MAIN_NOT_READABLE                                (3130)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 3131: ERROR_MODULE_MAIN_NOT_JS
-///
-/// main file is not of type 'js'
-///
-/// The module's main file is not a JavaScript file.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_MODULE_MAIN_NOT_JS                                      (3131)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 10000: RESULT_ELEMENT_EXISTS
-///
-/// element not inserted into structure, because it already exists
-///
-/// Will be returned if the element was not insert because it already exists.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_RESULT_ELEMENT_EXISTS                                         (10000)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 10001: RESULT_ELEMENT_NOT_FOUND
-///
-/// element not found in structure
-///
-/// Will be returned if the element was not found in the structure.
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_RESULT_ELEMENT_NOT_FOUND                                      (10001)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 20000: ERROR_APP_ALREADY_EXISTS
-///
-/// newest version of app already installed
-///
-/// newest version of app already installed
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_APP_ALREADY_EXISTS                                      (20000)
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief 21000: ERROR_QUEUE_ALREADY_EXISTS
-///
-/// named queue already exists
-///
-///  "Will be returned if a queue with this name already exists."
-////////////////////////////////////////////////////////////////////////////////
-
-#define TRI_ERROR_QUEUE_ALREADY_EXISTS                                    (21000)
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief 21001: ERROR_DISPATCHER_IS_STOPPING

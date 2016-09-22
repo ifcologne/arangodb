@@ -1,7 +1,7 @@
 /*global document, $, _ */
 /*global EventDispatcherControls, NodeShaperControls, EdgeShaperControls */
 /*global LayouterControls, GharialAdapterControls*/
-/*global GraphViewer, d3, window*/
+/*global GraphViewer, d3, window, arangoHelper, Storage, localStorage*/
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief Graph functionality
 ///
@@ -43,8 +43,8 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
   }
 
   var graphViewer,
-    width = (optWidth + 20 || container.offsetWidth - 81 + 20),
-    height = optHeight || container.offsetHeight,
+    width = (optWidth + 20 || container.getBoundingClientRect().width - 81 + 20),
+    height = optHeight || container.getBoundingClientRect().height,
     menubar = document.createElement("ul"),
     background = document.createElement("div"),
     colourList,
@@ -88,7 +88,7 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
         },
 
         alertError = function(msg) {
-          window.alert(msg);
+          arangoHelper.arangoError("Graph", msg);
         },
 
         resultCB = function(res) {
@@ -197,7 +197,7 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
         },
 
         alertError = function(msg) {
-          window.alert(msg);
+          arangoHelper.arangoError("Graph", msg);
         },
 
         resultCB2 = function(res) {
@@ -494,8 +494,10 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
       //create select option box 
       var optionBox = '<li class="enabled" style="float:right">'+
       '<select id="graphSize" class="documents-size">'+
+      '<optgroup label="Starting points:">'+
+      '<option value="5" selected="">5 vertices</option>'+
       '<option value="10">10 vertices</option>'+
-      '<option value="20" selected="">20 vertices</option>'+
+      '<option value="20">20 vertices</option>'+
       '<option value="50">50 vertices</option>'+
       '<option value="100">100 vertices</option>'+
       '<option value="500">500 vertices</option>'+
@@ -504,6 +506,7 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
       '<option value="5000">5000 vertices</option>'+
       '<option value="all">All vertices</option>'+
       '</select>'+
+      '</optgroup>'+
       '</li>';
       $('.headerBar .headerButtonList').prepend(optionBox);
     },
@@ -575,8 +578,8 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
 
       buttons.id = "modifiers";
 
-      title.appendChild(document.createTextNode("Graph Viewer"));
-      title.className = "arangoHeader";
+      //title.appendChild(document.createTextNode("Graph Viewer"));
+      //title.className = "arangoHeader";
 
       /*
       nodeShaperDropDown.id = "nodeshapermenu";
@@ -590,7 +593,7 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
       menubar.appendChild(configureLists.filter);
       menubar.appendChild(configureLists.node);
       transparentHeader.appendChild(buttons);
-      transparentHeader.appendChild(title);
+      //transparentHeader.appendChild(title);
 
       adapterUI.addControlChangeGraph(function() {
         updateAttributeExamples();
@@ -629,8 +632,58 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
   viewerConfig = viewerConfig || {};
   viewerConfig.zoom = true;
 
+  $('#subNavigationBar .breadcrumb').html(
+    'Graph: ' + adapterConfig.graphName
+  );
 
   svg = createSVG();
+
+  if (Storage !== "undefined") {
+    this.graphSettings = {};
+
+    this.loadLocalStorage = function() {
+      //graph name not enough, need to set db name also
+      var dbName = adapterConfig.baseUrl.split('/')[2],
+      combinedGraphName = adapterConfig.graphName + dbName;
+      
+      if (localStorage.getItem('graphSettings') === null || localStorage.getItem('graphSettings')  === 'null') {
+        var obj = {};
+        obj[combinedGraphName] = {
+          viewer: viewerConfig,
+          adapter: adapterConfig
+        };
+        localStorage.setItem('graphSettings', JSON.stringify(obj));
+      }
+      else {
+        try {
+          var settings = JSON.parse(localStorage.getItem('graphSettings'));
+          this.graphSettings = settings;
+
+          if (settings[combinedGraphName].viewer !== undefined) {
+            viewerConfig = settings[combinedGraphName].viewer;  
+          }
+          if (settings[combinedGraphName].adapter !== undefined) {
+            adapterConfig = settings[combinedGraphName].adapter;
+          }
+        }
+        catch (e) {
+          console.log("Could not load graph settings, resetting graph settings.");
+          this.graphSettings[combinedGraphName] = {
+            viewer: viewerConfig,
+            adapter: adapterConfig
+          };
+          localStorage.setItem('graphSettings', JSON.stringify(this.graphSettings));
+        }
+      }
+
+    };
+    this.loadLocalStorage();
+    
+    this.writeLocalStorage = function() {
+
+    };
+  }
+
   graphViewer = new GraphViewer(svg, width, height, adapterConfig, viewerConfig);
 
   createToolbox();
@@ -644,7 +697,7 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
     var size = $('#graphSize').find(":selected").val();
       graphViewer.loadGraphWithRandomStart(function(node) {
         if (node && node.errorCode) {
-          window.alert("Sorry your graph seems to be empty");
+          arangoHelper.arangoError("Graph", "Sorry your graph seems to be empty");
         }
       }, size);
   });
@@ -655,7 +708,7 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
     } else {
       graphViewer.loadGraphWithRandomStart(function(node) {
         if (node && node.errorCode) {
-          window.alert("Sorry your graph seems to be empty");
+          arangoHelper.arangoError("Graph", "Sorry your graph seems to be empty");
         }
       });
     }
@@ -667,4 +720,9 @@ function GraphViewerUI(container, adapterConfig, optWidth, optHeight, viewerConf
     svg.attr("width", reducedW)
       .style("width", reducedW + "px");
   };
+
+  //add events for writing/reading local storage (input fields)
+
+
+  
 }

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief binary buffer
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,9 +19,9 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2013, triAGENS GmbH, Cologne, Germany
-///
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
 /// Parts of the code are based on:
 ///
 /// Copyright Joyent, Inc. and other Node contributors.
@@ -55,24 +51,22 @@
 
 #include "Basics/Common.h"
 
+#include "V8/v8-globals.h"
 #include "V8/v8-wrapper.h"
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief buffer encoding
 ////////////////////////////////////////////////////////////////////////////////
 
 typedef enum TRI_V8_encoding_e {
-  ASCII, UTF8, BASE64, UCS2, BINARY, HEX, BUFFER
-}
-TRI_V8_encoding_t;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   class V8Wrapper
-// -----------------------------------------------------------------------------
+  ASCII,
+  UTF8,
+  BASE64,
+  UCS2,
+  BINARY,
+  HEX,
+  BUFFER
+} TRI_V8_encoding_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief binary buffer
@@ -86,248 +80,216 @@ TRI_V8_encoding_t;
 #define TRI_V8_BUFFER_CID (0xF000)
 
 class V8Buffer : public V8Wrapper<V8Buffer, TRI_V8_BUFFER_CID> {
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief maximal length
+  ///
+  /// mirrors deps/v8/src/objects.h
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                           static public variables
-// -----------------------------------------------------------------------------
+  static const unsigned int kMaxLength = 0x3fffffff;
 
-  public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief checks if the object is an instance
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief maximal length
-///
-/// mirrors deps/v8/src/objects.h
-////////////////////////////////////////////////////////////////////////////////
+  static bool hasInstance(v8::Isolate* isolate, v8::Handle<v8::Value> val);
 
-    static const unsigned int kMaxLength = 0x3fffffff;
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief the buffer data for a handle
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks if the object is an instance
-////////////////////////////////////////////////////////////////////////////////
+  static inline char* data(v8::Handle<v8::Value> val) {
+    TRI_ASSERT(val->IsObject());
+    auto o = val->ToObject();
+    int32_t offsetValue = 0;
 
-    static bool hasInstance (v8::Isolate *isolate, v8::Handle<v8::Value> val);
+    if (o->InternalFieldCount() == 0) {
+      // seems object has become a FastBuffer already
+      ISOLATE;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                             static public methods
-// -----------------------------------------------------------------------------
+      if (o->Has(TRI_V8_ASCII_STRING("offset"))) {
+        v8::Handle<v8::Value> offset = o->Get(TRI_V8_ASCII_STRING("offset"));
+        if (offset->IsNumber()) {
+          offsetValue = offset->Int32Value();
+        }
+      }
 
-  public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the buffer data for a handle
-////////////////////////////////////////////////////////////////////////////////
-
-    static inline char* data (v8::Handle<v8::Value> val) {
-      TRI_ASSERT(val->IsObject());
-      auto o = val->ToObject();
-
-      if (o->InternalFieldCount() == 0) {
-        // seems object has become a FastBuffer already
-        if (! o->HasIndexedPropertiesInExternalArrayData()) {
-          // probably not...
+      if (o->Has(TRI_V8_ASCII_STRING("parent"))) {
+        v8::Handle<v8::Value> parent = o->Get(TRI_V8_ASCII_STRING("parent"));
+        if (!parent->IsObject()) {
           return nullptr;
         }
-
-        void* data = o->GetIndexedPropertiesExternalArrayData();
-        return static_cast<char*>(data);
+        o = parent->ToObject();
+        // fallthrough intentional
       }
-
-      V8Buffer* buffer = unwrap(o);
-      if (buffer == nullptr) {
-        return nullptr; 
-      }
-
-      return buffer->_data;
     }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the buffer data
-////////////////////////////////////////////////////////////////////////////////
-
-    static inline char* data (v8::Isolate* isolate, V8Buffer* b) {
-      auto val = v8::Local<v8::Object>::New(isolate, b->_handle);
-      return data(val);
+    V8Buffer* buffer = unwrap(o);
+    if (buffer == nullptr || offsetValue < 0) {
+      return nullptr;
     }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief length of the data for a handle
-////////////////////////////////////////////////////////////////////////////////
+    size_t length = buffer->_length;
+    if (static_cast<size_t>(offsetValue) >= length) {
+      return nullptr; //OOB
+    }
 
-    static inline size_t length (v8::Handle<v8::Value> val) {
-      TRI_ASSERT(val->IsObject());
-      auto o = val->ToObject();
+    return buffer->_data + offsetValue;
+  }
 
-      if (o->InternalFieldCount() == 0) {
-        // seems object has become a FastBuffer already
-        if (! o->HasIndexedPropertiesInExternalArrayData()) {
-          // probably not...
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief the buffer data
+  //////////////////////////////////////////////////////////////////////////////
+
+  static inline char* data(v8::Isolate* isolate, V8Buffer* b) {
+    auto val = v8::Local<v8::Object>::New(isolate, b->_handle);
+    return data(val);
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief length of the data for a handle
+  //////////////////////////////////////////////////////////////////////////////
+
+  static inline size_t length(v8::Handle<v8::Value> val) {
+    TRI_ASSERT(val->IsObject());
+    auto o = val->ToObject();
+    int32_t lengthValue = -1;
+
+    if (o->InternalFieldCount() == 0) {
+      // seems object has become a FastBuffer already
+      ISOLATE;
+
+      if (o->Has(TRI_V8_ASCII_STRING("length"))) {
+        v8::Handle<v8::Value> length = o->Get(TRI_V8_ASCII_STRING("length"));
+        if (length->IsNumber()) {
+          lengthValue = length->Int32Value();
+        }
+      }
+
+      if (o->Has(TRI_V8_ASCII_STRING("parent"))) {
+        v8::Handle<v8::Value> parent = o->Get(TRI_V8_ASCII_STRING("parent"));
+        if (!parent->IsObject()) {
           return 0;
         }
-
-        int len = o->GetIndexedPropertiesExternalArrayDataLength();
-        return static_cast<size_t>(len);
+        o = parent->ToObject();
+        // fallthrough intentional
       }
-
-      V8Buffer* buffer = unwrap(o);
-      if (buffer == nullptr) {
-        return 0;  
-      }
-
-      return buffer->_length;
     }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief length of the data
-////////////////////////////////////////////////////////////////////////////////
-
-    static inline size_t length (v8::Isolate* isolate, V8Buffer* b) {
-      auto val = v8::Local<v8::Object>::New(isolate, b->_handle);
-      return length(val);
+    V8Buffer* buffer = unwrap(o);
+    if (buffer == nullptr) {
+      return 0;
     }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
+    if (lengthValue >= 0) {
+      return static_cast<size_t>(lengthValue);
+    }
 
-  public:
+    return buffer->_length;
+  }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief free callback type
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief length of the data
+  //////////////////////////////////////////////////////////////////////////////
 
-    typedef void (*free_callback_fptr)(char* data, void* hint);
+  static inline size_t length(v8::Isolate* isolate, V8Buffer* b) {
+    auto val = v8::Local<v8::Object>::New(isolate, b->_handle);
+    return length(val);
+  }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief free callback type
+  //////////////////////////////////////////////////////////////////////////////
 
-  public:
+  typedef void (*free_callback_fptr)(char* data, void* hint);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief instance constructor
-////////////////////////////////////////////////////////////////////////////////
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief instance constructor
+  //////////////////////////////////////////////////////////////////////////////
 
-    static void New (v8::FunctionCallbackInfo<v8::Value> const& args);
+  static void New(v8::FunctionCallbackInfo<v8::Value> const& args);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief C++ API for constructing fast buffer
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief C++ API for constructing fast buffer
+  //////////////////////////////////////////////////////////////////////////////
 
-    static v8::Handle<v8::Object> New (v8::Isolate* isolate,
-                                       v8::Handle<v8::String> string);
+  static v8::Handle<v8::Object> New(v8::Isolate* isolate,
+                                    v8::Handle<v8::String> string);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+  static V8Buffer* New(v8::Isolate* isolate, size_t length);
 
-    static V8Buffer* New (v8::Isolate* isolate,
-                          size_t length);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief constructor, data is copied
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor, data is copied
-////////////////////////////////////////////////////////////////////////////////
+  static V8Buffer* New(v8::Isolate* isolate, char const* data, size_t length);
 
-    static V8Buffer* New (v8::Isolate* isolate,
-                          const char *data, size_t length);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief constructor with free callback
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor with free callback
-////////////////////////////////////////////////////////////////////////////////
+  static V8Buffer* New(v8::Isolate* isolate, char* data, size_t length,
+                       free_callback_fptr callback, void* hint);
 
-    static V8Buffer* New (v8::Isolate* isolate,
-                          char *data,
-                          size_t length,
-                          free_callback_fptr callback,
-                          void *hint);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief desctructor
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief desctructor
-////////////////////////////////////////////////////////////////////////////////
+  ~V8Buffer();
 
-    ~V8Buffer ();
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief private constructor
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief private constructor
-////////////////////////////////////////////////////////////////////////////////
+ private:
+  V8Buffer(v8::Isolate* isolate, v8::Handle<v8::Object> wrapper, size_t length);
 
-  private:
-    V8Buffer (v8::Isolate* isolate,
-              v8::Handle<v8::Object> wrapper,
-              size_t length);
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief replaces the buffer
+  ///
+  /// If replace doesn't have a callback, data must be copied. const_cast in
+  /// Buffer::New requires this
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
+  void replace(v8::Isolate* isolate, char* data, size_t length,
+               free_callback_fptr callback, void* hint);
 
-  private:
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief length
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief replaces the buffer
-///
-/// If replace doesn't have a callback, data must be copied. const_cast in
-/// Buffer::New requires this
-////////////////////////////////////////////////////////////////////////////////
+  size_t _length;
 
-    void replace (v8::Isolate* isolate,
-                  char *data,
-                  size_t length,
-                  free_callback_fptr callback,
-                  void *hint);
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief buffer data
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public variables
-// -----------------------------------------------------------------------------
+  char* _data;
 
-  public:
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief free callback
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief length
-////////////////////////////////////////////////////////////////////////////////
+  free_callback_fptr _callback;
 
-    size_t _length;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief callback hint
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief buffer data
-////////////////////////////////////////////////////////////////////////////////
-
-    char* _data;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-  private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief free callback
-////////////////////////////////////////////////////////////////////////////////
-
-    free_callback_fptr _callback;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief callback hint
-////////////////////////////////////////////////////////////////////////////////
-
-    void* _callbackHint;
+  void* _callbackHint;
 };
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief initializes the buffer module
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_InitV8Buffer (v8::Isolate* isolate, v8::Handle<v8::Context> context);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+void TRI_InitV8Buffer(v8::Isolate* isolate, v8::Handle<v8::Context> context);

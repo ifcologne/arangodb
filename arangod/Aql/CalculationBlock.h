@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief AQL CalculationBlock
-///
-/// @file 
-///
 /// DISCLAIMER
 ///
-/// Copyright 2010-2014 triagens GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,117 +16,67 @@
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
 ///
-/// Copyright holder is triAGENS GmbH, Cologne, Germany
+/// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_CALCULATION_BLOCK_H
-#define ARANGODB_AQL_CALCULATION_BLOCK_H 1
+#ifndef ARANGOD_AQL_CALCULATION_BLOCK_H
+#define ARANGOD_AQL_CALCULATION_BLOCK_H 1
 
 #include "Aql/ExecutionBlock.h"
 #include "Aql/ExecutionNode.h"
 #include "Utils/AqlTransaction.h"
 
-namespace triagens {
-  namespace aql {
+namespace arangodb {
+namespace aql {
 
-    class AqlItemBlock;
+class AqlItemBlock;
 
-    class ExecutionEngine;
+class ExecutionEngine;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  CalculationBlock
-// -----------------------------------------------------------------------------
+class CalculationBlock : public ExecutionBlock {
+ public:
+  CalculationBlock(ExecutionEngine*, CalculationNode const*);
 
-    class CalculationBlock : public ExecutionBlock {
+  ~CalculationBlock();
 
-      public:
+ private:
+  /// @brief fill the target register in the item block with a reference to
+  /// another variable
+  void fillBlockWithReference(AqlItemBlock*);
 
-        CalculationBlock (ExecutionEngine*,
-                          CalculationNode const*);
+  /// @brief shared code for executing a simple or a V8 expression
+  void executeExpression(AqlItemBlock*);
 
-        ~CalculationBlock ();
+  /// @brief doEvaluation, private helper to do the work
+  void doEvaluation(AqlItemBlock*);
 
-        int initialize () override;
+ public:
+  /// @brief getSome
+  AqlItemBlock* getSome(size_t atLeast, size_t atMost) override final;
 
-      private:
+ private:
+  /// @brief we hold a pointer to the expression in the plan
+  Expression* _expression;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief fill the target register in the item block with a reference to 
-/// another variable
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief info about input variables
+  std::vector<Variable const*> _inVars;
 
-        void fillBlockWithReference (AqlItemBlock*);
+  /// @brief info about input registers
+  std::vector<RegisterId> _inRegs;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief shared code for executing a simple or a V8 expression
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief output register
+  RegisterId _outReg;
 
-        void executeExpression (AqlItemBlock*);
+  /// @brief condition variable register
+  RegisterId _conditionReg;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief doEvaluation, private helper to do the work
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not the expression is a simple variable reference
+  bool _isReference;
+};
 
-        void doEvaluation (AqlItemBlock*);
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief getSome
-////////////////////////////////////////////////////////////////////////////////
-
-        AqlItemBlock* getSome (size_t atLeast,
-                               size_t atMost) override final;
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief we hold a pointer to the expression in the plan
-////////////////////////////////////////////////////////////////////////////////
-
-        Expression* _expression;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief info about input variables
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<Variable const*> _inVars;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief info about input registers
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<RegisterId> _inRegs;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief output register
-////////////////////////////////////////////////////////////////////////////////
-
-        RegisterId _outReg;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief condition variable register
-////////////////////////////////////////////////////////////////////////////////
-
-        RegisterId _conditionReg;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the expression is a simple variable reference
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _isReference;
-
-    };
-
-  }  // namespace triagens::aql
-}  // namespace triagens
+}  // namespace arangodb::aql
+}  // namespace arangodb
 
 #endif
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "^\\(/// @brief\\|/// {@inheritDoc}\\|/// @addtogroup\\|// --SECTION--\\|/// @\\}\\)"
-// End:

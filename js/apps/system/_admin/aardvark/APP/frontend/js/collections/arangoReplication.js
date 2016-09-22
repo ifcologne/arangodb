@@ -1,47 +1,41 @@
-/*jshint browser: true */
-/*jshint strict: false, unused: false */
-/*global window, Backbone, $, window */
+/* jshint browser: true */
+/* jshint strict: false, unused: false */
+/* global window, Backbone, $, window, arangoHelper */
 
 window.ArangoReplication = Backbone.Collection.extend({
   model: window.Replication,
 
-  url: "../api/user",
+  url: '../api/user',
 
-  getLogState: function () {
-    var returnVal;
+  getLogState: function (callback) {
     $.ajax({
-      type: "GET",
+      type: 'GET',
       cache: false,
-      url: "/_api/replication/logger-state",
-      contentType: "application/json",
+      url: arangoHelper.databaseUrl('/_api/replication/logger-state'),
+      contentType: 'application/json',
       processData: false,
-      async: false,
-      success: function(data) {
-        returnVal = data;
+      success: function (data) {
+        callback(false, data);
       },
-      error: function(data) {
-        returnVal = data;
+      error: function (data) {
+        callback(true, data);
       }
     });
-    return returnVal;
   },
-  getApplyState: function () {
-    var returnVal;
+  getApplyState: function (callback) {
     $.ajax({
-      type: "GET",
+      type: 'GET',
       cache: false,
-      url: "/_api/replication/applier-state",
-      contentType: "application/json",
+      url: arangoHelper.databaseUrl('/_api/replication/applier-state'),
+      contentType: 'application/json',
       processData: false,
-      async: false,
-      success: function(data) {
-        returnVal = data;
+      success: function (data) {
+        callback(false, data);
       },
-      error: function(data) {
-        returnVal = data;
+      error: function (data) {
+        callback(true, data);
       }
     });
-    return returnVal;
   }
 
 });

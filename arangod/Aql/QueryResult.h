@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, query results
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,105 +19,53 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_QUERY_RESULT_H
-#define ARANGODB_AQL_QUERY_RESULT_H 1
+#ifndef ARANGOD_AQL_QUERY_RESULT_H
+#define ARANGOD_AQL_QUERY_RESULT_H 1
 
 #include "Basics/Common.h"
-#include "Basics/json.h"
 
-namespace triagens {
-  namespace aql {
+namespace arangodb {
+namespace velocypack {
+class Builder;
+}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                struct QueryResult
-// -----------------------------------------------------------------------------
+class TransactionContext;
 
-    struct QueryResult {
-      QueryResult& operator= (QueryResult const& other) = delete;
-      
-      QueryResult (QueryResult&& other) {
-        code              = other.code;
-        cached            = other.cached;
-        details           = other.details;
-        warnings          = other.warnings;
-        json              = other.json;
-        stats             = other.stats;
-        profile           = other.profile;
-        zone              = other.zone;
-        clusterplan       = other.clusterplan;
-        bindParameters    = other.bindParameters;
-        collectionNames   = other.collectionNames;
+namespace aql {
 
-        other.warnings    = nullptr;
-        other.json        = nullptr;
-        other.stats       = nullptr;
-        other.profile     = nullptr;
-        other.clusterplan = nullptr;
-      }
+struct QueryResult {
+  QueryResult& operator=(QueryResult const& other) = delete;
+  QueryResult(QueryResult&& other) = default;
 
-      QueryResult (int code,
-                   std::string const& details) 
-        : code(code),
-          cached(false),
-          details(details),
-          zone(TRI_UNKNOWN_MEM_ZONE),
-          warnings(nullptr),
-          json(nullptr),
-          stats(nullptr),
-          profile(nullptr),
-          clusterplan(nullptr) {
-      }
-      
-      explicit QueryResult (int code)
-        : QueryResult(code, "") {
-      }
+  QueryResult(int code, std::string const& details)
+      : code(code),
+        cached(false),
+        details(details),
+        warnings(nullptr),
+        result(nullptr),
+        profile(nullptr),
+        context(nullptr) {}
 
-      QueryResult ()
-        : QueryResult(TRI_ERROR_NO_ERROR) {
-      }
+  explicit QueryResult(int code) : QueryResult(code, "") {}
 
-      virtual ~QueryResult () {
-        if (warnings != nullptr) {
-          TRI_FreeJson(zone, warnings);
-        }
-        if (json != nullptr) {
-          TRI_FreeJson(zone, json);
-        }
-        if (stats != nullptr) {
-          TRI_FreeJson(zone, stats);
-        }
-        if (profile != nullptr) {
-          TRI_FreeJson(zone, profile);
-        }
-      }
+  QueryResult() : QueryResult(TRI_ERROR_NO_ERROR) {}
 
-      int                             code;
-      bool                            cached;
-      std::string                     details;
-      std::unordered_set<std::string> bindParameters;
-      std::vector<std::string>        collectionNames;
-      TRI_memory_zone_t*              zone;
-      TRI_json_t*                     warnings;
-      TRI_json_t*                     json;
-      TRI_json_t*                     stats;
-      TRI_json_t*                     profile;
-      TRI_json_t*                     clusterplan;
-    };
+  virtual ~QueryResult() {}
 
-  }
+  int code;
+  bool cached;
+  std::string details;
+  std::unordered_set<std::string> bindParameters;
+  std::vector<std::string> collectionNames;
+  std::shared_ptr<arangodb::velocypack::Builder> warnings;
+  std::shared_ptr<arangodb::velocypack::Builder> result;
+  std::shared_ptr<arangodb::velocypack::Builder> stats;
+  std::shared_ptr<arangodb::velocypack::Builder> profile;
+  std::shared_ptr<arangodb::TransactionContext> context;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

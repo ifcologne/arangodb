@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief mutexes, locks and condition variables in posix
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,42 +19,20 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_BASICS_C_LOCKS__POSIX_H
-#define ARANGODB_BASICS_C_LOCKS__POSIX_H 1
+#ifndef ARANGODB_BASICS_LOCKS__POSIX_H
+#define ARANGODB_BASICS_LOCKS__POSIX_H 1
 
 #include "Basics/Common.h"
 
 #ifdef TRI_HAVE_POSIX_THREADS
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief mutex type
 ////////////////////////////////////////////////////////////////////////////////
 
 #define TRI_mutex_t pthread_mutex_t
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief spin-lock type
-////////////////////////////////////////////////////////////////////////////////
-
-#ifdef TRI_FAKE_SPIN_LOCKS
-
-#define TRI_spin_t pthread_mutex_t
-
-#else
-
-#ifdef TRI_HAVE_POSIX_SPIN
-#define TRI_spin_t pthread_spinlock_t
-#endif
-
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief read-write-lock type
@@ -70,21 +44,11 @@
 /// @brief condition variable
 ////////////////////////////////////////////////////////////////////////////////
 
-typedef struct TRI_condition_s {
+struct TRI_condition_t {
   pthread_cond_t _cond;
-  pthread_mutex_t* _mutex;
-}
-TRI_condition_t;
+  pthread_mutex_t _mutex;
+};
 
 #endif
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

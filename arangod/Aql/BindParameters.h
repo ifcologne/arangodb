@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, bind parameters
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,126 +19,65 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_QUERY_BIND_PARAMETERS_H
-#define ARANGODB_AQL_QUERY_BIND_PARAMETERS_H 1
+#ifndef ARANGOD_AQL_BIND_PARAMETERS_H
+#define ARANGOD_AQL_BIND_PARAMETERS_H 1
 
 #include "Basics/Common.h"
-#include "Basics/json.h"
 
-namespace triagens {
-  namespace aql {
+#include <velocypack/Builder.h>
+#include <velocypack/Slice.h>
+#include <velocypack/velocypack-aliases.h>
 
-    typedef std::unordered_map<std::string, std::pair<TRI_json_t const*, bool>> BindParametersType;
+namespace arangodb {
+namespace aql {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class BindParameters
-// -----------------------------------------------------------------------------
+typedef std::unordered_map<std::string, std::pair<arangodb::velocypack::Slice, bool>> BindParametersType;
 
-    class BindParameters {
+class BindParameters {
+ public:
+  BindParameters(BindParameters const&) = delete;
+  BindParameters& operator=(BindParameters const&) = delete;
+  BindParameters() = delete;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
+  /// @brief create the parameters
+  explicit BindParameters(std::shared_ptr<arangodb::velocypack::Builder> builder) 
+    : _builder(builder), _parameters(), _processed(false) {}
 
-      public:
+  /// @brief destroy the parameters
+  ~BindParameters() = default;
 
-        BindParameters (BindParameters const&) = delete;
-        BindParameters& operator= (BindParameters const&) = delete;
-        BindParameters () = delete;
-      
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the parameters
-////////////////////////////////////////////////////////////////////////////////
-
-        explicit BindParameters (TRI_json_t*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the parameters
-////////////////////////////////////////////////////////////////////////////////
-
-        ~BindParameters ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return all parameters
-////////////////////////////////////////////////////////////////////////////////
-
-        BindParametersType const& operator() () {
-          process();
-          return _parameters;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create a hash value for the bind parameters
-////////////////////////////////////////////////////////////////////////////////
-
-        uint64_t hash () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief strip collection name prefixes from the parameters
-/// the values must be a JSON array. the array is modified in place
-////////////////////////////////////////////////////////////////////////////////
-
-        static void StripCollectionNames (TRI_json_t*, 
-                                          char const*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief process the parameters
-////////////////////////////////////////////////////////////////////////////////
-
-        void process ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the parameter json
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t*  _json;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief pointer to collection parameters
-////////////////////////////////////////////////////////////////////////////////
-
-        BindParametersType _parameters;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief internal state
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _processed;
-
-    };
-
+ public:
+  /// @brief return all parameters
+  BindParametersType& get() {
+    process();
+    return _parameters;
   }
+
+  /// @brief create a hash value for the bind parameters
+  uint64_t hash() const;
+
+  /// @brief strip collection name prefixes from the parameters
+  /// the values must be a VelocyPack array
+  static arangodb::velocypack::Builder StripCollectionNames(
+      arangodb::velocypack::Slice const&, char const*);
+
+ private:
+  /// @brief process the parameters
+  void process();
+
+ private:
+  /// @brief the parameter values
+  std::shared_ptr<arangodb::velocypack::Builder> _builder;
+
+  /// @brief pointer to collection parameters
+  BindParametersType _parameters;
+
+  /// @brief internal state
+  bool _processed;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

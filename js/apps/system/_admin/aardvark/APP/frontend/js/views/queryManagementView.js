@@ -1,64 +1,65 @@
-/*jshint browser: true */
-/*jshint unused: false */
-/*global Backbone, EJS, $, setTimeout, localStorage, ace, Storage, window, _ */
-/*global _, arangoHelper, templateEngine, jQuery, Joi*/
+/* jshint browser: true */
+/* jshint unused: false */
+/* global Backbone, $, setTimeout, window, arangoHelper, templateEngine */
 
 (function () {
-  "use strict";
-  window.queryManagementView = Backbone.View.extend({
+  'use strict';
+  window.QueryManagementView = Backbone.View.extend({
     el: '#content',
 
     id: '#queryManagementContent',
 
-    templateActive: templateEngine.createTemplate("queryManagementViewActive.ejs"),
-    templateSlow: templateEngine.createTemplate("queryManagementViewSlow.ejs"),
-    table: templateEngine.createTemplate("arangoTable.ejs"),
-    tabbar: templateEngine.createTemplate("arangoTabbar.ejs"),
+    templateActive: templateEngine.createTemplate('queryManagementViewActive.ejs'),
+    templateSlow: templateEngine.createTemplate('queryManagementViewSlow.ejs'),
+    table: templateEngine.createTemplate('arangoTable.ejs'),
+    active: true,
+    shouldRender: true,
+    timer: 0,
+    refreshRate: 2000,
 
     initialize: function () {
+      var self = this;
       this.activeCollection = new window.QueryManagementActive();
       this.slowCollection = new window.QueryManagementSlow();
       this.convertModelToJSON(true);
+
+      window.setInterval(function () {
+        if (window.location.hash === '#queries' && window.VISIBLE && self.shouldRender &&
+          arangoHelper.getCurrentSub().route === 'queryManagement') {
+          if (self.active) {
+            if ($('#arangoQueryManagementTable').is(':visible')) {
+              self.convertModelToJSON(true);
+            }
+          } else {
+            if ($('#arangoQueryManagementTable').is(':visible')) {
+              self.convertModelToJSON(false);
+            }
+          }
+        }
+      }, self.refreshRate);
     },
 
     events: {
-      "click #arangoQueryManagementTabbar button" : "switchTab",
-      "click #deleteSlowQueryHistory" : "deleteSlowQueryHistoryModal",
-      "click #arangoQueryManagementTable .fa-minus-circle" : "deleteRunningQueryModal"
-    },
-
-    tabbarElements: {
-      id: "arangoQueryManagementTabbar",
-      titles: [
-        ["Active", "activequeries"],
-        ["Slow", "slowqueries"]
-      ]
+      'click #deleteSlowQueryHistory': 'deleteSlowQueryHistoryModal',
+      'click #arangoQueryManagementTable .fa-minus-circle': 'deleteRunningQueryModal'
     },
 
     tableDescription: {
-      id: "arangoQueryManagementTable",
-      titles: ["ID", "Query String", "Runtime", "Started", ""],
+      id: 'arangoQueryManagementTable',
+      titles: ['ID', 'Query String', 'Runtime', 'Started', ''],
       rows: [],
       unescaped: [false, false, false, false, true]
     },
 
-    switchTab: function(e) {
-      if (e.currentTarget.id === 'activequeries') {
-        this.convertModelToJSON(true);
-      }
-      else if (e.currentTarget.id === 'slowqueries') {
-        this.convertModelToJSON(false);
-      }
-    },
-
-    deleteRunningQueryModal: function(e) {
+    deleteRunningQueryModal: function (e) {
       this.killQueryId = $(e.currentTarget).attr('data-id');
-      var buttons = [], tableContent = [];
+      var buttons = [];
+      var tableContent = [];
 
       tableContent.push(
         window.modalView.createReadOnlyEntry(
           undefined,
-          "Running Query",
+          'Running Query',
           'Do you want to kill the running query?',
           undefined,
           undefined,
@@ -79,26 +80,26 @@
       );
 
       $('.modal-delete-confirmation strong').html('Really kill?');
-
     },
 
-    killRunningQuery: function() {
+    killRunningQuery: function () {
       this.collection.killRunningQuery(this.killQueryId, this.killRunningQueryCallback.bind(this));
       window.modalView.hide();
     },
 
-    killRunningQueryCallback: function() {
+    killRunningQueryCallback: function () {
       this.convertModelToJSON(true);
       this.renderActive();
     },
 
-    deleteSlowQueryHistoryModal: function() {
-      var buttons = [], tableContent = [];
+    deleteSlowQueryHistoryModal: function () {
+      var buttons = [];
+      var tableContent = [];
 
       tableContent.push(
         window.modalView.createReadOnlyEntry(
           undefined,
-          "Slow Query Log",
+          'Slow Query Log',
           'Do you want to delete the slow query log entries?',
           undefined,
           undefined,
@@ -119,34 +120,54 @@
       );
     },
 
-    deleteSlowQueryHistory: function() {
+    deleteSlowQueryHistory: function () {
       this.collection.deleteSlowQueryHistory(this.slowQueryCallback.bind(this));
       window.modalView.hide();
     },
 
-    slowQueryCallback: function() {
+    slowQueryCallback: function () {
       this.convertModelToJSON(false);
       this.renderSlow();
     },
 
-    render: function() {
-      this.convertModelToJSON(true);
+    render: function () {
+      var options = arangoHelper.getCurrentSub();
+      if (options.params.active) {
+        this.active = true;
+        this.convertModelToJSON(true);
+      } else {
+        this.active = false;
+        this.convertModelToJSON(false);
+      }
     },
 
-    renderActive: function() {
+    addEvents: function () {
+      var self = this;
+      $('#queryManagementContent tbody').on('mousedown', function () {
+        clearTimeout(self.timer);
+        self.shouldRender = false;
+      });
+      $('#queryManagementContent tbody').on('mouseup', function () {
+        self.timer = window.setTimeout(function () {
+          self.shouldRender = true;
+        }, 3000);
+      });
+    },
+
+    renderActive: function () {
       this.$el.html(this.templateActive.render({}));
-      $(this.id).html(this.tabbar.render({content: this.tabbarElements}));
       $(this.id).append(this.table.render({content: this.tableDescription}));
-      $('#activequeries').addClass("arango-active-tab");
+      $('#activequeries').addClass('arango-active-tab');
+      this.addEvents();
     },
 
-    renderSlow: function() {
+    renderSlow: function () {
       this.$el.html(this.templateSlow.render({}));
-      $(this.id).html(this.tabbar.render({content: this.tabbarElements}));
       $(this.id).append(this.table.render({
-        content: this.tableDescription,
+        content: this.tableDescription
       }));
-      $('#slowqueries').addClass("arango-active-tab");
+      $('#slowqueries').addClass('arango-active-tab');
+      this.addEvents();
     },
 
     convertModelToJSON: function (active) {
@@ -155,18 +176,16 @@
 
       if (active === true) {
         this.collection = this.activeCollection;
-      }
-      else {
+      } else {
         this.collection = this.slowCollection;
       }
 
       this.collection.fetch({
         success: function () {
           self.collection.each(function (model) {
-
-          var button = '';
+            var button = '';
             if (active) {
-              button = '<i data-id="'+model.get('id')+'" class="fa fa-minus-circle"></i>';
+              button = '<i data-id="' + model.get('id') + '" class="fa fa-minus-circle"></i>';
             }
             rowsArray.push([
               model.get('id'),
@@ -177,17 +196,18 @@
             ]);
           });
 
-          var message = "No running queries.";
+          var message = 'No running queries.';
           if (!active) {
-            message = "No slow queries.";
+            message = 'No slow queries.';
           }
 
           if (rowsArray.length === 0) {
             rowsArray.push([
               message,
-              "",
-              "",
-              ""
+              '',
+              '',
+              '',
+              ''
             ]);
           }
 
@@ -195,13 +215,11 @@
 
           if (active) {
             self.renderActive();
-          }
-          else {
+          } else {
             self.renderSlow();
           }
         }
       });
-
     }
 
   });

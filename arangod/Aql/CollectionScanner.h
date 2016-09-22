@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, collection scanners
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,102 +19,39 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_COLLECTION_SCANNER_H
-#define ARANGODB_AQL_COLLECTION_SCANNER_H 1
+#ifndef ARANGOD_AQL_COLLECTION_SCANNER_H
+#define ARANGOD_AQL_COLLECTION_SCANNER_H 1
 
 #include "Basics/Common.h"
-#include "Utils/AqlTransaction.h"
-#include "VocBase/document-collection.h"
-#include "VocBase/transaction.h"
-#include "VocBase/vocbase.h"
+#include "Utils/OperationCursor.h"
+#include "Utils/Transaction.h"
 
-namespace triagens {
-  namespace aql {
+namespace arangodb {
+namespace aql {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                          struct CollectionScanner
-// -----------------------------------------------------------------------------
+class CollectionScanner {
+ public:
+  CollectionScanner(arangodb::Transaction*, std::string const&, bool);
 
-    struct CollectionScanner {
+  ~CollectionScanner();
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-  
-      CollectionScanner (triagens::arango::AqlTransaction*,
-                         TRI_transaction_collection_t*); 
-  
-      virtual ~CollectionScanner ();
+  arangodb::velocypack::Slice scan(size_t);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+  void reset();
 
-      virtual int scan (std::vector<TRI_doc_mptr_copy_t>&, size_t) = 0;
+  /// @brief forwards the cursor n elements. Does not read the data.
+  ///        Will at most forward to the last element.
+  ///        In the second parameter we add how many elements are
+  ///        really skipped
+  int forward(size_t, uint64_t&);
 
-      virtual void reset () = 0;
- 
-      triagens::arango::AqlTransaction* trx;
-      TRI_transaction_collection_t* trxCollection;
-      uint64_t totalCount;
-      triagens::basics::BucketPosition position;
-    };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                    struct RandomCollectionScanner
-// -----------------------------------------------------------------------------
-
-    struct RandomCollectionScanner final : public CollectionScanner {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-  
-      RandomCollectionScanner (triagens::arango::AqlTransaction*,
-                               TRI_transaction_collection_t*);
-
-      int scan (std::vector<TRI_doc_mptr_copy_t>&,
-                size_t) override;
-
-      void reset () override;
-
-      triagens::basics::BucketPosition initialPosition;
-      uint64_t step;
-    };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                    struct LinearCollectionScanner
-// -----------------------------------------------------------------------------
-
-    struct LinearCollectionScanner final : public CollectionScanner {
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-  
-      LinearCollectionScanner (triagens::arango::AqlTransaction*,
-                               TRI_transaction_collection_t*); 
-
-      int scan (std::vector<TRI_doc_mptr_copy_t>&,
-                size_t) override;
-      
-      void reset () override;
-    };
-
-  }
+ private:
+  std::unique_ptr<OperationCursor> _cursor;
+  std::shared_ptr<OperationResult> _currentBatch;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

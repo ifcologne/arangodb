@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Scope guard class
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,8 +19,6 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2009-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_BASICS_SCOPE_GUARD_H
@@ -32,32 +26,20 @@
 
 #include "Basics/Common.h"
 
-namespace triagens {
-  namespace basics {
-    class ScopeGuard {
-      public:
-        ScopeGuard (std::function<void()> onEnter,
-                    std::function<void()> onExit) 
-          : _onExit(onExit) {
-            onEnter();
-        }
-
-        ~ScopeGuard () {
-          _onExit();
-        }
-
-        std::function<void()> _onExit;
-    };
+namespace arangodb {
+namespace basics {
+class ScopeGuard {
+ public:
+  ScopeGuard(std::function<void()> onEnter, std::function<void()> onExit)
+      : _onExit(onExit) {
+    onEnter();
   }
+
+  ~ScopeGuard() { _onExit(); }
+
+  std::function<void()> _onExit;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

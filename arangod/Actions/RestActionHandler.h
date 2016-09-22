@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief action request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,137 +19,41 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_ACTIONS_REST_ACTION_HANDLER_H
-#define ARANGODB_ACTIONS_REST_ACTION_HANDLER_H 1
-
-#include "Basics/Common.h"
+#ifndef ARANGOD_ACTIONS_REST_ACTION_HANDLER_H
+#define ARANGOD_ACTIONS_REST_ACTION_HANDLER_H 1
 
 #include "RestHandler/RestVocbaseBaseHandler.h"
 
 #include "Actions/actions.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              forward declarations
-// -----------------------------------------------------------------------------
-
 class TRI_action_t;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 RestActionHandler
-// -----------------------------------------------------------------------------
+namespace arangodb {
+class RestActionHandler : public RestVocbaseBaseHandler {
+ public:
+  RestActionHandler(GeneralRequest*, GeneralResponse*);
 
-namespace triagens {
-  namespace arango {
+ public:
+  bool isDirect() const override;
+  status execute() override;
+  bool cancel() override;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief action request handler
-////////////////////////////////////////////////////////////////////////////////
+ private:
+  // executes an action
+  TRI_action_result_t executeAction();
 
-    class RestActionHandler : public RestVocbaseBaseHandler {
+ protected:
+  // action
+  TRI_action_t* _action;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
+  // data lock
+  Mutex _dataLock;
 
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor options
-////////////////////////////////////////////////////////////////////////////////
-
-        struct action_options_t {
-          TRI_vocbase_t* _vocbase;
-        };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-        RestActionHandler (rest::HttpRequest*,
-                           action_options_t*);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isDirect () const override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        status_t execute () override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        bool cancel () override;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief executes an action
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_action_result_t executeAction ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               protected variables
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief action
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_action_t* _action;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief data lock
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::Mutex _dataLock;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief data for cancelation
-////////////////////////////////////////////////////////////////////////////////
-
-        void* _data;
-
-    };
-  }
+  // data for cancelation
+  void* _data;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

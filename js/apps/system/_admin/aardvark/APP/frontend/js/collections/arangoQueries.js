@@ -1,60 +1,59 @@
-/*jshint browser: true */
-/*jshint unused: false */
-/*global Backbone, activeUser, window, ArangoQuery, $, data, _, arangoHelper*/
-(function() {
-  "use strict";
+/* jshint browser: true */
+/* jshint unused: false */
+/* global Backbone, window, ArangoQuery, $, _, arangoHelper*/
+(function () {
+  'use strict';
 
   window.ArangoQueries = Backbone.Collection.extend({
+    initialize: function (models, options) {
+      var self = this;
 
-    initialize: function(models, options) {
-      var result;
-      $.ajax("whoAmI?_=" + Date.now(), {async:false}).done(
-        function(data) {
-          result = data.user;
+      $.ajax('whoAmI?_=' + Date.now(), {async: true}).done(
+        function (data) {
+          if (this.activeUser === false || this.activeUser === null) {
+            self.activeUser = 'root';
+          } else {
+            self.activeUser = data.user;
+          }
         }
       );
-
-      this.activeUser = result;
-
-      if (this.activeUser === false) {
-        this.activeUser = "root";
-      }
     },
 
-    url: '/_api/user/',
+    url: arangoHelper.databaseUrl('/_api/user/'),
 
     model: ArangoQuery,
 
     activeUser: null,
 
-    parse: function(response) {
-      var self = this, toReturn;
+    parse: function (response) {
+      var self = this; var toReturn;
+      if (this.activeUser === false || this.activeUser === null) {
+        this.activeUser = 'root';
+      }
 
-      _.each(response.result, function(val) {
+      _.each(response.result, function (val) {
         if (val.user === self.activeUser) {
           try {
             if (val.extra.queries) {
               toReturn = val.extra.queries;
             }
-          }
-          catch (e) {
-          }
+          } catch (e) {}
         }
       });
       return toReturn;
     },
 
-    saveCollectionQueries: function() {
-      if (this.activeUser === 0) {
-        return false;
+    saveCollectionQueries: function (callback) {
+      if (this.activeUser === false || this.activeUser === null) {
+        this.activeUser = 'root';
       }
 
-      var returnValue = false;
       var queries = [];
 
-      this.each(function(query) {
+      this.each(function (query) {
         queries.push({
           value: query.attributes.value,
+          parameter: query.attributes.parameter,
           name: query.attributes.name
         });
       });
@@ -62,49 +61,45 @@
       // save current collection
       $.ajax({
         cache: false,
-        type: "PATCH",
-        async: false,
-        url: "/_api/user/" + encodeURIComponent(this.activeUser),
+        type: 'PATCH',
+        url: arangoHelper.databaseUrl('/_api/user/' + encodeURIComponent(this.activeUser)),
         data: JSON.stringify({
           extra: {
-           queries: queries
+            queries: queries
           }
         }),
-        contentType: "application/json",
+        contentType: 'application/json',
         processData: false,
-        success: function() {
-          returnValue = true;
+        success: function (data) {
+          callback(false, data);
         },
-        error: function() {
-          returnValue = false;
+        error: function () {
+          callback(true);
         }
       });
-
-      return returnValue;
     },
 
-    saveImportQueries: function(file, callback) {
-
+    saveImportQueries: function (file, callback) {
       if (this.activeUser === 0) {
         return false;
       }
 
-      window.progressView.show("Fetching documents...");
+      window.progressView.show('Fetching documents...');
       $.ajax({
         cache: false,
-        type: "POST",
-        async: false,
-        url: "query/upload/" + encodeURIComponent(this.activeUser),
+        type: 'POST',
+        url: 'query/upload/' + encodeURIComponent(this.activeUser),
         data: file,
-        contentType: "application/json",
+        contentType: 'application/json',
         processData: false,
-        success: function() {
+        success: function () {
           window.progressView.hide();
+          arangoHelper.arangoNotification('Queries successfully imported.');
           callback();
         },
-        error: function() {
+        error: function () {
           window.progressView.hide();
-          arangoHelper.arangoError("Query error", "queries could not be imported");
+          arangoHelper.arangoError('Query error', 'queries could not be imported');
         }
       });
     }

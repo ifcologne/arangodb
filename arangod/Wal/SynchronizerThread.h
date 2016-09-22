@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Write-ahead log synchronizer thread
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,163 +19,72 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_WAL_SYNCHRONIZER_THREAD_H
-#define ARANGODB_WAL_SYNCHRONIZER_THREAD_H 1
+#ifndef ARANGOD_WAL_SYNCHRONIZER_THREAD_H
+#define ARANGOD_WAL_SYNCHRONIZER_THREAD_H 1
 
 #include "Basics/Common.h"
 #include "Basics/ConditionVariable.h"
 #include "Basics/Thread.h"
 #include "Wal/Logfile.h"
-#include "Wal/SyncRegion.h"
 
-namespace triagens {
-  namespace wal {
+namespace arangodb {
+namespace wal {
 
-    class LogfileManager;
+class LogfileManager;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                          class SynchronizerThread
-// -----------------------------------------------------------------------------
+class SynchronizerThread final : public Thread {
+  /// @brief SynchronizerThread
+ private:
+  SynchronizerThread(SynchronizerThread const&) = delete;
+  SynchronizerThread& operator=(SynchronizerThread const&) = delete;
 
-    class SynchronizerThread : public basics::Thread {
+ public:
+  SynchronizerThread(LogfileManager*, uint64_t);
+  ~SynchronizerThread() { shutdown(); }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief SynchronizerThread
-////////////////////////////////////////////////////////////////////////////////
+ public:
+  void beginShutdown() override final;
 
-      private:
-        SynchronizerThread (SynchronizerThread const&) = delete;
-        SynchronizerThread& operator= (SynchronizerThread const&) = delete;
+ public:
+  /// @brief signal that a sync is needed
+  void signalSync(bool waitForSync);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ protected:
+  void run() override;
 
-      public:
+ private:
+  /// @brief synchronize an unsynchronized region
+  int doSync(bool&);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the synchronizer thread
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief get a logfile descriptor (it caches the descriptor for performance)
+  int getLogfileDescriptor(Logfile::IdType);
 
-        SynchronizerThread (LogfileManager*,
-                            uint64_t);
+ private:
+  /// @brief the logfile manager
+  LogfileManager* _logfileManager;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the synchronizer thread
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief condition variable for the thread
+  basics::ConditionVariable _condition;
 
-        ~SynchronizerThread ();
+  /// @brief wait interval for the synchronizer thread when idle
+  uint64_t const _syncInterval;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stops the synchronizer thread
-////////////////////////////////////////////////////////////////////////////////
-
-        void stop ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief signal that a sync is needed
-////////////////////////////////////////////////////////////////////////////////
-
-        void signalSync ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    Thread methods
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief main loop
-////////////////////////////////////////////////////////////////////////////////
-
-        void run ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief synchronize an unsynchronized region
-////////////////////////////////////////////////////////////////////////////////
-
-        int doSync (bool&);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get a logfile descriptor (it caches the descriptor for performance)
-////////////////////////////////////////////////////////////////////////////////
-
-        int getLogfileDescriptor (Logfile::IdType);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the logfile manager
-////////////////////////////////////////////////////////////////////////////////
-
-        LogfileManager* _logfileManager;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief condition variable for the thread
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::ConditionVariable _condition;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of requests waiting
-////////////////////////////////////////////////////////////////////////////////
-
-        uint32_t _waiting;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief stop flag
-////////////////////////////////////////////////////////////////////////////////
-
-        volatile sig_atomic_t _stop;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief wait interval for the synchronizer thread when idle
-////////////////////////////////////////////////////////////////////////////////
-
-        uint64_t const _syncInterval;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief logfile descriptor cache
-////////////////////////////////////////////////////////////////////////////////
-
-        struct {
-          Logfile::IdType  id;
-          int              fd;
-        }
-        _logfileCache;
-
-    };
-
-  }
+  /// @brief logfile descriptor cache
+  struct {
+    Logfile::IdType id;
+    int fd;
+  } _logfileCache;
+  
+  /// @brief number of requests waiting
+  /// the value stored here consists of two parts:
+  /// the lower 32 bits contain the number of waiters that requested
+  /// a synchronous write, the upper 32 bits contain the number of
+  /// waiters that requested asynchronous writes
+  std::atomic<uint64_t> _waiting;
+};
+}
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

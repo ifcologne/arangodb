@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief standalone transaction context
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,108 +19,80 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_UTILS_STANDALONE_TRANSACTION_CONTEXT_H
-#define ARANGODB_UTILS_STANDALONE_TRANSACTION_CONTEXT_H 1
+#ifndef ARANGOD_UTILS_STANDALONE_TRANSACTION_CONTEXT_H
+#define ARANGOD_UTILS_STANDALONE_TRANSACTION_CONTEXT_H 1
 
 #include "Basics/Common.h"
-
-#include "VocBase/transaction.h"
-#include "Utils/CollectionNameResolver.h"
 #include "Utils/TransactionContext.h"
 
-struct TRI_transaction_s;
+struct TRI_transaction_t;
+struct TRI_vocbase_t;
 
-namespace triagens {
-  namespace arango {
+namespace arangodb {
 
-    class StandaloneTransactionContext final : public TransactionContext {
+class StandaloneTransactionContext final : public TransactionContext {
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                class StandaloneTransactionContext
-// -----------------------------------------------------------------------------
+ public:
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create the context
+  //////////////////////////////////////////////////////////////////////////////
 
-      public:
+  explicit StandaloneTransactionContext(TRI_vocbase_t*);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the context
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief destroy the context
+  //////////////////////////////////////////////////////////////////////////////
 
-        StandaloneTransactionContext (); 
+  ~StandaloneTransactionContext() = default;
+ 
+ public:
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the context
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief order a custom type handler
+  //////////////////////////////////////////////////////////////////////////////
 
-        ~StandaloneTransactionContext ();
+  std::shared_ptr<VPackCustomTypeHandler> orderCustomTypeHandler() override final;
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the resolver
+  //////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+  CollectionNameResolver const* getResolver() override final;
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief return the parent transaction (none in our case)
+  //////////////////////////////////////////////////////////////////////////////
 
-      public:
+  struct TRI_transaction_t* getParentTransaction() const override;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the resolver
-////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief register the transaction, does nothing
+  //////////////////////////////////////////////////////////////////////////////
 
-        CollectionNameResolver const* getResolver () const override;
+  int registerTransaction(struct TRI_transaction_t*) override;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return the parent transaction (none in our case)
-////////////////////////////////////////////////////////////////////////////////
-        
-        struct TRI_transaction_s* getParentTransaction () const override;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief unregister the transaction
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief register the transaction, does nothing
-////////////////////////////////////////////////////////////////////////////////
+  void unregisterTransaction() override;
 
-        int registerTransaction (struct TRI_transaction_s*) override;
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief whether or not the transaction is embeddable
+  //////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief unregister the transaction, does nothing
-////////////////////////////////////////////////////////////////////////////////
+  bool isEmbeddable() const override;
+  
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create a context, returned in a shared ptr
+  //////////////////////////////////////////////////////////////////////////////
 
-        int unregisterTransaction () override;
+  static std::shared_ptr<StandaloneTransactionContext> Create(TRI_vocbase_t*);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the transaction is embeddable
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isEmbeddable () const override;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief collection name resolver
-////////////////////////////////////////////////////////////////////////////////
-
-        CollectionNameResolver* _resolver;
-
-    };
-
-  }
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

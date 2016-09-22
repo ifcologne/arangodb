@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief AQL SubqueryBlock
-///
-/// @file 
-///
 /// DISCLAIMER
 ///
-/// Copyright 2010-2014 triagens GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,104 +16,61 @@
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
 ///
-/// Copyright holder is triAGENS GmbH, Cologne, Germany
+/// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_AQL_SUBQUERY_BLOCK_H
-#define ARANGODB_AQL_SUBQUERY_BLOCK_H 1
+#ifndef ARANGOD_AQL_SUBQUERY_BLOCK_H
+#define ARANGOD_AQL_SUBQUERY_BLOCK_H 1
 
 #include "Aql/ExecutionBlock.h"
 #include "Aql/ExecutionNode.h"
 #include "Utils/AqlTransaction.h"
 
-namespace triagens {
-  namespace aql {
+namespace arangodb {
+namespace aql {
 
-    class AqlItemBlock;
+class AqlItemBlock;
 
-    class ExecutionEngine;
+class ExecutionEngine;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                     SubqueryBlock
-// -----------------------------------------------------------------------------
+class SubqueryBlock : public ExecutionBlock {
+ public:
+  SubqueryBlock(ExecutionEngine*, SubqueryNode const*, ExecutionBlock*);
+  ~SubqueryBlock() = default;
 
-    class SubqueryBlock : public ExecutionBlock {
+  /// @brief initialize, tell dependency and the subquery
+  int initialize() override final;
 
-      public:
+  /// @brief getSome
+  AqlItemBlock* getSome(size_t atLeast, size_t atMost) override final;
 
-        SubqueryBlock (ExecutionEngine*,
-                       SubqueryNode const*,
-                       ExecutionBlock*);
+  /// @brief shutdown, tell dependency and the subquery
+  int shutdown(int errorCode) override final;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief getter for the pointer to the subquery
+  ExecutionBlock* getSubquery() { return _subquery; }
 
-        ~SubqueryBlock ();
+ private:
+  /// @brief execute the subquery and return its results
+  std::vector<AqlItemBlock*>* executeSubquery();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief initialize, tell dependency and the subquery
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief destroy the results of a subquery
+  void destroySubqueryResults(std::vector<AqlItemBlock*>*);
 
-        int initialize () override;
+  /// @brief output register
+  RegisterId _outReg;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief getSome
-////////////////////////////////////////////////////////////////////////////////
+  /// @brief we need to have an executionblock and where to write the result
+  ExecutionBlock* _subquery;
 
-        AqlItemBlock* getSome (size_t atLeast,
-                               size_t atMost) override final;
+  /// @brief whether the subquery is const and will always return the same values
+  /// when invoked multiple times
+  bool _subqueryIsConst;
+};
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief shutdown, tell dependency and the subquery
-////////////////////////////////////////////////////////////////////////////////
-
-        int shutdown (int errorCode) override final;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief getter for the pointer to the subquery
-////////////////////////////////////////////////////////////////////////////////
-
-        ExecutionBlock* getSubquery() {
-          return _subquery;
-        }
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief execute the subquery and return its results
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<AqlItemBlock*>* executeSubquery ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the results of a subquery
-////////////////////////////////////////////////////////////////////////////////
-
-        void destroySubqueryResults (std::vector<AqlItemBlock*>*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief output register
-////////////////////////////////////////////////////////////////////////////////
-
-        RegisterId _outReg;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief we need to have an executionblock and where to write the result
-////////////////////////////////////////////////////////////////////////////////
-
-        ExecutionBlock* _subquery;
-    };
-
-  }  // namespace triagens::aql
-}  // namespace triagens
+}  // namespace arangodb::aql
+}  // namespace arangodb
 
 #endif
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "^\\(/// @brief\\|/// {@inheritDoc}\\|/// @addtogroup\\|// --SECTION--\\|/// @\\}\\)"
-// End:

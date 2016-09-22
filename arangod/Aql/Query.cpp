@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, query context
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,269 +19,237 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Aql/Query.h"
+#include "Query.h"
+
+#include <velocypack/Builder.h>
+#include <velocypack/Iterator.h>
+#include <velocypack/velocypack-aliases.h>
+
 #include "Aql/ExecutionBlock.h"
-#include "Aql/Executor.h"
 #include "Aql/ExecutionEngine.h"
 #include "Aql/ExecutionPlan.h"
+#include "Aql/Executor.h"
 #include "Aql/Optimizer.h"
 #include "Aql/Parser.h"
 #include "Aql/QueryCache.h"
 #include "Aql/QueryList.h"
-#include "Aql/ShortStringStorage.h"
-#include "Basics/fasthash.h"
-#include "Basics/JsonHelper.h"
-#include "Basics/json.h"
-#include "Basics/tri-strings.h"
 #include "Basics/Exceptions.h"
+#include "Basics/VelocyPackHelper.h"
+#include "Basics/WorkMonitor.h"
+#include "Basics/fasthash.h"
+#include "Basics/tri-strings.h"
 #include "Cluster/ServerState.h"
+#include "Logger/Logger.h"
+#include "Utils/Transaction.h"
 #include "Utils/AqlTransaction.h"
-#include "Utils/CollectionNameResolver.h"
 #include "Utils/StandaloneTransactionContext.h"
 #include "Utils/V8TransactionContext.h"
 #include "V8/v8-conv.h"
-#include "V8Server/ApplicationV8.h"
-#include "V8Server/v8-shape-conv.h"
+#include "V8/v8-vpack.h"
+#include "V8Server/V8DealerFeature.h"
+#include "VocBase/Graphs.h"
 #include "VocBase/vocbase.h"
 
-using namespace triagens::aql;
-using Json = triagens::basics::Json;
+using namespace arangodb;
+using namespace arangodb::aql;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                               static const values
-// -----------------------------------------------------------------------------
+namespace {
+static std::atomic<TRI_voc_tick_t> NextQueryId(1);
+}
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief empty string singleton
-////////////////////////////////////////////////////////////////////////////////
-    
 static char const* EmptyString = "";
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief names of query phases / states
-////////////////////////////////////////////////////////////////////////////////
-
 static std::string StateNames[] = {
-  "initializing",           // INITIALIZATION 
-  "parsing",                // PARSING
-  "optimizing ast",         // AST_OPTIMIZATION
-  "instantiating plan",     // PLAN_INSTANTIATION
-  "optimizing plan",        // PLAN_OPTIMIZATION
-  "executing",              // EXECUTION
-  "finalizing"              // FINALIZATION
+    "initializing",        // INITIALIZATION
+    "parsing",             // PARSING
+    "optimizing ast",      // AST_OPTIMIZATION
+    "instantiating plan",  // PLAN_INSTANTIATION
+    "optimizing plan",     // PLAN_OPTIMIZATION
+    "executing",           // EXECUTION
+    "finalizing",          // FINALIZATION
+
+    "invalid"  // INVALID
 };
 
 // make sure the state strings and the actual states match
-static_assert(sizeof(StateNames) / sizeof(std::string) == static_cast<size_t>(ExecutionState::INVALID_STATE), 
+static_assert(sizeof(StateNames) / sizeof(std::string) ==
+                  static_cast<size_t>(ExecutionState::INVALID_STATE) + 1,
               "invalid number of ExecutionState values");
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    struct Profile
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief create a profile
-////////////////////////////////////////////////////////////////////////////////
-      
-Profile::Profile (Query* query) 
-  : query(query),
-    results(),
-    stamp(TRI_microtime()),
-    tracked(false) {
+Profile::Profile(Query* query)
+    : query(query), results(), stamp(query->startTime()), tracked(false) {
+  auto queryList = query->vocbase()->queryList();
 
-  auto queryList = static_cast<QueryList*>(query->vocbase()->_queries);
-
-  if (queryList != nullptr) {
-    try {
-      tracked = queryList->insert(query, stamp);
-    }
-    catch (...) {
-    }
+  try {
+    tracked = queryList->insert(query, stamp);
+  } catch (...) {
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy a profile
-////////////////////////////////////////////////////////////////////////////////
-      
-Profile::~Profile () { 
+Profile::~Profile() {
   // only remove from list when the query was inserted into it...
   if (tracked) {
-    auto queryList = static_cast<QueryList*>(query->vocbase()->_queries);
+    auto queryList = query->vocbase()->queryList();
 
-    if (queryList != nullptr) {
-      try {
-        queryList->remove(query, stamp);
-      }
-      catch (...) {
-      }
+    try {
+      queryList->remove(query, stamp);
+     } catch (...) {
     }
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief sets a state to done
-////////////////////////////////////////////////////////////////////////////////
-
-void Profile::setDone (ExecutionState state) {
+void Profile::setDone(ExecutionState state) {
   double const now = TRI_microtime();
 
   if (state != ExecutionState::INVALID_STATE) {
     // record duration of state
-    results.emplace_back(state, now - stamp); 
+    results.emplace_back(state, now - stamp);
   }
 
   // set timestamp
   stamp = now;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief convert the profile to JSON
-////////////////////////////////////////////////////////////////////////////////
-
-TRI_json_t* Profile::toJson (TRI_memory_zone_t*) {
-  triagens::basics::Json result(triagens::basics::Json::Object);
-  for (auto const& it : results) {
-    result.set(StateNames[static_cast<int>(it.first)].c_str(), triagens::basics::Json(it.second));
+/// @brief convert the profile to VelocyPack
+std::shared_ptr<VPackBuilder> Profile::toVelocyPack() {
+  auto result = std::make_shared<VPackBuilder>();
+  {
+    VPackObjectBuilder b(result.get());
+    for (auto const& it : results) {
+      result->add(StateNames[static_cast<int>(it.first)],
+                  VPackValue(it.second));
+    }
   }
-  return result.steal();
+  return result;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       class Query
-// -----------------------------------------------------------------------------
+/// @brief global threshold value for slow queries
+double Query::SlowQueryThresholdValue = 10.0;
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not query tracking is disabled globally
-////////////////////////////////////////////////////////////////////////////////
-          
 bool Query::DoDisableQueryTracking = false;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief creates a query
-////////////////////////////////////////////////////////////////////////////////
-
-Query::Query (triagens::arango::ApplicationV8* applicationV8,
-              bool contextOwnedByExterior,
-              TRI_vocbase_t* vocbase,
-              char const* queryString,
-              size_t queryLength,
-              TRI_json_t* bindParameters,
-              TRI_json_t* options,
-              QueryPart part)
-  : _id(0),
-    _applicationV8(applicationV8),
-    _vocbase(vocbase),
-    _executor(nullptr),
-    _context(nullptr),
-    _queryString(queryString),
-    _queryLength(queryLength),
-    _queryJson(),
-    _bindParameters(bindParameters),
-    _options(options),
-    _collections(vocbase),
-    _strings(),
-    _shortStringStorage(1024),
-    _ast(nullptr),
-    _profile(nullptr),
-    _state(INVALID_STATE),
-    _plan(nullptr),
-    _parser(nullptr),
-    _trx(nullptr),
-    _engine(nullptr),
-    _maxWarningCount(10),
-    _warnings(),
-    _part(part),
-    _contextOwnedByExterior(contextOwnedByExterior),
-    _killed(false),
-    _isModificationQuery(false) {
-
-  // std::cout << TRI_CurrentThreadId() << ", QUERY " << this << " CTOR: " << queryString << "\n";
-
+Query::Query(bool contextOwnedByExterior, TRI_vocbase_t* vocbase,
+             char const* queryString, size_t queryLength,
+             std::shared_ptr<VPackBuilder> bindParameters,
+             std::shared_ptr<VPackBuilder> options, QueryPart part)
+    : _id(0),
+      _vocbase(vocbase),
+      _executor(nullptr),
+      _context(nullptr),
+      _queryString(queryString),
+      _queryLength(queryLength),
+      _queryBuilder(),
+      _bindParameters(bindParameters),
+      _options(options),
+      _collections(vocbase),
+      _strings(),
+      _shortStringStorage(1024),
+      _ast(nullptr),
+      _profile(nullptr),
+      _state(INVALID_STATE),
+      _plan(nullptr),
+      _parser(nullptr),
+      _trx(nullptr),
+      _engine(nullptr),
+      _maxWarningCount(10),
+      _warnings(),
+      _startTime(TRI_microtime()),
+      _part(part),
+      _contextOwnedByExterior(contextOwnedByExterior),
+      _killed(false),
+      _isModificationQuery(false) {
+  // std::cout << TRI_CurrentThreadId() << ", QUERY " << this << " CTOR: " <<
+  // queryString << "\n";
+  LOG_TOPIC(DEBUG, Logger::QUERIES)
+      << TRI_microtime() - _startTime << " "
+      << "Query::Query queryString: " << std::string(queryString, queryLength)
+      << " this: " << (uintptr_t) this;
+  if (bindParameters != nullptr && !bindParameters->isEmpty() &&
+      !bindParameters->slice().isNone()) {
+    LOG_TOPIC(DEBUG, Logger::QUERIES)
+        << "bindParameters: " << bindParameters->slice().toJson();
+  }
+  if (options != nullptr && !options->isEmpty() && !options->slice().isNone()) {
+    LOG_TOPIC(DEBUG, Logger::QUERIES)
+        << "options: " << options->slice().toJson();
+  }
   TRI_ASSERT(_vocbase != nullptr);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief creates a query from Json
-////////////////////////////////////////////////////////////////////////////////
-
-Query::Query (triagens::arango::ApplicationV8* applicationV8,
-              bool contextOwnedByExterior,
-              TRI_vocbase_t* vocbase,
-              triagens::basics::Json queryStruct,
-              TRI_json_t* options,
-              QueryPart part)
-  : _id(0),
-    _applicationV8(applicationV8),
-    _vocbase(vocbase),
-    _executor(nullptr),
-    _context(nullptr),
-    _queryString(nullptr),
-    _queryLength(0),
-    _queryJson(queryStruct),
-    _bindParameters(nullptr),
-    _options(options),
-    _collections(vocbase),
-    _strings(),
-    _shortStringStorage(1024),
-    _ast(nullptr),
-    _profile(nullptr),
-    _state(INVALID_STATE),
-    _plan(nullptr),
-    _parser(nullptr),
-    _trx(nullptr),
-    _engine(nullptr),
-    _maxWarningCount(10),
-    _warnings(),
-    _part(part),
-    _contextOwnedByExterior(contextOwnedByExterior),
-    _killed(false),
-    _isModificationQuery(false) {
-
-  // std::cout << TRI_CurrentThreadId() << ", QUERY " << this << " CTOR (JSON): " << _queryJson.toString() << "\n";
-
+/// @brief creates a query from VelocyPack
+Query::Query(bool contextOwnedByExterior, TRI_vocbase_t* vocbase,
+             std::shared_ptr<VPackBuilder> const queryStruct,
+             std::shared_ptr<VPackBuilder> options, QueryPart part)
+    : _id(0),
+      _vocbase(vocbase),
+      _executor(nullptr),
+      _context(nullptr),
+      _queryString(nullptr),
+      _queryLength(0),
+      _queryBuilder(queryStruct),
+      _bindParameters(nullptr),
+      _options(options),
+      _collections(vocbase),
+      _strings(),
+      _shortStringStorage(1024),
+      _ast(nullptr),
+      _profile(nullptr),
+      _state(INVALID_STATE),
+      _plan(nullptr),
+      _parser(nullptr),
+      _trx(nullptr),
+      _engine(nullptr),
+      _maxWarningCount(10),
+      _warnings(),
+      _startTime(TRI_microtime()),
+      _part(part),
+      _contextOwnedByExterior(contextOwnedByExterior),
+      _killed(false),
+      _isModificationQuery(false) {
+  LOG_TOPIC(DEBUG, Logger::QUERIES)
+      << TRI_microtime() - _startTime << " "
+      << "Query::Query queryStruct: " << queryStruct->slice().toJson()
+      << " this: " << (uintptr_t) this;
+  if (options != nullptr && !options->isEmpty() && !options->slice().isNone()) {
+    LOG_TOPIC(DEBUG, Logger::QUERIES)
+        << "options: " << options->slice().toJson();
+  }
   TRI_ASSERT(_vocbase != nullptr);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief destroys a query
-////////////////////////////////////////////////////////////////////////////////
-
-Query::~Query () {
+Query::~Query() {
   // std::cout << TRI_CurrentThreadId() << ", QUERY " << this << " DTOR\r\n";
-  cleanupPlanAndEngine(TRI_ERROR_INTERNAL); // abort the transaction
+  cleanupPlanAndEngine(TRI_ERROR_INTERNAL);  // abort the transaction
 
   delete _profile;
   _profile = nullptr;
-
-  if (_options != nullptr) {
-    TRI_FreeJson(TRI_UNKNOWN_MEM_ZONE, _options);
-    _options = nullptr;
-  }
 
   delete _executor;
   _executor = nullptr;
 
   if (_context != nullptr) {
-    TRI_ASSERT(! _contextOwnedByExterior);
-        
+    TRI_ASSERT(!_contextOwnedByExterior);
+
     // unregister transaction and resolver in context
     ISOLATE;
     TRI_GET_GLOBALS();
-    auto ctx = static_cast<triagens::arango::V8TransactionContext*>(v8g->_transactionContext);
+    auto ctx =
+        static_cast<arangodb::V8TransactionContext*>(v8g->_transactionContext);
     if (ctx != nullptr) {
       ctx->unregisterTransaction();
     }
 
-    _applicationV8->exitContext(_context);
+    V8DealerFeature::DEALER->exitContext(_context);
     _context = nullptr;
   }
 
@@ -300,48 +264,36 @@ Query::~Query () {
   for (auto& it : _nodes) {
     delete it;
   }
+  for (auto& it : _graphs) {
+    delete it.second;
+  }
+  LOG_TOPIC(DEBUG, Logger::QUERIES)
+      << TRI_microtime() - _startTime << " "
+      << "Query::~Query this: " << (uintptr_t) this;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief clone a query
 /// note: as a side-effect, this will also create and start a transaction for
 /// the query
-////////////////////////////////////////////////////////////////////////////////
-
-Query* Query::clone (QueryPart part,
-                     bool withPlan) {
-  std::unique_ptr<TRI_json_t> options;
-
-  if (_options != nullptr) {
-    options.reset(TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, _options));
-  }
-
-  std::unique_ptr<Query> clone;
-
-  clone.reset(new Query(_applicationV8, 
-                        false,
-                        _vocbase,
-                        _queryString,
-                        _queryLength,
-                        nullptr,
-                        options.get(),
-                        part));
-  options.release();
+Query* Query::clone(QueryPart part, bool withPlan) {
+  auto clone =
+      std::make_unique<Query>(false, _vocbase, _queryString, _queryLength,
+                              std::shared_ptr<VPackBuilder>(), _options, part);
 
   if (_plan != nullptr) {
     if (withPlan) {
       // clone the existing plan
       clone->setPlan(_plan->clone(*clone));
     }
-   
-    // clone all variables 
+
+    // clone all variables
     for (auto& it : _ast->variables()->variables(true)) {
       auto var = _ast->variables()->getVariable(it.first);
       TRI_ASSERT(var != nullptr);
       clone->ast()->variables()->createVariable(var);
     }
   }
-    
+
   if (clone->_plan == nullptr) {
     // initialize an empty plan
     clone->setPlan(new ExecutionPlan(ast()));
@@ -361,33 +313,28 @@ Query* Query::clone (QueryPart part,
   return clone.release();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief add a node to the list of nodes
-////////////////////////////////////////////////////////////////////////////////
+void Query::addNode(AstNode* node) { _nodes.emplace_back(node); }
 
-void Query::addNode (AstNode* node) {
-  _nodes.emplace_back(node);
+void Query::setExecutionTime() {
+  if (_engine != nullptr) {
+    _engine->_stats.setExecutionTime(TRI_microtime() - _startTime);
+  }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief extract a region from the query
-////////////////////////////////////////////////////////////////////////////////
+std::string Query::extractRegion(int line, int column) const {
+  TRI_ASSERT(_queryString != nullptr);
 
-std::string Query::extractRegion (int line, 
-                                  int column) const {
   // note: line numbers reported by bison/flex start at 1, columns start at 0
-  int currentLine   = 1;
+  int currentLine = 1;
   int currentColumn = 0;
 
   char c;
   char const* p = _queryString;
 
-  while ((c = *p)) {
-    if (currentLine > line || 
+  while ((static_cast<size_t>(p - _queryString) < _queryLength) && (c = *p)) {
+    if (currentLine > line ||
         (currentLine >= line && currentColumn >= column)) {
       break;
     }
@@ -396,8 +343,7 @@ std::string Query::extractRegion (int line,
       ++p;
       ++currentLine;
       currentColumn = 0;
-    }
-    else if (c == '\r') {
+    } else if (c == '\r') {
       ++p;
       ++currentLine;
       currentColumn = 0;
@@ -406,8 +352,7 @@ std::string Query::extractRegion (int line,
       if (*p == '\n') {
         ++p;
       }
-    }
-    else {
+    } else {
       ++currentColumn;
       ++p;
     }
@@ -418,7 +363,7 @@ std::string Query::extractRegion (int line,
 
   size_t offset = static_cast<size_t>(p - _queryString);
 
-  static int const   SNIPPET_LENGTH = 32;
+  static int const SNIPPET_LENGTH = 32;
   static char const* SNIPPET_SUFFIX = "...";
 
   if (_queryLength < offset + SNIPPET_LENGTH) {
@@ -433,37 +378,27 @@ std::string Query::extractRegion (int line,
   return result;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief register an error, with an optional parameter inserted into printf
 /// this also makes the query abort
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::registerError (int code,
-                           char const* details) {
-
+void Query::registerError(int code, char const* details) {
   TRI_ASSERT(code != TRI_ERROR_NO_ERROR);
 
   if (details == nullptr) {
     THROW_ARANGO_EXCEPTION(code);
   }
-  
+
   THROW_ARANGO_EXCEPTION_PARAMS(code, details);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief register an error with a custom error message
 /// this also makes the query abort
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::registerErrorCustom (int code,
-                                 char const* details) {
-
+void Query::registerErrorCustom(int code, char const* details) {
   TRI_ASSERT(code != TRI_ERROR_NO_ERROR);
 
   if (details == nullptr) {
     THROW_ARANGO_EXCEPTION(code);
   }
-  
+
   std::string errorMessage(TRI_errno_string(code));
   errorMessage.append(": ");
   errorMessage.append(details);
@@ -471,13 +406,8 @@ void Query::registerErrorCustom (int code,
   THROW_ARANGO_EXCEPTION_MESSAGE(code, errorMessage);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief register a warning
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::registerWarning (int code,
-                             char const* details) {
-
+void Query::registerWarning(int code, char const* details) {
   TRI_ASSERT(code != TRI_ERROR_NO_ERROR);
 
   if (_warnings.size() > _maxWarningCount) {
@@ -486,43 +416,47 @@ void Query::registerWarning (int code,
 
   if (details == nullptr) {
     _warnings.emplace_back(code, TRI_errno_string(code));
-  }
-  else {
+  } else {
     _warnings.emplace_back(code, details);
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief prepare an AQL query, this is a preparation for execute, but 
+/// @brief prepare an AQL query, this is a preparation for execute, but
 /// execute calls it internally. The purpose of this separate method is
-/// to be able to only prepare a query from JSON and then store it in the
+/// to be able to only prepare a query from VelocyPack and then store it in the
 /// QueryRegistry.
-////////////////////////////////////////////////////////////////////////////////
+QueryResult Query::prepare(QueryRegistry* registry) {
+  LOG_TOPIC(DEBUG, Logger::QUERIES) << TRI_microtime() - _startTime << " "
+                                    << "Query::prepare"
+                                    << " this: " << (uintptr_t) this;
+  TRI_ASSERT(registry != nullptr);
 
-QueryResult Query::prepare (QueryRegistry* registry) {
   try {
     init();
     enterState(PARSING);
 
-    std::unique_ptr<Parser> parser(new Parser(this));
+    auto parser = std::make_unique<Parser>(this);
     std::unique_ptr<ExecutionPlan> plan;
-    
+
     if (_queryString != nullptr) {
       parser->parse(false);
       // put in bind parameters
       parser->ast()->injectBindParameters(_bindParameters);
     }
-      
+
     _isModificationQuery = parser->isModificationQuery();
 
     // create the transaction object, but do not start it yet
-    _trx = new triagens::arango::AqlTransaction(createTransactionContext(), _vocbase, _collections.collections(), _part == PART_MAIN);
+    arangodb::AqlTransaction* trx = new arangodb::AqlTransaction(
+        createTransactionContext(), _collections.collections(),
+        _part == PART_MAIN);
+    _trx = trx;
 
     bool planRegisters;
 
     if (_queryString != nullptr) {
       // we have an AST
-      int res = _trx->begin();
+      int res = trx->begin();
 
       if (res != TRI_ERROR_NO_ERROR) {
         return transactionError(res);
@@ -532,76 +466,68 @@ QueryResult Query::prepare (QueryRegistry* registry) {
       enterState(AST_OPTIMIZATION);
 
       parser->ast()->validateAndOptimize();
-      // std::cout << "AST: " << triagens::basics::JsonHelper::toString(parser->ast()->toJson(TRI_UNKNOWN_MEM_ZONE, false)) << "\n";
 
       enterState(PLAN_INSTANTIATION);
       plan.reset(ExecutionPlan::instantiateFromAst(parser->ast()));
 
       if (plan.get() == nullptr) {
         // oops
-        return QueryResult(TRI_ERROR_INTERNAL, "failed to create query execution engine");
+        return QueryResult(TRI_ERROR_INTERNAL,
+                           "failed to create query execution engine");
       }
 
       // Run the query optimizer:
       enterState(PLAN_OPTIMIZATION);
-      triagens::aql::Optimizer opt(maxNumberOfPlans());
+      arangodb::aql::Optimizer opt(maxNumberOfPlans());
       // getenabled/disabled rules
-      opt.createPlans(plan.release(), getRulesFromOptions(), inspectSimplePlans());
+      opt.createPlans(plan.release(), getRulesFromOptions(),
+                      inspectSimplePlans());
       // Now plan and all derived plans belong to the optimizer
-      plan.reset(opt.stealBest()); // Now we own the best one again
+      plan.reset(opt.stealBest());  // Now we own the best one again
       planRegisters = true;
-    }
-    else {   // no queryString, we are instantiating from _queryJson
+    } else {  // no queryString, we are instantiating from _queryBuilder
       enterState(PLAN_INSTANTIATION);
-      ExecutionPlan::getCollectionsFromJson(parser->ast(), _queryJson);
 
-      parser->ast()->variables()->fromJson(_queryJson);
+      VPackSlice const querySlice = _queryBuilder->slice();
+      ExecutionPlan::getCollectionsFromVelocyPack(parser->ast(), querySlice);
+
+      parser->ast()->variables()->fromVelocyPack(querySlice);
       // creating the plan may have produced some collections
-      // we need to add them to the transaction now (otherwise the query will fail)
+      // we need to add them to the transaction now (otherwise the query will
+      // fail)
 
-      int res = _trx->addCollectionList(_collections.collections());
-      
+      int res = trx->addCollectionList(_collections.collections());
+
       if (res == TRI_ERROR_NO_ERROR) {
-        res = _trx->begin();
+        res = trx->begin();
       }
 
       if (res != TRI_ERROR_NO_ERROR) {
         return transactionError(res);
       }
 
-      // we have an execution plan in JSON format
-      plan.reset(ExecutionPlan::instantiateFromJson(parser->ast(), _queryJson));
+      // we have an execution plan in VelocyPack format
+      plan.reset(ExecutionPlan::instantiateFromVelocyPack(
+          parser->ast(), _queryBuilder->slice()));
       if (plan.get() == nullptr) {
         // oops
         return QueryResult(TRI_ERROR_INTERNAL);
       }
 
-      // std::cout << "GOT PLAN:\n" << plan.get()->toJson(parser->ast(), TRI_UNKNOWN_MEM_ZONE, true).toString() << "\n\n";
       planRegisters = false;
     }
 
     TRI_ASSERT(plan.get() != nullptr);
-    /* // for debugging of serialization/deserialization . . . * /
-    auto JsonPlan = plan->toJson(parser->ast(),TRI_UNKNOWN_MEM_ZONE, true);
-    auto JsonString = JsonPlan.toString();
-    std::cout << "original plan: \n" << JsonString << "\n";
 
-    auto otherPlan = ExecutionPlan::instantiateFromJson (parser->ast(),
-                                                         JsonPlan);
-    otherPlan->getCost(); 
-    auto otherJsonString =
-      otherPlan->toJson(parser->ast(), TRI_UNKNOWN_MEM_ZONE, true).toString(); 
-    std::cout << "deserialized plan: \n" << otherJsonString << "\n";
-    //TRI_ASSERT(otherJsonString == JsonString); */
-    
     // varsUsedLater and varsValid are unordered_sets and so their orders
-    // are not the same in the serialized and deserialized plans 
+    // are not the same in the serialized and deserialized plans
 
     // return the V8 context
     exitContext();
 
     enterState(EXECUTION);
-    ExecutionEngine* engine(ExecutionEngine::instantiateFromPlan(registry, this, plan.get(), planRegisters));
+    ExecutionEngine* engine(ExecutionEngine::instantiateFromPlan(
+        registry, this, plan.get(), planRegisters));
 
     // If all went well so far, then we keep _plan, _parser and _trx and
     // return:
@@ -609,30 +535,33 @@ QueryResult Query::prepare (QueryRegistry* registry) {
     _parser = parser.release();
     _engine = engine;
     return QueryResult();
-  }
-  catch (triagens::basics::Exception const& ex) {
+  } catch (arangodb::basics::Exception const& ex) {
     cleanupPlanAndEngine(ex.code());
     return QueryResult(ex.code(), ex.message() + getStateString());
-  }
-  catch (std::bad_alloc const&) {
+  } catch (std::bad_alloc const&) {
     cleanupPlanAndEngine(TRI_ERROR_OUT_OF_MEMORY);
-    return QueryResult(TRI_ERROR_OUT_OF_MEMORY, TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
-  }
-  catch (std::exception const& ex) {
+    return QueryResult(
+        TRI_ERROR_OUT_OF_MEMORY,
+        TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
+  } catch (std::exception const& ex) {
     cleanupPlanAndEngine(TRI_ERROR_INTERNAL);
     return QueryResult(TRI_ERROR_INTERNAL, ex.what() + getStateString());
-  }
-  catch (...) {
+  } catch (...) {
     cleanupPlanAndEngine(TRI_ERROR_INTERNAL);
-    return QueryResult(TRI_ERROR_INTERNAL, TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
+    return QueryResult(TRI_ERROR_INTERNAL,
+                       TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief execute an AQL query 
-////////////////////////////////////////////////////////////////////////////////
+/// @brief execute an AQL query
+QueryResult Query::execute(QueryRegistry* registry) {
+  LOG_TOPIC(DEBUG, Logger::QUERIES) << TRI_microtime() - _startTime << " "
+                                    << "Query::execute"
+                                    << " this: " << (uintptr_t) this;
+  TRI_ASSERT(registry != nullptr);
 
-QueryResult Query::execute (QueryRegistry* registry) {
+  std::unique_ptr<AqlWorkStack> work;
+
   try {
     bool useQueryCache = canUseQueryCache();
     uint64_t queryStringHash = 0;
@@ -642,142 +571,170 @@ QueryResult Query::execute (QueryRegistry* registry) {
       queryStringHash = hash();
 
       // check the query cache for an existing result
-      auto cacheEntry = triagens::aql::QueryCache::instance()->lookup(_vocbase, queryStringHash, _queryString, _queryLength);
-      triagens::aql::QueryCacheResultEntryGuard guard(cacheEntry);
+      auto cacheEntry = arangodb::aql::QueryCache::instance()->lookup(
+          _vocbase, queryStringHash, _queryString, _queryLength);
+      arangodb::aql::QueryCacheResultEntryGuard guard(cacheEntry);
 
       if (cacheEntry != nullptr) {
         // got a result from the query cache
         QueryResult res(TRI_ERROR_NO_ERROR);
-        res.warnings = warningsToJson(TRI_UNKNOWN_MEM_ZONE);
-        res.json     = TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, cacheEntry->_queryResult);
-        res.stats    = nullptr;
-        res.cached   = true;
+        // we don't have yet a transaction when we're here, so let's create
+        // a mimimal context to build the result
+        res.context = std::make_shared<StandaloneTransactionContext>(_vocbase);
 
+        res.warnings = warningsToVelocyPack();
+        TRI_ASSERT(cacheEntry->_queryResult != nullptr);
+        res.result = cacheEntry->_queryResult;
+        res.cached = true;
         return res;
-      } 
+      }
     }
 
-    QueryResult res = prepare(registry);
+    QueryResult result = prepare(registry);
 
-    if (res.code != TRI_ERROR_NO_ERROR) {
-      return res;
+    if (result.code != TRI_ERROR_NO_ERROR) {
+      return result;
     }
 
-    if (useQueryCache && (_isModificationQuery || ! _warnings.empty() || ! _ast->root()->isCacheable())) {
+    if (_queryString == nullptr) {
+      // we don't have query string... now pass query id to WorkMonitor
+      work.reset(new AqlWorkStack(_vocbase, _id));
+    } else {
+      // we do have a query string... pass query to WorkMonitor
+      work.reset(new AqlWorkStack(_vocbase, _id, _queryString, _queryLength));
+    }
+
+    log();
+
+    if (useQueryCache && (_isModificationQuery || !_warnings.empty() ||
+                          !_ast->root()->isCacheable())) {
       useQueryCache = false;
     }
 
-    triagens::basics::Json jsonResult(triagens::basics::Json::Array, 16);
-    triagens::basics::Json stats;
-
-    // this is the RegisterId our results can be found in
-    auto const resultRegister = _engine->resultRegister();
-    
     AqlItemBlock* value = nullptr;
+    VPackOptions options = VPackOptions::Defaults;
+    options.buildUnindexedArrays = true;
+    options.buildUnindexedObjects = true;
+
+    TRI_ASSERT(_engine != nullptr);
+    auto resultBuilder = std::make_shared<VPackBuilder>(&options);
+    resultBuilder->buffer()->reserve(
+        16 * 1024);  // reserve some space in Builder to avoid frequent reallocs
 
     try {
+      resultBuilder->openArray();
+      // this is the RegisterId our results can be found in
+      auto const resultRegister = _engine->resultRegister();
+
       if (useQueryCache) {
         // iterate over result, return it and store it in query cache
-        while (nullptr != (value = _engine->getSome(1, ExecutionBlock::DefaultBatchSize))) {
-          auto doc = value->getDocumentCollection(resultRegister);
-
+        while (nullptr != (value = _engine->getSome(
+                               1, ExecutionBlock::DefaultBatchSize()))) {
           size_t const n = value->size();
-          // reserve space for n additional results at once
-          jsonResult.reserve(n);
 
           for (size_t i = 0; i < n; ++i) {
-            auto val = value->getValueReference(i, resultRegister);
+            AqlValue const& val = value->getValueReference(i, resultRegister);
 
-            if (! val.isEmpty()) {
-              jsonResult.add(val.toJson(_trx, doc, true)); 
+            if (!val.isEmpty()) {
+              val.toVelocyPack(_trx, *resultBuilder, true);
             }
           }
           delete value;
           value = nullptr;
         }
+
+        // must close result array here because it must be passed as a closed
+        // array
+        // to the query cache
+        resultBuilder->close();
 
         if (_warnings.empty()) {
           // finally store the generated result in the query cache
-          QueryCache::instance()->store(
-            _vocbase, 
-            queryStringHash, 
-            _queryString, 
-            _queryLength, 
-            TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, jsonResult.json()), 
-            _trx->collectionNames()
-          );
+          auto result = QueryCache::instance()->store(
+              _vocbase, queryStringHash, _queryString, _queryLength,
+              resultBuilder, _trx->collectionNames());
+
+          if (result == nullptr) {
+            THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+          }
         }
-      }
-      else {
+      } else {
         // iterate over result and return it
-        while (nullptr != (value = _engine->getSome(1, ExecutionBlock::DefaultBatchSize))) {
-          auto doc = value->getDocumentCollection(resultRegister);
-
+        while (nullptr != (value = _engine->getSome(
+                               1, ExecutionBlock::DefaultBatchSize()))) {
           size_t const n = value->size();
-          // reserve space for n additional results at once
-          jsonResult.reserve(n);
-
           for (size_t i = 0; i < n; ++i) {
-            auto val = value->getValueReference(i, resultRegister);
+            AqlValue const& val = value->getValueReference(i, resultRegister);
 
-            if (! val.isEmpty()) {
-              jsonResult.add(val.toJson(_trx, doc, true)); 
+            if (!val.isEmpty()) {
+              val.toVelocyPack(_trx, *resultBuilder, false);
             }
           }
           delete value;
           value = nullptr;
         }
+
+        // must close result array
+        resultBuilder->close();
       }
-    }
-    catch (...) {
+    } catch (...) {
       delete value;
       throw;
     }
 
-    stats = _engine->_stats.toJson();
-
     _trx->commit();
-    
+
+    _engine->_stats.setExecutionTime(TRI_microtime() - _startTime);
+    auto stats = std::make_shared<VPackBuilder>();
+    _engine->_stats.toVelocyPack(*(stats.get()));
+
+    result.context = _trx->transactionContext();
+
     cleanupPlanAndEngine(TRI_ERROR_NO_ERROR);
 
-    enterState(FINALIZATION); 
+    enterState(FINALIZATION);
 
-    QueryResult result(TRI_ERROR_NO_ERROR);
-    result.warnings = warningsToJson(TRI_UNKNOWN_MEM_ZONE);
-    result.json     = jsonResult.steal();
-    result.stats    = stats.steal(); 
+    result.warnings = warningsToVelocyPack();
+    result.result = resultBuilder;
+    result.stats = stats;
 
     if (_profile != nullptr && profiling()) {
-      result.profile = _profile->toJson(TRI_UNKNOWN_MEM_ZONE);
+      result.profile = _profile->toVelocyPack();
     }
 
+    LOG_TOPIC(DEBUG, Logger::QUERIES) << TRI_microtime() - _startTime << " "
+                                      << "Query::execute:returning"
+                                      << " this: " << (uintptr_t) this;
     return result;
-  }
-  catch (triagens::basics::Exception const& ex) {
+  } catch (arangodb::basics::Exception const& ex) {
+    setExecutionTime();
     cleanupPlanAndEngine(ex.code());
     return QueryResult(ex.code(), ex.message() + getStateString());
-  }
-  catch (std::bad_alloc const&) {
+  } catch (std::bad_alloc const&) {
+    setExecutionTime();
     cleanupPlanAndEngine(TRI_ERROR_OUT_OF_MEMORY);
-    return QueryResult(TRI_ERROR_OUT_OF_MEMORY, TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
-  }
-  catch (std::exception const& ex) {
+    return QueryResult(
+        TRI_ERROR_OUT_OF_MEMORY,
+        TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
+  } catch (std::exception const& ex) {
+    setExecutionTime();
     cleanupPlanAndEngine(TRI_ERROR_INTERNAL);
     return QueryResult(TRI_ERROR_INTERNAL, ex.what() + getStateString());
-  }
-  catch (...) {
+  } catch (...) {
+    setExecutionTime();
     cleanupPlanAndEngine(TRI_ERROR_INTERNAL);
-    return QueryResult(TRI_ERROR_INTERNAL, TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
+    return QueryResult(TRI_ERROR_INTERNAL,
+                       TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief execute an AQL query 
-/// may only be called with an active V8 handle scope
-////////////////////////////////////////////////////////////////////////////////
+// execute an AQL query: may only be called with an active V8 handle scope
+QueryResultV8 Query::executeV8(v8::Isolate* isolate, QueryRegistry* registry) {
+  LOG_TOPIC(DEBUG, Logger::QUERIES) << TRI_microtime() - _startTime << " "
+                                    << "Query::executeV8"
+                                    << " this: " << (uintptr_t) this;
+  std::unique_ptr<AqlWorkStack> work;
 
-QueryResultV8 Query::executeV8 (v8::Isolate* isolate, 
-                                QueryRegistry* registry) {
   try {
     bool useQueryCache = canUseQueryCache();
     uint64_t queryStringHash = 0;
@@ -787,165 +744,190 @@ QueryResultV8 Query::executeV8 (v8::Isolate* isolate,
       queryStringHash = hash();
 
       // check the query cache for an existing result
-      auto cacheEntry = triagens::aql::QueryCache::instance()->lookup(_vocbase, queryStringHash, _queryString, _queryLength);
-      triagens::aql::QueryCacheResultEntryGuard guard(cacheEntry);
+      auto cacheEntry = arangodb::aql::QueryCache::instance()->lookup(
+          _vocbase, queryStringHash, _queryString, _queryLength);
+      arangodb::aql::QueryCacheResultEntryGuard guard(cacheEntry);
 
       if (cacheEntry != nullptr) {
         // got a result from the query cache
         QueryResultV8 res(TRI_ERROR_NO_ERROR);
-        res.result = v8::Handle<v8::Array>::Cast(TRI_ObjectJson(isolate, cacheEntry->_queryResult));
+        // we don't have yet a transaction when we're here, so let's create
+        // a mimimal context to build the result
+        res.context = std::make_shared<StandaloneTransactionContext>(_vocbase);
+
+        v8::Handle<v8::Value> values =
+            TRI_VPackToV8(isolate, cacheEntry->_queryResult->slice(),
+                          res.context->getVPackOptions());
+        TRI_ASSERT(values->IsArray());
+        res.result = v8::Handle<v8::Array>::Cast(values);
         res.cached = true;
         return res;
-      } 
+      }
     }
 
-    QueryResultV8 res = prepare(registry);
+    QueryResultV8 result = prepare(registry);
 
-    if (res.code != TRI_ERROR_NO_ERROR) {
-      return res;
+    if (result.code != TRI_ERROR_NO_ERROR) {
+      return result;
     }
 
-    if (useQueryCache && (_isModificationQuery || ! _warnings.empty() || ! _ast->root()->isCacheable())) {
+    work.reset(new AqlWorkStack(_vocbase, _id, _queryString, _queryLength));
+
+    log();
+
+    if (useQueryCache && (_isModificationQuery || !_warnings.empty() ||
+                          !_ast->root()->isCacheable())) {
       useQueryCache = false;
     }
 
-    QueryResultV8 result(TRI_ERROR_NO_ERROR);
     result.result = v8::Array::New(isolate);
-    triagens::basics::Json stats;
-    
+
+    TRI_ASSERT(_engine != nullptr);
+
     // this is the RegisterId our results can be found in
     auto const resultRegister = _engine->resultRegister();
     AqlItemBlock* value = nullptr;
 
     try {
       if (useQueryCache) {
+        VPackOptions options = VPackOptions::Defaults;
+        options.buildUnindexedArrays = true;
+        options.buildUnindexedObjects = true;
+
         // iterate over result, return it and store it in query cache
-        std::unique_ptr<TRI_json_t> cacheResult(TRI_CreateArrayJson(TRI_UNKNOWN_MEM_ZONE));
+        auto builder = std::make_shared<VPackBuilder>(&options);
+        builder->openArray();
 
         uint32_t j = 0;
-        while (nullptr != (value = _engine->getSome(1, ExecutionBlock::DefaultBatchSize))) {
-          auto doc = value->getDocumentCollection(resultRegister);
-
+        while (nullptr != (value = _engine->getSome(
+                               1, ExecutionBlock::DefaultBatchSize()))) {
           size_t const n = value->size();
-          
+
           for (size_t i = 0; i < n; ++i) {
-            auto val = value->getValueReference(i, resultRegister);
+            AqlValue const& val = value->getValueReference(i, resultRegister);
 
-            if (! val.isEmpty()) {
-              result.result->Set(j++, val.toV8(isolate, _trx, doc));
-
-              auto json = val.toJson(_trx, doc, true);
-              TRI_PushBack3ArrayJson(TRI_UNKNOWN_MEM_ZONE, cacheResult.get(), json.steal());
+            if (!val.isEmpty()) {
+              result.result->Set(j++, val.toV8(isolate, _trx));
+              val.toVelocyPack(_trx, *builder, true);
             }
           }
           delete value;
           value = nullptr;
         }
+
+        builder->close();
 
         if (_warnings.empty()) {
           // finally store the generated result in the query cache
-          QueryCache::instance()->store(
-            _vocbase, 
-            queryStringHash, 
-            _queryString, 
-            _queryLength, 
-            cacheResult.get(), 
-            _trx->collectionNames()
-          );
-          cacheResult.release();
+          QueryCache::instance()->store(_vocbase, queryStringHash, _queryString,
+                                        _queryLength, builder,
+                                        _trx->collectionNames());
         }
-      }
-      else {
+      } else {
         // iterate over result and return it
+        bool suppressResult = silent();
+
         uint32_t j = 0;
-        while (nullptr != (value = _engine->getSome(1, ExecutionBlock::DefaultBatchSize))) {
-          auto doc = value->getDocumentCollection(resultRegister);
+        while (nullptr != (value = _engine->getSome(
+                               1, ExecutionBlock::DefaultBatchSize()))) {
+          if (!suppressResult) {
+            size_t const n = value->size();
 
-          size_t const n = value->size();
-          
-          for (size_t i = 0; i < n; ++i) {
-            auto val = value->getValueReference(i, resultRegister);
+            for (size_t i = 0; i < n; ++i) {
+              AqlValue const& val = value->getValueReference(i, resultRegister);
 
-            if (! val.isEmpty()) {
-              result.result->Set(j++, val.toV8(isolate, _trx, doc));
+              if (!val.isEmpty()) {
+                result.result->Set(j++, val.toV8(isolate, _trx));
+              }
+
+              if (V8PlatformFeature::isOutOfMemory(isolate)) {
+                THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+              }
             }
           }
           delete value;
           value = nullptr;
         }
       }
-    }
-    catch (...) {
+    } catch (...) {
       delete value;
       throw;
     }
 
-    stats = _engine->_stats.toJson();
+    LOG_TOPIC(DEBUG, Logger::QUERIES) << TRI_microtime() - _startTime << " "
+                                      << "Query::executeV8: before _trx->commit"
+                                      << " this: " << (uintptr_t) this;
 
     _trx->commit();
-    
+
+    _engine->_stats.setExecutionTime(TRI_microtime() - _startTime);
+    auto stats = std::make_shared<VPackBuilder>();
+    _engine->_stats.toVelocyPack(*(stats.get()));
+
+    result.context = _trx->transactionContext();
+
+    LOG_TOPIC(DEBUG, Logger::QUERIES)
+        << TRI_microtime() - _startTime << " "
+        << "Query::executeV8: before cleanupPlanAndEngine"
+        << " this: " << (uintptr_t) this;
+
     cleanupPlanAndEngine(TRI_ERROR_NO_ERROR);
 
-    enterState(FINALIZATION); 
+    enterState(FINALIZATION);
 
-    result.warnings = warningsToJson(TRI_UNKNOWN_MEM_ZONE);
-    result.stats    = stats.steal(); 
+    result.warnings = warningsToVelocyPack();
+    result.stats = stats;
 
     if (_profile != nullptr && profiling()) {
-      result.profile = _profile->toJson(TRI_UNKNOWN_MEM_ZONE);
+      result.profile = _profile->toVelocyPack();
     }
 
     return result;
-  }
-  catch (triagens::basics::Exception const& ex) {
+  } catch (arangodb::basics::Exception const& ex) {
+    setExecutionTime();
     cleanupPlanAndEngine(ex.code());
     return QueryResultV8(ex.code(), ex.message() + getStateString());
-  }
-  catch (std::bad_alloc const&) {
+  } catch (std::bad_alloc const&) {
+    setExecutionTime();
     cleanupPlanAndEngine(TRI_ERROR_OUT_OF_MEMORY);
-    return QueryResultV8(TRI_ERROR_OUT_OF_MEMORY, TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
-  }
-  catch (std::exception const& ex) {
+    return QueryResultV8(
+        TRI_ERROR_OUT_OF_MEMORY,
+        TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
+  } catch (std::exception const& ex) {
+    setExecutionTime();
     cleanupPlanAndEngine(TRI_ERROR_INTERNAL);
     return QueryResultV8(TRI_ERROR_INTERNAL, ex.what() + getStateString());
-  }
-  catch (...) {
+  } catch (...) {
+    setExecutionTime();
     cleanupPlanAndEngine(TRI_ERROR_INTERNAL);
-    return QueryResult(TRI_ERROR_INTERNAL, TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
+    return QueryResult(TRI_ERROR_INTERNAL,
+                       TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief parse an AQL query
-////////////////////////////////////////////////////////////////////////////////
-
-QueryResult Query::parse () {
+QueryResult Query::parse() {
   try {
     init();
     Parser parser(this);
     return parser.parse(true);
-  }
-  catch (triagens::basics::Exception const& ex) {
+  } catch (arangodb::basics::Exception const& ex) {
     return QueryResult(ex.code(), ex.message());
-  }
-  catch (std::bad_alloc const&) {
+  } catch (std::bad_alloc const&) {
     cleanupPlanAndEngine(TRI_ERROR_OUT_OF_MEMORY);
-    return QueryResult(TRI_ERROR_OUT_OF_MEMORY, TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY));
-  }
-  catch (std::exception const& ex) {
+    return QueryResult(TRI_ERROR_OUT_OF_MEMORY,
+                       TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY));
+  } catch (std::exception const& ex) {
     cleanupPlanAndEngine(TRI_ERROR_INTERNAL);
     return QueryResult(TRI_ERROR_INTERNAL, ex.what());
-  }
-  catch (...) {
-    return QueryResult(TRI_ERROR_OUT_OF_MEMORY, TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY));
+  } catch (...) {
+    return QueryResult(TRI_ERROR_OUT_OF_MEMORY,
+                       TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY));
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief explain an AQL query
-////////////////////////////////////////////////////////////////////////////////
-
-QueryResult Query::explain () {
+QueryResult Query::explain() {
   try {
     init();
     enterState(PARSING);
@@ -959,10 +941,10 @@ QueryResult Query::explain () {
     enterState(AST_OPTIMIZATION);
     // optimize and validate the ast
     parser.ast()->validateAndOptimize();
-    // std::cout << "AST: " << triagens::basics::JsonHelper::toString(parser.ast()->toJson(TRI_UNKNOWN_MEM_ZONE)) << "\n";
 
     // create the transaction object, but do not start it yet
-    _trx = new triagens::arango::AqlTransaction(createTransactionContext(), _vocbase, _collections.collections(), true);
+    _trx = new arangodb::AqlTransaction(createTransactionContext(),
+                                        _collections.collections(), true);
 
     // we have an AST
     int res = _trx->begin();
@@ -981,65 +963,70 @@ QueryResult Query::explain () {
 
     // Run the query optimizer:
     enterState(PLAN_OPTIMIZATION);
-    triagens::aql::Optimizer opt(maxNumberOfPlans());
+    arangodb::aql::Optimizer opt(maxNumberOfPlans());
     // get enabled/disabled rules
     opt.createPlans(plan, getRulesFromOptions(), inspectSimplePlans());
-      
 
     enterState(FINALIZATION);
-      
+
     QueryResult result(TRI_ERROR_NO_ERROR);
-    QueryRegistry localRegistry;
 
     if (allPlans()) {
-      triagens::basics::Json out(Json::Array);
+      result.result = std::make_shared<VPackBuilder>();
+      {
+        VPackArrayBuilder guard(result.result.get());
 
-      auto plans = opt.getPlans();
-      for (auto& it : plans) {
-        TRI_ASSERT(it != nullptr);
+        auto plans = opt.getPlans();
+        for (auto& it : plans) {
+          TRI_ASSERT(it != nullptr);
 
-        it->findVarUsage();
-        it->planRegisters();
-        out.add(it->toJson(parser.ast(), TRI_UNKNOWN_MEM_ZONE, verbosePlans()));
+          it->findVarUsage();
+          it->planRegisters();
+          it->toVelocyPack(*result.result.get(), parser.ast(), verbosePlans());
+        }
       }
-      result.json = out.steal();
-    }
-    else {
+      // cacheability not available here
+      result.cached = false;
+    } else {
       // Now plan and all derived plans belong to the optimizer
-      std::unique_ptr<ExecutionPlan> bestPlan(opt.stealBest()); // Now we own the best one again
+      std::unique_ptr<ExecutionPlan> bestPlan(
+          opt.stealBest());  // Now we own the best one again
       TRI_ASSERT(bestPlan != nullptr);
 
       bestPlan->findVarUsage();
       bestPlan->planRegisters();
-      result.json = bestPlan->toJson(parser.ast(), TRI_UNKNOWN_MEM_ZONE, verbosePlans()).steal(); 
+
+      result.result = bestPlan->toVelocyPack(parser.ast(), verbosePlans());
+
+      // cacheability
+      result.cached = (_queryString != nullptr && _queryLength > 0 &&
+                       !_isModificationQuery && _warnings.empty() &&
+                       _ast->root()->isCacheable());
     }
 
     _trx->commit();
-      
-    result.warnings = warningsToJson(TRI_UNKNOWN_MEM_ZONE);
-    result.stats = opt._stats.toJson(TRI_UNKNOWN_MEM_ZONE);
+
+    result.warnings = warningsToVelocyPack();
+
+    result.stats = opt._stats.toVelocyPack();
 
     return result;
-  }
-  catch (triagens::basics::Exception const& ex) {
+  } catch (arangodb::basics::Exception const& ex) {
     return QueryResult(ex.code(), ex.message() + getStateString());
-  }
-  catch (std::bad_alloc const&) {
-    return QueryResult(TRI_ERROR_OUT_OF_MEMORY, TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
-  }
-  catch (std::exception const& ex) {
+  } catch (std::bad_alloc const&) {
+    return QueryResult(
+        TRI_ERROR_OUT_OF_MEMORY,
+        TRI_errno_string(TRI_ERROR_OUT_OF_MEMORY) + getStateString());
+  } catch (std::exception const& ex) {
     return QueryResult(TRI_ERROR_INTERNAL, ex.what() + getStateString());
-  }
-  catch (...) {
-    return QueryResult(TRI_ERROR_INTERNAL, TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
+  } catch (...) {
+    return QueryResult(TRI_ERROR_INTERNAL,
+                       TRI_errno_string(TRI_ERROR_INTERNAL) + getStateString());
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief get v8 executor
-////////////////////////////////////////////////////////////////////////////////
-
-Executor* Query::executor () {
+Executor* Query::executor() {
   if (_executor == nullptr) {
     // the executor is a singleton per query
     _executor = new Executor(literalSizeThreshold());
@@ -1049,14 +1036,9 @@ Executor* Query::executor () {
   return _executor;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief register a string
 /// the string is freed when the query is destroyed
-////////////////////////////////////////////////////////////////////////////////
-
-char* Query::registerString (char const* p, 
-                             size_t length) {
-
+char* Query::registerString(char const* p, size_t length) {
   if (p == nullptr) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
   }
@@ -1067,10 +1049,10 @@ char* Query::registerString (char const* p,
   }
 
   if (length < ShortStringStorage::MaxStringLength) {
-    return _shortStringStorage.registerString(p, length); 
+    return _shortStringStorage.registerString(p, length);
   }
 
-  char* copy = TRI_DuplicateString2Z(TRI_UNKNOWN_MEM_ZONE, p, length);
+  char* copy = TRI_DuplicateString(TRI_UNKNOWN_MEM_ZONE, p, length);
 
   if (copy == nullptr) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
@@ -1078,32 +1060,23 @@ char* Query::registerString (char const* p,
 
   try {
     _strings.emplace_back(copy);
-  }
-  catch (...) {
+  } catch (...) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
   }
 
   return copy;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief register a string
 /// the string is freed when the query is destroyed
-////////////////////////////////////////////////////////////////////////////////
-
-char* Query::registerString (std::string const& p) {
+char* Query::registerString(std::string const& p) {
   return registerString(p.c_str(), p.length());
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief register a potentially UTF-8-escaped string
 /// the string is freed when the query is destroyed
-////////////////////////////////////////////////////////////////////////////////
-
-char* Query::registerEscapedString (char const* p, 
-                                    size_t length,
-                                    size_t& outLength) {
-
+char* Query::registerEscapedString(char const* p, size_t length,
+                                   size_t& outLength) {
   if (p == nullptr) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
   }
@@ -1114,7 +1087,8 @@ char* Query::registerEscapedString (char const* p,
     return const_cast<char*>(EmptyString);
   }
 
-  char* copy = TRI_UnescapeUtf8String(TRI_UNKNOWN_MEM_ZONE, p, length, &outLength);
+  char* copy = TRI_UnescapeUtf8String(TRI_UNKNOWN_MEM_ZONE, p, length,
+                                      &outLength, false);
 
   if (copy == nullptr) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
@@ -1122,33 +1096,31 @@ char* Query::registerEscapedString (char const* p,
 
   try {
     _strings.emplace_back(copy);
-  }
-  catch (...) {
+  } catch (...) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
   }
 
   return copy;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief enter a V8 context
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::enterContext () {
-  if (! _contextOwnedByExterior) {
+void Query::enterContext() {
+  if (!_contextOwnedByExterior) {
     if (_context == nullptr) {
-      _context = _applicationV8->enterContext(_vocbase, false);
+      _context = V8DealerFeature::DEALER->enterContext(_vocbase, false);
 
       if (_context == nullptr) {
-        THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_INTERNAL, "cannot enter V8 context");
+        THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_INTERNAL,
+                                       "cannot enter V8 context");
       }
-    
+
       // register transaction and resolver in context
       TRI_ASSERT(_trx != nullptr);
 
       ISOLATE;
       TRI_GET_GLOBALS();
-      auto ctx = static_cast<triagens::arango::V8TransactionContext*>(v8g->_transactionContext);
+      auto ctx = static_cast<arangodb::V8TransactionContext*>(
+          v8g->_transactionContext);
       if (ctx != nullptr) {
         ctx->registerTransaction(_trx->getInternals());
       }
@@ -1158,191 +1130,201 @@ void Query::enterContext () {
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return a V8 context
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::exitContext () {
-  if (! _contextOwnedByExterior) {
+void Query::exitContext() {
+  if (!_contextOwnedByExterior) {
     if (_context != nullptr) {
       // unregister transaction and resolver in context
       ISOLATE;
       TRI_GET_GLOBALS();
-      auto ctx = static_cast<triagens::arango::V8TransactionContext*>(v8g->_transactionContext);
+      auto ctx = static_cast<arangodb::V8TransactionContext*>(
+          v8g->_transactionContext);
       if (ctx != nullptr) {
         ctx->unregisterTransaction();
       }
 
-      _applicationV8->exitContext(_context);
+      V8DealerFeature::DEALER->exitContext(_context);
       _context = nullptr;
     }
     TRI_ASSERT(_context == nullptr);
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief returns statistics for current query.
-////////////////////////////////////////////////////////////////////////////////
-
-triagens::basics::Json Query::getStats() {
-  if (_engine) {
-    return _engine->_stats.toJson();
+void Query::getStats(VPackBuilder& builder) {
+  if (_engine != nullptr) {
+    _engine->_stats.setExecutionTime(TRI_microtime() - _startTime);
+    _engine->_stats.toVelocyPack(builder);
+  } else {
+    ExecutionStats::toVelocyPackStatic(builder);
   }
-  return ExecutionStats::toJsonStatic();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief fetch a boolean value from the options
-////////////////////////////////////////////////////////////////////////////////
-
-bool Query::getBooleanOption (char const* option, bool defaultValue) const {  
-  if (! TRI_IsObjectJson(_options)) {
+bool Query::getBooleanOption(char const* option, bool defaultValue) const {
+  if (_options == nullptr) {
     return defaultValue;
   }
 
-  TRI_json_t const* valueJson = TRI_LookupObjectJson(_options, option);
-  if (! TRI_IsBooleanJson(valueJson)) {
+  VPackSlice options = _options->slice();
+  if (!options.isObject()) {
     return defaultValue;
   }
 
-  return valueJson->_value._boolean;
+  VPackSlice value = options.get(option);
+  if (!value.isBoolean()) {
+    return defaultValue;
+  }
+
+  return value.getBool();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief convert the list of warnings to JSON
-////////////////////////////////////////////////////////////////////////////////
+/// @brief convert the list of warnings to VelocyPack.
+///        Will add a new entry { ..., warnings: <warnings>, } if there are
+///        warnings. If there are none it will not modify the builder
+void Query::addWarningsToVelocyPackObject(
+    arangodb::velocypack::Builder& builder) const {
+  TRI_ASSERT(builder.isOpenObject());
+  if (_warnings.empty()) {
+    return;
+  }
+  size_t const n = _warnings.size();
+  builder.add(VPackValue("warnings"));
+  {
+    VPackArrayBuilder guard(&builder);
+    for (size_t i = 0; i < n; ++i) {
+      VPackObjectBuilder objGuard(&builder);
+      builder.add("code", VPackValue(_warnings[i].first));
+      builder.add("message", VPackValue(_warnings[i].second));
+    }
+  }
+}
 
-TRI_json_t* Query::warningsToJson (TRI_memory_zone_t* zone) const {
+/// @brief transform the list of warnings to VelocyPack.
+std::shared_ptr<VPackBuilder> Query::warningsToVelocyPack() const {
   if (_warnings.empty()) {
     return nullptr;
   }
-
-  size_t const n = _warnings.size();
-  TRI_json_t* json = TRI_CreateArrayJson(zone, n);
-
-  if (json != nullptr) {
+  auto result = std::make_shared<VPackBuilder>();
+  {
+    VPackArrayBuilder guard(result.get());
+    size_t const n = _warnings.size();
     for (size_t i = 0; i < n; ++i) {
-      TRI_json_t* error = TRI_CreateObjectJson(zone, 2);
-
-      if (error != nullptr) {
-        TRI_Insert3ObjectJson(zone, error, "code", TRI_CreateNumberJson(zone, static_cast<double>(_warnings[i].first)));
-        TRI_Insert3ObjectJson(zone, error, "message", TRI_CreateStringCopyJson(zone, _warnings[i].second.c_str(), _warnings[i].second.size()));
-
-        TRI_PushBack3ArrayJson(zone, json, error);
-      }
+      VPackObjectBuilder objGuard(result.get());
+      result->add("code", VPackValue(_warnings[i].first));
+      result->add("message", VPackValue(_warnings[i].second));
     }
   }
-
-  return json;
+  return result;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief initializes the query
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::init () {
+void Query::init() {
   if (_id != 0) {
     // already called
     return;
   }
-   
+
   TRI_ASSERT(_id == 0);
   TRI_ASSERT(_ast == nullptr);
- 
-  _id = TRI_NextQueryIdVocBase(_vocbase);
 
+  _id = Query::NextId();
+
+  TRI_ASSERT(_profile == nullptr);
   _profile = new Profile(this);
   enterState(INITIALIZATION);
-  
+
+  TRI_ASSERT(_ast == nullptr);
   _ast = new Ast(this);
   _nodes.reserve(32);
   _strings.reserve(32);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief calculate a hash value for the query and bind parameters
-////////////////////////////////////////////////////////////////////////////////
+/// @brief log a query
+void Query::log() {
+  if (_queryString != nullptr) {
+    static size_t const MaxLength = 1024;
 
-uint64_t Query::hash () const {
+    LOG_TOPIC(TRACE, Logger::QUERIES)
+        << "executing query " << _id << ": '"
+        << std::string(_queryString, (std::min)(_queryLength, MaxLength))
+               .append(_queryLength > MaxLength ? "..." : "") << "'";
+  }
+}
+
+/// @brief calculate a hash value for the query and bind parameters
+uint64_t Query::hash() const {
   // hash the query string first
-  uint64_t hash = triagens::aql::QueryCache::instance()->hashQueryString(_queryString, _queryLength);
+  uint64_t hash = arangodb::aql::QueryCache::instance()->hashQueryString(
+      _queryString, _queryLength);
 
   // handle "fullCount" option. if this option is set, the query result will
-  // be different to when it is not set! 
+  // be different to when it is not set!
   if (getBooleanOption("fullcount", false)) {
     hash = fasthash64(TRI_CHAR_LENGTH_PAIR("fullcount:true"), hash);
-  }
-  else {
+  } else {
     hash = fasthash64(TRI_CHAR_LENGTH_PAIR("fullcount:false"), hash);
   }
 
   // handle "count" option
   if (getBooleanOption("count", false)) {
     hash = fasthash64(TRI_CHAR_LENGTH_PAIR("count:true"), hash);
-  }
-  else {
+  } else {
     hash = fasthash64(TRI_CHAR_LENGTH_PAIR("count:false"), hash);
   }
 
   // blend query hash with bind parameters
-  return hash ^ _bindParameters.hash(); 
+  return hash ^ _bindParameters.hash();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not the query cache can be used for the query
-////////////////////////////////////////////////////////////////////////////////
-
-bool Query::canUseQueryCache () const {
+bool Query::canUseQueryCache() const {
   if (_queryString == nullptr || _queryLength < 8) {
     return false;
   }
 
-  auto queryCacheMode = QueryCache::instance()->mode(); 
+  auto queryCacheMode = QueryCache::instance()->mode();
 
   if (queryCacheMode == CACHE_ALWAYS_ON && getBooleanOption("cache", true)) {
-    // cache mode is set to always on... query can still be excluded from cache by 
+    // cache mode is set to always on... query can still be excluded from cache
+    // by
     // setting `cache` attribute to false.
 
     // cannot use query cache on a coordinator at the moment
-    return ! triagens::arango::ServerState::instance()->isRunningInCluster();
-  }
-  else if (queryCacheMode == CACHE_ON_DEMAND && getBooleanOption("cache", false)) {
+    return !arangodb::ServerState::instance()->isRunningInCluster();
+  } else if (queryCacheMode == CACHE_ON_DEMAND &&
+             getBooleanOption("cache", false)) {
     // cache mode is set to demand... query will only be cached if `cache`
     // attribute is set to false
-    
+
     // cannot use query cache on a coordinator at the moment
-    return ! triagens::arango::ServerState::instance()->isRunningInCluster();
+    return !arangodb::ServerState::instance()->isRunningInCluster();
   }
 
   return false;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief fetch a numeric value from the options
-////////////////////////////////////////////////////////////////////////////////
-
-double Query::getNumericOption (char const* option, double defaultValue) const {  
-  if (! TRI_IsObjectJson(_options)) {
+double Query::getNumericOption(char const* option, double defaultValue) const {
+  if (_options == nullptr) {
     return defaultValue;
   }
 
-  TRI_json_t const* valueJson = TRI_LookupObjectJson(_options, option);
-  if (! TRI_IsNumberJson(valueJson)) {
+  VPackSlice options = _options->slice();
+  if (!options.isObject()) {
     return defaultValue;
   }
 
-  return valueJson->_value._number;
+  VPackSlice value = options.get(option);
+  if (!value.isNumber()) {
+    return defaultValue;
+  }
+
+  return value.getNumericValue<double>();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief neatly format transaction error to the user.
-////////////////////////////////////////////////////////////////////////////////
-
-QueryResult Query::transactionError (int errorCode) const {
+QueryResult Query::transactionError(int errorCode) const {
   std::string err(TRI_errno_string(errorCode));
 
   auto detail = _trx->getErrorData();
@@ -1351,103 +1333,95 @@ QueryResult Query::transactionError (int errorCode) const {
   }
 
   if (_queryString != nullptr && verboseErrors()) {
-    err += std::string("\nwhile executing:\n") + _queryString + std::string("\n");
+    err +=
+        std::string("\nwhile executing:\n") + _queryString + std::string("\n");
   }
 
   return QueryResult(errorCode, err);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief read the "optimizer.inspectSimplePlans" section from the options
-////////////////////////////////////////////////////////////////////////////////
+bool Query::inspectSimplePlans() const {
+  if (_options == nullptr) {
+    return true;
+  }
 
-bool Query::inspectSimplePlans () const {
-  if (! TRI_IsObjectJson(_options)) {
-    return true; // default
+  VPackSlice options = _options->slice();
+  if (!options.isObject()) {
+    return true;  // default
   }
-  
-  TRI_json_t const* optJson = TRI_LookupObjectJson(_options, "optimizer");
 
-  if (! TRI_IsObjectJson(optJson)) {
-    return true; // default
+  VPackSlice opt = options.get("optimizer");
+
+  if (!opt.isObject()) {
+    return true;  // default
   }
-  
-  TRI_json_t const* j = TRI_LookupObjectJson(optJson, "inspectSimplePlans");
-  if (TRI_IsBooleanJson(j)) {
-    return j->_value._boolean;
-  }
-  return true; // default;
+
+  return arangodb::basics::VelocyPackHelper::getBooleanValue(
+      opt, "inspectSimplePlans", true);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief read the "optimizer.rules" section from the options
-////////////////////////////////////////////////////////////////////////////////
-
-std::vector<std::string> Query::getRulesFromOptions () const {
+std::vector<std::string> Query::getRulesFromOptions() const {
   std::vector<std::string> rules;
 
-  if (! TRI_IsObjectJson(_options)) {
+  if (_options == nullptr) {
     return rules;
   }
-  
-  TRI_json_t const* optJson = TRI_LookupObjectJson(_options, "optimizer");
 
-  if (! TRI_IsObjectJson(optJson)) {
+  VPackSlice options = _options->slice();
+
+  if (!options.isObject()) {
     return rules;
   }
-  
-  TRI_json_t const* rulesJson = TRI_LookupObjectJson(optJson, "rules");
 
-  if (! TRI_IsArrayJson(rulesJson)) {
+  VPackSlice opt = options.get("optimizer");
+
+  if (!opt.isObject()) {
     return rules;
   }
-        
-  size_t const n = TRI_LengthArrayJson(rulesJson);
 
-  for (size_t i = 0; i < n; ++i) {
-    TRI_json_t const* rule = static_cast<TRI_json_t const*>(TRI_AtVector(&rulesJson->_value._objects, i));
+  VPackSlice rulesList = opt.get("rules");
 
-    if (TRI_IsStringJson(rule)) {
-      rules.emplace_back(rule->_value._string.data, rule->_value._string.length - 1);
+  if (!rulesList.isArray()) {
+    return rules;
+  }
+
+  for (auto const& rule : VPackArrayIterator(rulesList)) {
+    if (rule.isString()) {
+      rules.emplace_back(rule.copyString());
     }
   }
 
   return rules;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief enter a new state
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::enterState (ExecutionState state) {
+void Query::enterState(ExecutionState state) {
+  LOG_TOPIC(DEBUG, Logger::QUERIES) << TRI_microtime() - _startTime << " "
+                                    << "Query::enterState: " << state
+                                    << " this: " << (uintptr_t) this;
   if (_profile != nullptr) {
     // record timing for previous state
     _profile->setDone(_state);
   }
-  
+
   // and adjust the state
   _state = state;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief get a description of the query's current state
-////////////////////////////////////////////////////////////////////////////////
-
-std::string Query::getStateString () const {
+std::string Query::getStateString() const {
   return std::string(" (while " + StateNames[_state] + ")");
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief cleanup plan and engine for current query
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::cleanupPlanAndEngine (int errorCode) {
+void Query::cleanupPlanAndEngine(int errorCode) {
   if (_engine != nullptr) {
     try {
-      _engine->shutdown(errorCode); 
-    }
-    catch (...) {
-      // shutdown may fail but we must not throw here 
+      _engine->shutdown(errorCode);
+    } catch (...) {
+      // shutdown may fail but we must not throw here
       // (we're also called from the destructor)
     }
     delete _engine;
@@ -1471,35 +1445,47 @@ void Query::cleanupPlanAndEngine (int errorCode) {
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief set the plan for the query
-////////////////////////////////////////////////////////////////////////////////
-
-void Query::setPlan (ExecutionPlan *plan) {
+void Query::setPlan(ExecutionPlan* plan) {
   if (_plan != nullptr) {
     delete _plan;
   }
   _plan = plan;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief create a TransactionContext
-////////////////////////////////////////////////////////////////////////////////
-
-triagens::arango::TransactionContext* Query::createTransactionContext () {
+std::shared_ptr<arangodb::TransactionContext>
+Query::createTransactionContext() {
   if (_contextOwnedByExterior) {
     // we can use v8
-    return new triagens::arango::V8TransactionContext(true);
+    return arangodb::V8TransactionContext::Create(_vocbase, true);
   }
 
-  return new triagens::arango::StandaloneTransactionContext();
+  return arangodb::StandaloneTransactionContext::Create(_vocbase);
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+/// @brief look up a graph either from our cache list or from the  _graphs
+///        collection
+Graph const* Query::lookupGraphByName(std::string const& name) {
+  auto it = _graphs.find(name);
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+  if (it != _graphs.end()) {
+    return it->second;
+  }
+
+  std::unique_ptr<arangodb::aql::Graph> g(
+      arangodb::lookupGraphByName(_vocbase, name));
+
+  if (g == nullptr) {
+    return nullptr;
+  }
+
+  _graphs.emplace(name, g.get());
+
+  return g.release();
+}
+
+/// @brief returns the next query id
+TRI_voc_tick_t Query::NextId() {
+  return NextQueryId.fetch_add(1, std::memory_order_seq_cst);
+}

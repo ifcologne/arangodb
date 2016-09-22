@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief wrapper for explicit transactions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,121 +19,59 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_UTILS_EXPLICIT_TRANSACTION_H
-#define ARANGODB_UTILS_EXPLICIT_TRANSACTION_H 1
+#ifndef ARANGOD_UTILS_EXPLICIT_TRANSACTION_H
+#define ARANGOD_UTILS_EXPLICIT_TRANSACTION_H 1
 
 #include "Basics/Common.h"
 
 #include "Utils/Transaction.h"
 #include "Utils/V8TransactionContext.h"
-#include "VocBase/server.h"
+#include "VocBase/ticks.h"
 #include "VocBase/transaction.h"
 
-struct TRI_vocbase_t;
+namespace arangodb {
 
-namespace triagens {
-  namespace arango {
+class ExplicitTransaction : public Transaction {
+ public:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief create the transaction
+  //////////////////////////////////////////////////////////////////////////////
 
-    class ExplicitTransaction : public Transaction {
+  ExplicitTransaction(std::shared_ptr<V8TransactionContext> transactionContext,
+                      std::vector<std::string> const& readCollections,
+                      std::vector<std::string> const& writeCollections,
+                      double lockTimeout, bool waitForSync,
+                      bool allowImplicitCollections)
+      : Transaction(transactionContext) {
+    this->addHint(TRI_TRANSACTION_HINT_LOCK_ENTIRELY, false);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                         class ExplicitTransaction
-// -----------------------------------------------------------------------------
+    if (lockTimeout >= 0.0) {
+      this->setTimeout(lockTimeout);
+    }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+    if (waitForSync) {
+      this->setWaitForSync();
+    }
 
-      public:
+    for (auto const& it : writeCollections) {
+      this->addCollection(it, TRI_TRANSACTION_WRITE);
+    }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the transaction
-////////////////////////////////////////////////////////////////////////////////
-
-        ExplicitTransaction (TRI_vocbase_t* vocbase,
-                             std::vector<std::string> const& readCollections,
-                             std::vector<std::string> const& writeCollections,
-                             double lockTimeout,
-                             bool waitForSync,
-                             bool embed,
-                             bool allowImplicitCollections)
-          : Transaction(new V8TransactionContext(embed), vocbase, 0) {
-
-          this->addHint(TRI_TRANSACTION_HINT_LOCK_ENTIRELY, false);
-
-          if (lockTimeout >= 0.0) {
-            this->setTimeout(lockTimeout);
-          }
-
-          if (waitForSync) {
-            this->setWaitForSync();
-          }
-
-          this->setAllowImplicitCollections(allowImplicitCollections);
-          
-          for (auto const& it : readCollections) {
-            this->addCollection(it, TRI_TRANSACTION_READ);
-          }
-
-          for (auto const& it : writeCollections) {
-            this->addCollection(it, TRI_TRANSACTION_WRITE);
-          }
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the transaction with cids
-////////////////////////////////////////////////////////////////////////////////
-
-        ExplicitTransaction (TRI_vocbase_t* vocbase,
-                             std::vector<TRI_voc_cid_t> const& readCollections,
-                             std::vector<TRI_voc_cid_t> const& writeCollections,
-                             double lockTimeout,
-                             bool waitForSync,
-                             bool embed)
-          : Transaction(new V8TransactionContext(embed), vocbase, 0) {
-
-          this->addHint(TRI_TRANSACTION_HINT_LOCK_ENTIRELY, false);
-
-          if (lockTimeout >= 0.0) {
-            this->setTimeout(lockTimeout);
-          }
-
-          if (waitForSync) {
-            this->setWaitForSync();
-          }
-
-          for (auto const& it : readCollections) {
-            this->addCollection(it, TRI_TRANSACTION_READ);
-          }
-
-          for (auto const& it : writeCollections) {
-            this->addCollection(it, TRI_TRANSACTION_WRITE);
-          }
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief end the transaction
-////////////////////////////////////////////////////////////////////////////////
-
-        ~ExplicitTransaction () {
-        }
-
-    };
-
+    for (auto const& it : readCollections) {
+      this->addCollection(it, TRI_TRANSACTION_READ);
+    }
+    
+    this->setAllowImplicitCollections(allowImplicitCollections);
   }
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief end the transaction
+  //////////////////////////////////////////////////////////////////////////////
+
+  ~ExplicitTransaction() {}
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

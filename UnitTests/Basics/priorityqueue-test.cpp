@@ -23,12 +23,13 @@
 /// @author Copyright 2015, ArangoDB GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "Basics/Common.h"
+
+#define BOOST_TEST_INCLUDED
 #include <boost/test/unit_test.hpp>
 
-#include "Basics/Traverser.h"
+#include "Basics/ShortestPathFinder.h"
 #include "Basics/voc-errors.h"
-
-#include <vector>
 
 using namespace std;
 
@@ -77,12 +78,13 @@ BOOST_FIXTURE_TEST_SUITE(CPriorityQueueTest, CPriorityQueueSetup)
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_deque_case) {
-  triagens::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
+  arangodb::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
  
   BOOST_CHECK_EQUAL(0, (int) pq.size());
   BOOST_CHECK_EQUAL(true, pq.empty());
 
   bool b;
+  MyValue* v;
 
   b = pq.insert("a", new MyValue("a", 1));
   BOOST_CHECK_EQUAL(b, true);
@@ -92,8 +94,10 @@ BOOST_AUTO_TEST_CASE (tst_deque_case) {
   BOOST_CHECK_EQUAL(b, true);
   b = pq.insert("d", new MyValue("d", 4));
   BOOST_CHECK_EQUAL(b, true);
-  b = pq.insert("c", new MyValue("c", 5));
+  v = new MyValue("c", 5);
+  b = pq.insert("c", v);
   BOOST_CHECK_EQUAL(b, false);
+  delete v;
 
   BOOST_CHECK_EQUAL(4, (int) pq.size());
   BOOST_CHECK_EQUAL(false, pq.empty());
@@ -112,7 +116,6 @@ BOOST_AUTO_TEST_CASE (tst_deque_case) {
   BOOST_CHECK(p == nullptr);
 
   std::string k;
-  MyValue* v;
 
   p = pq.getMinimal();
   BOOST_CHECK_EQUAL(p->_key, "a");
@@ -167,12 +170,13 @@ BOOST_AUTO_TEST_CASE (tst_deque_case) {
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_heap_case) {
-  triagens::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
+  arangodb::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
  
   BOOST_CHECK_EQUAL(0, (int) pq.size());
   BOOST_CHECK_EQUAL(true, pq.empty());
 
   bool b;
+  MyValue* v;
 
   b = pq.insert("a", new MyValue("a", 4));
   BOOST_CHECK_EQUAL(b, true);
@@ -182,8 +186,10 @@ BOOST_AUTO_TEST_CASE (tst_heap_case) {
   BOOST_CHECK_EQUAL(b, true);
   b = pq.insert("d", new MyValue("d", 2));
   BOOST_CHECK_EQUAL(b, true);
-  b = pq.insert("c", new MyValue("c", 5));
+  v = new MyValue("c", 5);
+  b = pq.insert("c", v);
   BOOST_CHECK_EQUAL(b, false);
+  delete v;
 
   BOOST_CHECK_EQUAL(4, (int) pq.size());
   BOOST_CHECK_EQUAL(false, pq.empty());
@@ -202,7 +208,6 @@ BOOST_AUTO_TEST_CASE (tst_heap_case) {
   BOOST_CHECK(p == nullptr);
 
   std::string k;
-  MyValue* v;
 
   p = pq.getMinimal();
   BOOST_CHECK_EQUAL(p->_key, "b");
@@ -257,12 +262,13 @@ BOOST_AUTO_TEST_CASE (tst_heap_case) {
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_deque_case_with_lowering) {
-  triagens::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
+  arangodb::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
  
   BOOST_CHECK_EQUAL(0, (int) pq.size());
   BOOST_CHECK_EQUAL(true, pq.empty());
 
   bool b;
+  MyValue* v;
 
   b = pq.insert("a", new MyValue("a", 1));
   BOOST_CHECK_EQUAL(b, true);
@@ -272,8 +278,10 @@ BOOST_AUTO_TEST_CASE (tst_deque_case_with_lowering) {
   BOOST_CHECK_EQUAL(b, true);
   b = pq.insert("d", new MyValue("d", 4));
   BOOST_CHECK_EQUAL(b, true);
-  b = pq.insert("c", new MyValue("c", 5));
+  v = new MyValue("c", 5);
+  b = pq.insert("c", v);
   BOOST_CHECK_EQUAL(b, false);
+  delete v;
 
   BOOST_CHECK_EQUAL(4, (int) pq.size());
   BOOST_CHECK_EQUAL(false, pq.empty());
@@ -294,7 +302,6 @@ BOOST_AUTO_TEST_CASE (tst_deque_case_with_lowering) {
   BOOST_CHECK(p == nullptr);
 
   std::string k;
-  MyValue* v;
 
   p = pq.getMinimal();
   BOOST_CHECK_EQUAL(p->_key, "a");
@@ -349,12 +356,13 @@ BOOST_AUTO_TEST_CASE (tst_deque_case_with_lowering) {
 ////////////////////////////////////////////////////////////////////////////////
 
 BOOST_AUTO_TEST_CASE (tst_heap_case_with_lowering) {
-  triagens::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
+  arangodb::basics::PriorityQueue<std::string, MyValue, unsigned int> pq;
  
   BOOST_CHECK_EQUAL(0, (int) pq.size());
   BOOST_CHECK_EQUAL(true, pq.empty());
 
   bool b;
+  MyValue* v;
 
   b = pq.insert("a", new MyValue("a", 4));
   BOOST_CHECK_EQUAL(b, true);
@@ -364,8 +372,10 @@ BOOST_AUTO_TEST_CASE (tst_heap_case_with_lowering) {
   BOOST_CHECK_EQUAL(b, true);
   b = pq.insert("d", new MyValue("d", 3));
   BOOST_CHECK_EQUAL(b, true);
-  b = pq.insert("c", new MyValue("c", 5));
+  v = new MyValue("c", 5);
+  b = pq.insert("c", v);
   BOOST_CHECK_EQUAL(b, false);
+  delete v;
 
   BOOST_CHECK_EQUAL(4, (int) pq.size());
   BOOST_CHECK_EQUAL(false, pq.empty());
@@ -386,7 +396,6 @@ BOOST_AUTO_TEST_CASE (tst_heap_case_with_lowering) {
   BOOST_CHECK(p == nullptr);
 
   std::string k;
-  MyValue* v;
 
   p = pq.getMinimal();
   BOOST_CHECK_EQUAL(p->_key, "a");

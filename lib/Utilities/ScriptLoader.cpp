@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief source code loader
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,54 +19,36 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "ScriptLoader.h"
-
 #include "Basics/MutexLocker.h"
 #include "Basics/files.h"
-#include "Basics/logging.h"
+#include "Logger/Logger.h"
 #include "Basics/tri-strings.h"
 #include "Basics/StringUtils.h"
 
-using namespace std;
-using namespace triagens::basics;
-using namespace triagens::arango;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb;
+using namespace arangodb::basics;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructs a loader
 ////////////////////////////////////////////////////////////////////////////////
 
-ScriptLoader::ScriptLoader ()
-  : _scripts(),
-    _directory(),
-    _lock() {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+ScriptLoader::ScriptLoader() : _scripts(), _directory(), _lock() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief gets the directory for scripts
 ////////////////////////////////////////////////////////////////////////////////
 
-string const& ScriptLoader::getDirectory () const {
-  return _directory;
-}
+std::string const& ScriptLoader::getDirectory() const { return _directory; }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief sets the directory for scripts
 ////////////////////////////////////////////////////////////////////////////////
 
-void ScriptLoader::setDirectory (string const& directory) {
-  MUTEX_LOCKER(_lock);
+void ScriptLoader::setDirectory(std::string const& directory) {
+  MUTEX_LOCKER(mutexLocker, _lock);
 
   _directory = directory;
 }
@@ -79,11 +57,11 @@ void ScriptLoader::setDirectory (string const& directory) {
 /// @brief build a script from an array of strings
 ////////////////////////////////////////////////////////////////////////////////
 
-string ScriptLoader::buildScript (const char** script) {
-  string scriptString;
+std::string ScriptLoader::buildScript(char const** script) {
+  std::string scriptString;
 
   while (true) {
-    string tempStr = string(*script);
+    std::string tempStr = std::string(*script);
 
     if (tempStr == "//__end__") {
       break;
@@ -101,8 +79,9 @@ string ScriptLoader::buildScript (const char** script) {
 /// @brief defines a new named script
 ////////////////////////////////////////////////////////////////////////////////
 
-void ScriptLoader::defineScript (string const& name, string const& script) {
-  MUTEX_LOCKER(_lock);
+void ScriptLoader::defineScript(std::string const& name,
+                                std::string const& script) {
+  MUTEX_LOCKER(mutexLocker, _lock);
 
   _scripts[name] = script;
 }
@@ -111,10 +90,10 @@ void ScriptLoader::defineScript (string const& name, string const& script) {
 /// @brief defines a new named script
 ////////////////////////////////////////////////////////////////////////////////
 
-void ScriptLoader::defineScript (string const& name, const char** script) {
-  string scriptString = buildScript(script);
+void ScriptLoader::defineScript(std::string const& name, char const** script) {
+  std::string scriptString = buildScript(script);
 
-  MUTEX_LOCKER(_lock);
+  MUTEX_LOCKER(mutexLocker, _lock);
 
   _scripts[name] = scriptString;
 }
@@ -123,28 +102,26 @@ void ScriptLoader::defineScript (string const& name, const char** script) {
 /// @brief finds a named script
 ////////////////////////////////////////////////////////////////////////////////
 
-string const& ScriptLoader::findScript (string const& name) {
-  static string empty = "";
+std::string const& ScriptLoader::findScript(std::string const& name) {
+  static std::string empty = "";
 
-  MUTEX_LOCKER(_lock);
+  MUTEX_LOCKER(mutexLocker, _lock);
 
-  map<string, string>::iterator i = _scripts.find(name);
+  std::map<std::string, std::string>::iterator i = _scripts.find(name);
 
   if (i != _scripts.end()) {
     return i->second;
   }
 
-  if (! _directory.empty()) {
-    vector<string> parts = getDirectoryParts();
+  if (!_directory.empty()) {
+    std::vector<std::string> parts = getDirectoryParts();
 
     for (size_t i = 0; i < parts.size(); i++) {
       char* filename = TRI_Concatenate2File(parts.at(i).c_str(), name.c_str());
       char* result = TRI_SlurpFile(TRI_CORE_MEM_ZONE, filename, nullptr);
 
       if (result == nullptr && (i == parts.size() - 1)) {
-        LOG_ERROR("cannot locate file '%s': %s",
-                  StringUtils::correctPath(name).c_str(),
-                  TRI_last_error());
+        LOG(ERR) << "cannot locate file '" << StringUtils::correctPath(name) << "': " << TRI_last_error();
       }
 
       TRI_FreeString(TRI_CORE_MEM_ZONE, filename);
@@ -160,34 +137,29 @@ string const& ScriptLoader::findScript (string const& name) {
   return empty;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief gets a list of all specified directory parts
 ////////////////////////////////////////////////////////////////////////////////
 
-vector<string> ScriptLoader::getDirectoryParts () {
-  vector<string> directories;
+std::vector<std::string> ScriptLoader::getDirectoryParts() {
+  std::vector<std::string> directories;
 
-  if (! _directory.empty()) {
-
-    // .........................................................................
-    // for backwards compatibility allow ":" as a delimiter for POSIX like
-    // implementations, otherwise we will only allow ";"
-    // .........................................................................
+  if (!_directory.empty()) {
+// .........................................................................
+// for backwards compatibility allow ":" as a delimiter for POSIX like
+// implementations, otherwise we will only allow ";"
+// .........................................................................
 
 #ifdef _WIN32
-      TRI_vector_string_t parts = TRI_Split2String(_directory.c_str(), ";");
+    TRI_vector_string_t parts = TRI_Split2String(_directory.c_str(), ";");
 #else
-      TRI_vector_string_t parts = TRI_Split2String(_directory.c_str(), ":;");
+    TRI_vector_string_t parts = TRI_Split2String(_directory.c_str(), ":;");
 #endif
 
     for (size_t i = 0; i < parts._length; i++) {
-      string part = StringUtils::trim(parts._buffer[i]);
+      std::string part = StringUtils::trim(parts._buffer[i]);
 
-      if (! part.empty()) {
+      if (!part.empty()) {
         directories.push_back(part);
       }
     }
@@ -197,12 +169,3 @@ vector<string> ScriptLoader::getDirectoryParts () {
 
   return directories;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

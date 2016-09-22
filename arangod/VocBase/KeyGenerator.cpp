@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief collection key generators
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,25 +19,21 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "KeyGenerator.h"
-
 #include "Basics/conversions.h"
-#include "Basics/json.h"
-#include "Basics/logging.h"
-#include "Basics/tri-strings.h"
-#include "Basics/voc-errors.h"
 #include "Basics/MutexLocker.h"
 #include "Basics/StringUtils.h"
-
+#include "Basics/tri-strings.h"
+#include "Basics/VelocyPackHelper.h"
+#include "Basics/voc-errors.h"
 #include "VocBase/vocbase.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
+#include <array>
+
+using namespace arangodb;
+using namespace arangodb::basics;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief lookup table for key checks
@@ -53,84 +45,56 @@ std::array<bool, 256> KeyGenerator::LookupTable;
 /// @brief initialize the lookup table for key checks
 ////////////////////////////////////////////////////////////////////////////////
 
-void KeyGenerator::Initialize () {
+void KeyGenerator::Initialize() {
   for (int c = 0; c < 256; ++c) {
-    if ((c >= 'a' && c <= 'z') ||
-        (c >= 'A' && c <= 'Z') ||
-        (c >= '0' && c <= '9') ||
-         c == '_' ||
-         c == ':' ||
-         c == '-' || 
-         c == '@' ||
-         c == '.' ||
-         c == '(' ||
-         c == ')' ||
-         c == '+' ||
-         c == ',' ||
-         c == '=' ||
-         c == ';' ||
-         c == '$' ||
-         c == '!' ||
-         c == '*' ||
-         c == '\'' ||
-         c == '%') {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '_' || c == ':' || c == '-' ||
+        c == '@' || c == '.' || c == '(' || c == ')' || c == '+' || c == ',' ||
+        c == '=' || c == ';' || c == '$' || c == '!' || c == '*' || c == '\'' ||
+        c == '%') {
       LookupTable[c] = true;
-    }
-    else {
+    } else {
       LookupTable[c] = false;
     }
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                             GENERAL KEY GENERATOR
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create the key enerator
 ////////////////////////////////////////////////////////////////////////////////
 
-KeyGenerator::KeyGenerator (bool allowUserKeys)
-  : _allowUserKeys(allowUserKeys) {
-}
+KeyGenerator::KeyGenerator(bool allowUserKeys)
+    : _allowUserKeys(allowUserKeys) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy the key enerator
 ////////////////////////////////////////////////////////////////////////////////
 
-KeyGenerator::~KeyGenerator () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+KeyGenerator::~KeyGenerator() {}
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief get the generator type from JSON
+/// @brief get the generator type from VelocyPack
 ////////////////////////////////////////////////////////////////////////////////
 
-KeyGenerator::GeneratorType KeyGenerator::generatorType (TRI_json_t const* parameters) {
-  if (! TRI_IsObjectJson(parameters)) {
+KeyGenerator::GeneratorType KeyGenerator::generatorType(
+    VPackSlice const& parameters) {
+  if (!parameters.isObject()) {
+    return KeyGenerator::TYPE_TRADITIONAL;
+  }
+  VPackSlice const type = parameters.get("type");
+
+  if (!type.isString()) {
     return KeyGenerator::TYPE_TRADITIONAL;
   }
 
-  TRI_json_t const* type = TRI_LookupObjectJson(parameters, "type");
+  std::string const typeName =
+      arangodb::basics::StringUtils::tolower(type.copyString());
 
-  if (! TRI_IsStringJson(type)) {
+  if (typeName == TraditionalKeyGenerator::name()) {
     return KeyGenerator::TYPE_TRADITIONAL;
   }
 
-  char const* typeName = type->_value._string.data;
-
-  if (TRI_CaseEqualString(typeName, TraditionalKeyGenerator::name().c_str())) {
-    return KeyGenerator::TYPE_TRADITIONAL;
-  }
-
-  if (TRI_CaseEqualString(typeName, AutoIncrementKeyGenerator::name().c_str())) {
+  if (typeName == AutoIncrementKeyGenerator::name()) {
     return KeyGenerator::TYPE_AUTOINCREMENT;
   }
 
@@ -142,30 +106,27 @@ KeyGenerator::GeneratorType KeyGenerator::generatorType (TRI_json_t const* param
 /// @brief create a key generator based on the options specified
 ////////////////////////////////////////////////////////////////////////////////
 
-KeyGenerator* KeyGenerator::factory (TRI_json_t const* options) {
+KeyGenerator* KeyGenerator::factory(VPackSlice const& options) {
   KeyGenerator::GeneratorType type;
 
-  bool const readOptions = TRI_IsObjectJson(options);
+  bool const readOptions = options.isObject();
 
   if (readOptions) {
     type = generatorType(options);
-  }
-  else {
+  } else {
     type = TYPE_TRADITIONAL;
   }
 
   if (type == TYPE_UNKNOWN) {
-    return nullptr;
+    THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_ARANGO_INVALID_KEY_GENERATOR, "invalid key generator type");
   }
 
   bool allowUserKeys = true;
 
   if (readOptions) {
-    TRI_json_t* option = TRI_LookupObjectJson(options, "allowUserKeys");
-
-    if (TRI_IsBooleanJson(option)) {
-      allowUserKeys = option->_value._boolean;
-    }
+    // Change allowUserKeys only if it is a boolean value, otherwise use default
+    allowUserKeys = arangodb::basics::VelocyPackHelper::getBooleanValue(
+        options, "allowUserKeys", allowUserKeys);
   }
 
   if (type == TYPE_TRADITIONAL) {
@@ -177,34 +138,35 @@ KeyGenerator* KeyGenerator::factory (TRI_json_t const* options) {
     uint64_t increment = 1;
 
     if (readOptions) {
-      TRI_json_t* option;
+      VPackSlice const incrementSlice = options.get("increment");
 
-      option = TRI_LookupObjectJson(options, "increment");
-
-      if (TRI_IsNumberJson(option)) {
-        if (option->_value._number <= 0.0) {
-          // negative or 0 offset is not allowed
-          return nullptr;
+      if (incrementSlice.isNumber()) {
+        double v = incrementSlice.getNumericValue<double>();
+        if (v <= 0.0) {
+          // negative or 0 increment is not allowed
+          THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_ARANGO_INVALID_KEY_GENERATOR, "increment value must be greater than zero");
         }
 
-        increment = static_cast<uint64_t>(option->_value._number);
+        increment = incrementSlice.getNumericValue<uint64_t>();
 
         if (increment == 0 || increment >= (1ULL << 16)) {
-          return nullptr;
+          THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_ARANGO_INVALID_KEY_GENERATOR, "increment value must be greater than zero");
         }
       }
-    
-      option = TRI_LookupObjectJson(options, "offset");
 
-      if (TRI_IsNumberJson(option)) {
-        if (option->_value._number < 0.0) {
-          return nullptr;
+      VPackSlice const offsetSlice = options.get("offset");
+
+      if (offsetSlice.isNumber()) {
+        double v = offsetSlice.getNumericValue<double>();
+        if (v < 0.0) {
+          // negative or 0 offset is not allowed
+          THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_ARANGO_INVALID_KEY_GENERATOR, "offset value must be zero or greater");
         }
-       
-        offset = static_cast<uint64_t>(option->_value._number);
+
+        offset = offsetSlice.getNumericValue<uint64_t>();
 
         if (offset >= UINT64_MAX) {
-          return nullptr;
+          THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_ARANGO_INVALID_KEY_GENERATOR, "offset value is too high");
         }
       }
     }
@@ -212,21 +174,17 @@ KeyGenerator* KeyGenerator::factory (TRI_json_t const* options) {
     return new AutoIncrementKeyGenerator(allowUserKeys, offset, increment);
   }
 
-  return nullptr;
+  // unknown key generator type
+  THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_ARANGO_INVALID_KEY_GENERATOR, "invalid key generator type");
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               protected functions
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief check global key attributes
 ////////////////////////////////////////////////////////////////////////////////
 
-int KeyGenerator::globalCheck (std::string const& key,
-                               bool isRestore) {
+int KeyGenerator::globalCheck(std::string const& key, bool isRestore) {
   // user has specified a key
-  if (! key.empty() && ! _allowUserKeys && ! isRestore) {
+  if (!key.empty() && !_allowUserKeys && !isRestore) {
     // we do not allow user-generated keys
     return TRI_ERROR_ARANGO_DOCUMENT_KEY_UNEXPECTED;
   }
@@ -244,55 +202,50 @@ int KeyGenerator::globalCheck (std::string const& key,
   return TRI_ERROR_NO_ERROR;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                         TRADITIONAL KEY GENERATOR
-// -----------------------------------------------------------------------------
+//////////////////////////////////////////////////////////////////////////////
+/// @brief return a VelocyPack representation of the generator
+///        Not virtual because this is identical for all of them
+//////////////////////////////////////////////////////////////////////////////
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
+std::shared_ptr<VPackBuilder> KeyGenerator::toVelocyPack() const {
+  auto builder = std::make_shared<VPackBuilder>();
+  toVelocyPack(*builder);
+  builder->close();
+  return builder;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create the key enerator
 ////////////////////////////////////////////////////////////////////////////////
 
-TraditionalKeyGenerator::TraditionalKeyGenerator (bool allowUserKeys)
-  : KeyGenerator(allowUserKeys) {
-}
+TraditionalKeyGenerator::TraditionalKeyGenerator(bool allowUserKeys)
+    : KeyGenerator(allowUserKeys) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy the key enerator
 ////////////////////////////////////////////////////////////////////////////////
 
-TraditionalKeyGenerator::~TraditionalKeyGenerator () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+TraditionalKeyGenerator::~TraditionalKeyGenerator() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief validate a key
 ////////////////////////////////////////////////////////////////////////////////
 
-bool TraditionalKeyGenerator::validateKey (char const* key) {
+bool TraditionalKeyGenerator::validateKey(char const* key, size_t len) {
   unsigned char const* p = reinterpret_cast<unsigned char const*>(key);
-  unsigned char const* s = p;
+  size_t pos = 0;
 
   while (true) {
-    unsigned char c = *p;
-
-    if (c == '\0') {
-      return ((p - s) > 0) &&
-             ((p - s) <= TRI_VOC_KEY_MAX_LENGTH);
+    if (pos >= len || *p == '\0') {
+      return (pos > 0) && (pos <= TRI_VOC_KEY_MAX_LENGTH);
     }
 
-    if (LookupTable[c]) {
-      ++p;
-      continue;
+    if (!LookupTable[*p]) {
+      return false;
     }
 
-    return false;
+    ++p;
+    ++pos;
   }
 }
 
@@ -300,16 +253,15 @@ bool TraditionalKeyGenerator::validateKey (char const* key) {
 /// @brief generate a key
 ////////////////////////////////////////////////////////////////////////////////
 
-std::string TraditionalKeyGenerator::generate (TRI_voc_tick_t tick) {
-  return triagens::basics::StringUtils::itoa(tick);
+std::string TraditionalKeyGenerator::generate(TRI_voc_tick_t tick) {
+  return arangodb::basics::StringUtils::itoa(tick);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief validate a key
 ////////////////////////////////////////////////////////////////////////////////
 
-int TraditionalKeyGenerator::validate (std::string const& key,
-                                       bool isRestore) {
+int TraditionalKeyGenerator::validate(std::string const& key, bool isRestore) {
   int res = globalCheck(key, isRestore);
 
   if (res != TRI_ERROR_NO_ERROR) {
@@ -317,7 +269,7 @@ int TraditionalKeyGenerator::validate (std::string const& key,
   }
 
   // validate user-supplied key
-  if (! validateKey(key.c_str())) {
+  if (!validateKey(key.c_str(), key.size())) {
     return TRI_ERROR_ARANGO_DOCUMENT_KEY_BAD;
   }
 
@@ -328,77 +280,59 @@ int TraditionalKeyGenerator::validate (std::string const& key,
 /// @brief track usage of a key
 ////////////////////////////////////////////////////////////////////////////////
 
-void TraditionalKeyGenerator::track (TRI_voc_key_t) {
-}
+void TraditionalKeyGenerator::track(char const*, VPackValueLength) {}
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief create a JSON representation of the generator
+/// @brief create a VPack representation of the generator
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_json_t* TraditionalKeyGenerator::toJson (TRI_memory_zone_t* zone) const {
-  TRI_json_t* json = TRI_CreateObjectJson(zone, 2);
+////////////////////////////////////////////////////////////////////////////////
+/// @brief create a VPack representation of the generator
+////////////////////////////////////////////////////////////////////////////////
 
-  if (json != nullptr) {
-    TRI_Insert3ObjectJson(zone, json, "type", TRI_CreateStringCopyJson(zone, name().c_str(), name().size()));
-    TRI_Insert3ObjectJson(zone, json, "allowUserKeys", TRI_CreateBooleanJson(zone, _allowUserKeys));
-  }
-
-  return json;
+void TraditionalKeyGenerator::toVelocyPack(VPackBuilder& builder) const {
+  TRI_ASSERT(!builder.isClosed());
+  builder.add("type", VPackValue(name()));
+  builder.add("allowUserKeys", VPackValue(_allowUserKeys));
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      AUTO-INCREMENT KEY GENERATOR
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create the generator
 ////////////////////////////////////////////////////////////////////////////////
 
-AutoIncrementKeyGenerator::AutoIncrementKeyGenerator (bool allowUserKeys,
-                                                      uint64_t offset,
-                                                      uint64_t increment)
-  : KeyGenerator(allowUserKeys),
-    _lastValue(0),
-    _offset(offset),
-    _increment(increment) {
-}
+AutoIncrementKeyGenerator::AutoIncrementKeyGenerator(bool allowUserKeys,
+                                                     uint64_t offset,
+                                                     uint64_t increment)
+    : KeyGenerator(allowUserKeys),
+      _lastValue(0),
+      _offset(offset),
+      _increment(increment) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy the generator
 ////////////////////////////////////////////////////////////////////////////////
 
-AutoIncrementKeyGenerator::~AutoIncrementKeyGenerator () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+AutoIncrementKeyGenerator::~AutoIncrementKeyGenerator() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief validate a numeric key
 ////////////////////////////////////////////////////////////////////////////////
 
-bool AutoIncrementKeyGenerator::validateKey (char const* key) {
+bool AutoIncrementKeyGenerator::validateKey(char const* key, size_t len) {
   char const* p = key;
+  size_t pos = 0;
 
   while (true) {
-    char c = *p;
-
-    if (c == '\0') {
-      return ((p - key) > 0) &&
-             ((p - key) <= TRI_VOC_KEY_MAX_LENGTH);
+    if (pos >= len || *p == '\0') {
+      return (pos > 0) && (pos <= TRI_VOC_KEY_MAX_LENGTH);
     }
 
-    if (c >= '0' && c <= '9') {
-      ++p;
-      continue;
+    if (*p < '0' || *p > '9') {
+      return false;
     }
 
-    return false;
+    ++p;
+    ++pos;
   }
 }
 
@@ -406,25 +340,18 @@ bool AutoIncrementKeyGenerator::validateKey (char const* key) {
 /// @brief generate a key
 ////////////////////////////////////////////////////////////////////////////////
 
-std::string AutoIncrementKeyGenerator::generate (TRI_voc_tick_t tick) {
+std::string AutoIncrementKeyGenerator::generate(TRI_voc_tick_t tick) {
   uint64_t keyValue;
 
   {
-    MUTEX_LOCKER(_lock);
+    MUTEX_LOCKER(mutexLocker, _lock);
 
     // user has not specified a key, generate one based on algorithm
     if (_lastValue < _offset) {
       keyValue = _offset;
-    }
-    else {
-      uint64_t next = _lastValue + _increment - ((_lastValue - _offset) % _increment);
-
-      // TODO: check if we can remove the following if
-      if (next < _offset) {
-        next = _offset;
-      }
-
-      keyValue = next;
+    } else {
+      keyValue =
+          _lastValue + _increment - ((_lastValue - _offset) % _increment);
     }
 
     // bounds and sanity checks
@@ -437,15 +364,15 @@ std::string AutoIncrementKeyGenerator::generate (TRI_voc_tick_t tick) {
     _lastValue = keyValue;
   }
 
-  return triagens::basics::StringUtils::itoa(keyValue);
+  return arangodb::basics::StringUtils::itoa(keyValue);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief validate a key
 ////////////////////////////////////////////////////////////////////////////////
 
-int AutoIncrementKeyGenerator::validate (std::string const& key,
-                                         bool isRestore) {
+int AutoIncrementKeyGenerator::validate(std::string const& key,
+                                        bool isRestore) {
   int res = globalCheck(key, isRestore);
 
   if (res != TRI_ERROR_NO_ERROR) {
@@ -453,14 +380,14 @@ int AutoIncrementKeyGenerator::validate (std::string const& key,
   }
 
   // validate user-supplied key
-  if (! validateKey(key.c_str())) {
+  if (!validateKey(key.c_str(), key.size())) {
     return TRI_ERROR_ARANGO_DOCUMENT_KEY_BAD;
   }
 
-  uint64_t intValue = triagens::basics::StringUtils::uint64(key);
+  uint64_t intValue = arangodb::basics::StringUtils::uint64(key);
 
   if (intValue > _lastValue) {
-    MUTEX_LOCKER(_lock);
+    MUTEX_LOCKER(mutexLocker, _lock);
     // update our last value
     _lastValue = intValue;
   }
@@ -472,9 +399,9 @@ int AutoIncrementKeyGenerator::validate (std::string const& key,
 /// @brief track usage of a key
 ////////////////////////////////////////////////////////////////////////////////
 
-void AutoIncrementKeyGenerator::track (TRI_voc_key_t key) {
+void AutoIncrementKeyGenerator::track(char const* p, VPackValueLength length) {
   // check the numeric key part
-  uint64_t value = TRI_UInt64String(key);
+  uint64_t value = StringUtils::uint64(p, length);
 
   if (value > _lastValue) {
     // and update our last value
@@ -483,43 +410,50 @@ void AutoIncrementKeyGenerator::track (TRI_voc_key_t key) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief create a JSON representation of the generator
+/// @brief create a VelocyPack representation of the generator
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_json_t* AutoIncrementKeyGenerator::toJson (TRI_memory_zone_t* zone) const {
-  TRI_json_t* json = TRI_CreateObjectJson(zone, 4);
-
-  if (json != nullptr) {
-    TRI_Insert3ObjectJson(zone, json, "type", TRI_CreateStringCopyJson(zone, name().c_str(), name().size()));
-    TRI_Insert3ObjectJson(zone, json, "allowUserKeys", TRI_CreateBooleanJson(zone, _allowUserKeys));
-    TRI_Insert3ObjectJson(zone, json, "offset", TRI_CreateNumberJson(zone, (double) _offset));
-    TRI_Insert3ObjectJson(zone, json, "increment", TRI_CreateNumberJson(zone, (double) _increment));
-  }
-
-  return json;
+void AutoIncrementKeyGenerator::toVelocyPack(VPackBuilder& builder) const {
+  TRI_ASSERT(!builder.isClosed());
+  builder.add("type", VPackValue(name()));
+  builder.add("allowUserKeys", VPackValue(_allowUserKeys));
+  builder.add("offset", VPackValue(_offset));
+  builder.add("increment", VPackValue(_increment));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief validate a document id (collection name + / + document key)
 ////////////////////////////////////////////////////////////////////////////////
 
-bool TRI_ValidateDocumentIdKeyGenerator (char const* key,
-                                         size_t* split) {
+bool TRI_ValidateDocumentIdKeyGenerator(char const* key, size_t len,
+                                        size_t* split) {
+  if (len == 0) {
+    return false;
+  }
+
   char const* p = key;
   char c = *p;
+  size_t pos = 0;
 
   // extract collection name
-  if (! (c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+  if (!(c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z'))) {
     return false;
   }
 
   ++p;
+  ++pos;
 
-  while (1) {
+  while (true) {
+    if (pos >= len) {
+      return false;
+    }
+
     c = *p;
-
-    if (c == '_' || c == '-' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+    if (c == '_' || c == '-' || (c >= '0' && c <= '9') ||
+        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
       ++p;
+      ++pos;
       continue;
     }
 
@@ -530,23 +464,15 @@ bool TRI_ValidateDocumentIdKeyGenerator (char const* key,
     return false;
   }
 
-  if (p - key > TRI_COL_NAME_LENGTH) {
+  if (pos > TRI_COL_NAME_LENGTH) {
     return false;
   }
 
   // store split position
-  *split = p - key;
+  *split = pos;
   ++p;
+  ++pos;
 
   // validate document key
-  return TraditionalKeyGenerator::validateKey(p);
+  return TraditionalKeyGenerator::validateKey(p, len - pos);
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

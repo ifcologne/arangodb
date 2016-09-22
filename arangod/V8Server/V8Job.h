@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief V8 job
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,143 +19,47 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_V8SERVER_V8JOB_H
-#define ARANGODB_V8SERVER_V8JOB_H 1
+#ifndef ARANGOD_V8_SERVER_V8_JOB_H
+#define ARANGOD_V8_SERVER_V8_JOB_H 1
 
 #include "Basics/Common.h"
-#include "Basics/json.h"
 #include "Dispatcher/Job.h"
+#include "VocBase/vocbase.h"
 
-struct TRI_vocbase_t;
+namespace arangodb {
+namespace rest {
+class Task;
+}
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       class V8Job
-// -----------------------------------------------------------------------------
+class V8Job : public rest::Job {
+  V8Job(V8Job const&) = delete;
+  V8Job& operator=(V8Job const&) = delete;
 
-namespace triagens {
-  namespace arango {
-    class ApplicationV8;
+ public:
+  V8Job(TRI_vocbase_t*, std::string const&,
+        std::shared_ptr<arangodb::velocypack::Builder> const, bool, rest::Task*);
+  ~V8Job();
 
-    class V8Job : public rest::Job {
-      private:
-        V8Job (V8Job const&) = delete;
-        V8Job& operator= (V8Job const&) = delete;
+ public:
+  void work() override;
+  bool cancel() override;
+  void cleanup(rest::DispatcherQueue*) override;
+  void handleError(basics::Exception const& ex) override;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ public:
+  virtual std::string const& getName() const override { return _command; }
 
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructs a new V8 job
-////////////////////////////////////////////////////////////////////////////////
-
-        V8Job (TRI_vocbase_t*,
-               ApplicationV8*,
-               std::string const&,
-               TRI_json_t const*,
-               bool);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroys a V8 job
-////////////////////////////////////////////////////////////////////////////////
-        
-        ~V8Job ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       Job methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        status_t work () override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        bool cancel () override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        void cleanup (rest::DispatcherQueue*) override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        void handleError (basics::Exception const& ex) override;
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual const std::string& getName () const override {
-          return _command;
-        }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief vocbase
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_vocbase_t* _vocbase;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief V8 dealer
-////////////////////////////////////////////////////////////////////////////////
-
-        ApplicationV8* _v8Dealer;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the command to execute
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string const _command;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief paramaters
-////////////////////////////////////////////////////////////////////////////////
-
-        TRI_json_t* _parameters;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief cancel flag
-////////////////////////////////////////////////////////////////////////////////
-
-        std::atomic<bool> _canceled;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the job is allowed to switch the database
-////////////////////////////////////////////////////////////////////////////////
-
-        bool const _allowUseDatabase;
-    };
-  }
+ private:
+  /// @brief guard to make sure the database is not dropped while used by us
+  VocbaseGuard _vocbaseGuard;
+  std::string const _command;
+  std::shared_ptr<arangodb::velocypack::Builder> _parameters;
+  std::atomic<bool> _canceled;
+  bool const _allowUseDatabase;
+  rest::Task* _task;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

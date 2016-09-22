@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Mutex Locker
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,8 +20,6 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2008-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_BASICS_MUTEX_LOCKER_H
@@ -34,10 +28,6 @@
 #include "Basics/Common.h"
 #include "Basics/Mutex.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                     public macros
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief construct locker with file and line information
 ///
@@ -45,27 +35,21 @@
 /// number.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define MUTEX_LOCKER_VAR_A(a) _mutex_lock_variable_ ## a
 #define MUTEX_LOCKER_VAR_B(a) MUTEX_LOCKER_VAR_A(a)
 
 #ifdef TRI_SHOW_LOCK_TIME
 
-#define MUTEX_LOCKER(b) \
-  triagens::basics::MutexLocker MUTEX_LOCKER_VAR_B(__LINE__)(&b, __FILE__, __LINE__)
+#define MUTEX_LOCKER(obj, lock) \
+  arangodb::basics::MutexLocker obj(&lock, __FILE__, __LINE__)
 
 #else
 
-#define MUTEX_LOCKER(b) \
-  triagens::basics::MutexLocker MUTEX_LOCKER_VAR_B(__LINE__)(&b)
+#define MUTEX_LOCKER(obj, lock) arangodb::basics::MutexLocker obj(&lock)
 
 #endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 class MutexLocker
-// -----------------------------------------------------------------------------
-
-namespace triagens {
-  namespace basics {
+namespace arangodb {
+namespace basics {
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief mutex locker
@@ -74,16 +58,11 @@ namespace triagens {
 /// when it is destroyed.
 ////////////////////////////////////////////////////////////////////////////////
 
-    class MutexLocker {
-        MutexLocker (MutexLocker const&);
-        MutexLocker& operator= (MutexLocker const&);
+class MutexLocker {
+  MutexLocker(MutexLocker const&) = delete;
+  MutexLocker& operator=(MutexLocker const&) = delete;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
+ public:
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief aquires a lock
 ///
@@ -92,65 +71,50 @@ namespace triagens {
 
 #ifdef TRI_SHOW_LOCK_TIME
 
-        MutexLocker (Mutex* mutex, char const* file, int line);
+  MutexLocker(Mutex* mutex, char const* file, int line);
 
 #else
 
-        explicit
-        MutexLocker (Mutex* mutex);
-
-#endif        
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief releases the lock
-////////////////////////////////////////////////////////////////////////////////
-
-        ~MutexLocker ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      private:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the mutex
-////////////////////////////////////////////////////////////////////////////////
-
-        Mutex* _mutex;
-
-#ifdef TRI_SHOW_LOCK_TIME
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief file
-////////////////////////////////////////////////////////////////////////////////
-
-        char const* _file;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief line number
-////////////////////////////////////////////////////////////////////////////////
-
-        int _line;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief lock time
-////////////////////////////////////////////////////////////////////////////////
-
-        double _time;
-
-#endif        
-    };
-  }
-}
+  explicit MutexLocker(Mutex* mutex);
 
 #endif
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief releases the lock
+  //////////////////////////////////////////////////////////////////////////////
 
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+  ~MutexLocker();
+
+ private:
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief the mutex
+  //////////////////////////////////////////////////////////////////////////////
+
+  Mutex* _mutex;
+
+#ifdef TRI_SHOW_LOCK_TIME
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief file
+  //////////////////////////////////////////////////////////////////////////////
+
+  char const* _file;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief line number
+  //////////////////////////////////////////////////////////////////////////////
+
+  int _line;
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// @brief lock time
+  //////////////////////////////////////////////////////////////////////////////
+
+  double _time;
+
+#endif
+};
+}
+}
+
+#endif

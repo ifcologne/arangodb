@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief abstract actions
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,8 +19,6 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "actions.h"
@@ -33,28 +27,22 @@
 #include "Basics/ReadWriteLock.h"
 #include "Basics/StringUtils.h"
 #include "Basics/WriteLocker.h"
-#include "Basics/delete_object.h"
-#include "Basics/logging.h"
-#include "Rest/HttpRequest.h"
+#include "Logger/Logger.h"
+#include "Rest/GeneralRequest.h"
 
-using namespace std;
-using namespace triagens::basics;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
+using namespace arangodb::basics;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief actions
 ////////////////////////////////////////////////////////////////////////////////
 
-static map<string, TRI_action_t*> Actions;
+static std::map<std::string, TRI_action_t*> Actions;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief prefix actions
 ////////////////////////////////////////////////////////////////////////////////
 
-static map<string, TRI_action_t*> PrefixActions;
+static std::map<std::string, TRI_action_t*> PrefixActions;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief actions lock
@@ -62,21 +50,17 @@ static map<string, TRI_action_t*> PrefixActions;
 
 static ReadWriteLock ActionsLock;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief defines an action
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_action_t* TRI_DefineActionVocBase (string const& name,
-                                       TRI_action_t* action) {
-  WRITE_LOCKER(ActionsLock);
+TRI_action_t* TRI_DefineActionVocBase(std::string const& name,
+                                      TRI_action_t* action) {
+  WRITE_LOCKER(writeLocker, ActionsLock);
 
-  string url = name;
+  std::string url = name;
 
-  while (! url.empty() && url[0] == '/') {
+  while (!url.empty() && url[0] == '/') {
     url = url.substr(1);
   }
 
@@ -87,40 +71,29 @@ TRI_action_t* TRI_DefineActionVocBase (string const& name,
   if (action->_isPrefix) {
     if (PrefixActions.find(url) == PrefixActions.end()) {
       PrefixActions[url] = action;
-    }
-    else {
+    } else {
       TRI_action_t* oldAction = PrefixActions[url];
 
       if (oldAction->_type != action->_type) {
-        LOG_ERROR("trying to define two incompatible actions of type '%s' and '%s' for prefix url '%s'",
-                  oldAction->_type.c_str(),
-                  action->_type.c_str(),
-                  action->_url.c_str());
+        LOG(ERR) << "trying to define two incompatible actions of type '" << oldAction->_type << "' and '" << action->_type << "' for prefix url '" << action->_url << "'";
 
         delete oldAction;
-      }
-      else {
+      } else {
         delete action;
         action = oldAction;
       }
     }
-  }
-  else {
+  } else {
     if (Actions.find(url) == Actions.end()) {
       Actions[url] = action;
-    }
-    else {
+    } else {
       TRI_action_t* oldAction = Actions[url];
 
       if (oldAction->_type != action->_type) {
-        LOG_ERROR("trying to define two incompatible actions of type '%s' and type '%s' for url '%s'",
-                  oldAction->_type.c_str(),
-                  action->_type.c_str(),
-                  action->_url.c_str());
+        LOG(ERR) << "trying to define two incompatible actions of type '" << oldAction->_type << "' and type '" << action->_type << "' for url '" << action->_url << "'";
 
         delete oldAction;
-      }
-      else {
+      } else {
         delete action;
         action = oldAction;
       }
@@ -128,10 +101,7 @@ TRI_action_t* TRI_DefineActionVocBase (string const& name,
   }
 
   // some debug output
-  LOG_DEBUG("created %s %saction '%s'",
-            action->_type.c_str(),
-            (action->_isPrefix ? "prefix " : ""),
-            url.c_str());
+  LOG(DEBUG) << "created " << action->_type << " " << (action->_isPrefix ? "prefix " : "") << " '" << url << "'";
 
   // return old or new action description
   return action;
@@ -141,16 +111,15 @@ TRI_action_t* TRI_DefineActionVocBase (string const& name,
 /// @brief looks up an action
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_action_t* TRI_LookupActionVocBase (triagens::rest::HttpRequest* request) {
+TRI_action_t* TRI_LookupActionVocBase(arangodb::GeneralRequest* request) {
   // check if we know a callback
-  vector<string> suffix = request->suffix();
+  std::vector<std::string> suffix = request->suffix();
 
   // find a direct match
-  string name = StringUtils::join(suffix, '/');
-  
+  std::string name = StringUtils::join(suffix, '/');
 
-  READ_LOCKER(ActionsLock);
-  map<string, TRI_action_t*>::iterator i = Actions.find(name);
+  READ_LOCKER(readLocker, ActionsLock);
+  std::map<std::string, TRI_action_t*>::iterator i = Actions.find(name);
 
   if (i != Actions.end()) {
     return i->second;
@@ -179,19 +148,14 @@ TRI_action_t* TRI_LookupActionVocBase (triagens::rest::HttpRequest* request) {
 /// @brief deletes all defined actions
 ////////////////////////////////////////////////////////////////////////////////
 
-void TRI_CleanupActions () {
-  for_each(Actions.begin(), Actions.end(), DeleteObjectValue());
+void TRI_CleanupActions() {
+  for (auto& it : Actions) {
+    delete it.second;
+  }
   Actions.clear();
 
-  for_each(PrefixActions.begin(), PrefixActions.end(), DeleteObjectValue());
+  for (auto& it : PrefixActions) {
+    delete it.second;
+  }
   PrefixActions.clear();
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

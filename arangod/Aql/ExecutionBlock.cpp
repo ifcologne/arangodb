@@ -1,11 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Infrastructure for ExecutionBlocks, the execution engine
-///
-/// @file arangod/Aql/ExecutionBlock.cpp
-///
 /// DISCLAIMER
 ///
-/// Copyright 2010-2014 triagens GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -19,53 +16,25 @@
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
 ///
-/// Copyright holder is triAGENS GmbH, Cologne, Germany
+/// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Max Neunhoeffer
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
+/// @author Michael Hackstein
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Aql/ExecutionBlock.h"
+#include "ExecutionBlock.h"
 #include "Aql/ExecutionEngine.h"
-#include "Basics/StringUtils.h"
-#include "Basics/Exceptions.h"
-#include "VocBase/vocbase.h"
 
-using namespace std;
-using namespace triagens::arango;
-using namespace triagens::aql;
+using namespace arangodb::aql;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class ExecutionBlock
-// -----------------------------------------------------------------------------
+ExecutionBlock::ExecutionBlock(ExecutionEngine* engine, ExecutionNode const* ep)
+    : _engine(engine),
+      _trx(engine->getQuery()->trx()),
+      _exeNode(ep),
+      _pos(0),
+      _done(false) {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief batch size value
-////////////////////////////////////////////////////////////////////////////////
-
-size_t const ExecutionBlock::DefaultBatchSize = 1000;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
-
-ExecutionBlock::ExecutionBlock (ExecutionEngine* engine,
-                                ExecutionNode const* ep)
-  : _engine(engine),
-    _trx(engine->getQuery()->trx()), 
-    _exeNode(ep), 
-    _done(false) {
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-ExecutionBlock::~ExecutionBlock () {
+ExecutionBlock::~ExecutionBlock() {
   for (auto& it : _buffer) {
     delete it;
   }
@@ -73,15 +42,25 @@ ExecutionBlock::~ExecutionBlock () {
   _buffer.clear();
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
+/// @brief returns the register id for a variable id
+/// will return ExecutionNode::MaxRegisterId for an unknown variable
+RegisterId ExecutionBlock::getRegister(VariableId id) const {
+  auto it = _exeNode->getRegisterPlan()->varInfo.find(id);
 
-////////////////////////////////////////////////////////////////////////////////
+  if (it != _exeNode->getRegisterPlan()->varInfo.end()) {
+    return (*it).second.registerId;
+  }
+  return ExecutionNode::MaxRegisterId;
+}
+
+RegisterId ExecutionBlock::getRegister(Variable const* variable) const {
+  TRI_ASSERT(variable != nullptr);
+  return getRegister(variable->id);
+}
+
 /// @brief determine the number of rows in a vector of blocks
-////////////////////////////////////////////////////////////////////////////////
-
-size_t ExecutionBlock::countBlocksRows (std::vector<AqlItemBlock*> const& blocks) const {
+size_t ExecutionBlock::countBlocksRows(
+    std::vector<AqlItemBlock*> const& blocks) const {
   size_t count = 0;
   for (auto const& it : blocks) {
     count += it->size();
@@ -89,7 +68,7 @@ size_t ExecutionBlock::countBlocksRows (std::vector<AqlItemBlock*> const& blocks
   return count;
 }
 
-bool ExecutionBlock::removeDependency (ExecutionBlock* ep) {
+bool ExecutionBlock::removeDependency(ExecutionBlock* ep) {
   auto it = _dependencies.begin();
   while (it != _dependencies.end()) {
     if (*it == ep) {
@@ -101,7 +80,8 @@ bool ExecutionBlock::removeDependency (ExecutionBlock* ep) {
   return false;
 }
 
-int ExecutionBlock::initializeCursor (AqlItemBlock* items, size_t pos) {
+int ExecutionBlock::initializeCursor(AqlItemBlock* items, size_t pos) {
+  DEBUG_BEGIN_BLOCK();
   for (auto& d : _dependencies) {
     int res = d->initializeCursor(items, pos);
 
@@ -117,31 +97,21 @@ int ExecutionBlock::initializeCursor (AqlItemBlock* items, size_t pos) {
 
   _done = false;
   return TRI_ERROR_NO_ERROR;
+  DEBUG_END_BLOCK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not the query was killed
-////////////////////////////////////////////////////////////////////////////////
+bool ExecutionBlock::isKilled() const { return _engine->getQuery()->killed(); }
 
-bool ExecutionBlock::isKilled () const {
-  return _engine->getQuery()->killed();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not the query was killed
-////////////////////////////////////////////////////////////////////////////////
-
-void ExecutionBlock::throwIfKilled () {
+void ExecutionBlock::throwIfKilled() {
   if (isKilled()) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_QUERY_KILLED);
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief initialize
-////////////////////////////////////////////////////////////////////////////////
-
-int ExecutionBlock::initialize () {
+int ExecutionBlock::initialize() {
   for (auto it = _dependencies.begin(); it != _dependencies.end(); ++it) {
     int res = (*it)->initialize();
 
@@ -152,11 +122,8 @@ int ExecutionBlock::initialize () {
   return TRI_ERROR_NO_ERROR;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief shutdown, will be called exactly once for the whole query
-////////////////////////////////////////////////////////////////////////////////
-
-int ExecutionBlock::shutdown (int errorCode) {
+int ExecutionBlock::shutdown(int errorCode) {
   int ret = TRI_ERROR_NO_ERROR;
 
   for (auto& it : _buffer) {
@@ -168,8 +135,7 @@ int ExecutionBlock::shutdown (int errorCode) {
     int res;
     try {
       res = (*it)->shutdown(errorCode);
-    }
-    catch (...) {
+    } catch (...) {
       res = TRI_ERROR_INTERNAL;
     }
 
@@ -181,149 +147,93 @@ int ExecutionBlock::shutdown (int errorCode) {
   return ret;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief getSome, gets some more items, semantic is as follows: not
 /// more than atMost items may be delivered. The method tries to
 /// return a block of at least atLeast items, however, it may return
 /// less (for example if there are not enough items to come). However,
 /// if it returns an actual block, it must contain at least one item.
-////////////////////////////////////////////////////////////////////////////////
-
-AqlItemBlock* ExecutionBlock::getSome (size_t atLeast, size_t atMost) {
-  std::unique_ptr<AqlItemBlock> result(getSomeWithoutRegisterClearout(atLeast, atMost));
+AqlItemBlock* ExecutionBlock::getSome(size_t atLeast, size_t atMost) {
+  DEBUG_BEGIN_BLOCK();
+  std::unique_ptr<AqlItemBlock> result(
+      getSomeWithoutRegisterClearout(atLeast, atMost));
   clearRegisters(result.get());
   return result.release();
+  DEBUG_END_BLOCK();
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief request an AqlItemBlock from the memory manager
-////////////////////////////////////////////////////////////////////////////////
-
-AqlItemBlock* ExecutionBlock::requestBlock (size_t nrItems, 
-                                            RegisterId nrRegs) {
+AqlItemBlock* ExecutionBlock::requestBlock(size_t nrItems, RegisterId nrRegs) {
   return _engine->_itemBlockManager.requestBlock(nrItems, nrRegs);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return an AqlItemBlock to the memory manager
-////////////////////////////////////////////////////////////////////////////////
-
-void ExecutionBlock::returnBlock (AqlItemBlock*& block) {
+void ExecutionBlock::returnBlock(AqlItemBlock*& block) {
   _engine->_itemBlockManager.returnBlock(block);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief resolve a collection name and return cid and document key
-/// this is used for parsing _from, _to and _id values
-////////////////////////////////////////////////////////////////////////////////
-  
-int ExecutionBlock::resolve (char const* handle, 
-                             TRI_voc_cid_t& cid, 
-                             std::string& key) const {
-  char const* p = strchr(handle, TRI_DOCUMENT_HANDLE_SEPARATOR_CHR);
-  if (p == nullptr || *p == '\0') {
-    return TRI_ERROR_ARANGO_DOCUMENT_HANDLE_BAD;
-  }
-  
-  if (*handle >= '0' && *handle <= '9') {
-    cid = triagens::basics::StringUtils::uint64(handle, p - handle);
-  }
-  else {
-    std::string const name(handle, p - handle);
-    cid = _trx->resolver()->getCollectionIdCluster(name);
-  }
-                              
-  if (cid == 0) {
-    return TRI_ERROR_ARANGO_COLLECTION_NOT_FOUND;
-  }
-
-  key = std::string(p + 1);
-
-  return TRI_ERROR_NO_ERROR;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief copy register data from one block (src) into another (dst)
 /// register values are cloned
-////////////////////////////////////////////////////////////////////////////////
-
-void ExecutionBlock::inheritRegisters (AqlItemBlock const* src,
-                                       AqlItemBlock* dst,
-                                       size_t srcRow,
-                                       size_t dstRow) {
+void ExecutionBlock::inheritRegisters(AqlItemBlock const* src,
+                                      AqlItemBlock* dst, size_t srcRow,
+                                      size_t dstRow) {
+  DEBUG_BEGIN_BLOCK();
   RegisterId const n = src->getNrRegs();
   auto planNode = getPlanNode();
 
   for (RegisterId i = 0; i < n; i++) {
     if (planNode->_regsToClear.find(i) == planNode->_regsToClear.end()) {
-      auto value = src->getValueReference(srcRow, i);
+      auto const& value = src->getValueReference(srcRow, i);
 
-      if (! value.isEmpty()) {
+      if (!value.isEmpty()) {
         AqlValue a = value.clone();
-        try {
-          dst->setValue(dstRow, i, a);
-        }
-        catch (...) {
-          a.destroy();
-          throw;
-        }
+        AqlValueGuard guard(a, true);
+
+        dst->setValue(dstRow, i, a);
+        guard.steal();
       }
-      // copy collection
-      dst->setDocumentCollection(i, src->getDocumentCollection(i));
     }
   }
+  DEBUG_END_BLOCK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief copy register data from one block (src) into another (dst)
 /// register values are cloned
-////////////////////////////////////////////////////////////////////////////////
-
-void ExecutionBlock::inheritRegisters (AqlItemBlock const* src,
-                                       AqlItemBlock* dst,
-                                       size_t row) {
+void ExecutionBlock::inheritRegisters(AqlItemBlock const* src,
+                                      AqlItemBlock* dst, size_t row) {
+  DEBUG_BEGIN_BLOCK();
   RegisterId const n = src->getNrRegs();
   auto planNode = getPlanNode();
 
   for (RegisterId i = 0; i < n; i++) {
     if (planNode->_regsToClear.find(i) == planNode->_regsToClear.end()) {
-      auto value = src->getValueReference(row, i);
+      auto const& value = src->getValueReference(row, i);
 
-      if (! value.isEmpty()) {
+      if (!value.isEmpty()) {
         AqlValue a = value.clone();
+        AqlValueGuard guard(a, true);
 
-        try {
-          TRI_IF_FAILURE("ExecutionBlock::inheritRegisters") {
-            THROW_ARANGO_EXCEPTION(TRI_ERROR_DEBUG);
-          }
+        TRI_IF_FAILURE("ExecutionBlock::inheritRegisters") {
+          THROW_ARANGO_EXCEPTION(TRI_ERROR_DEBUG);
+        }
 
-          dst->setValue(0, i, a);
-        }
-        catch (...) {
-          a.destroy();
-          throw;
-        }
+        dst->setValue(0, i, a);
+        guard.steal();
       }
-      // copy collection
-      dst->setDocumentCollection(i, src->getDocumentCollection(i));
     }
   }
+
+  DEBUG_END_BLOCK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief the following is internal to pull one more block and append it to
 /// our _buffer deque. Returns true if a new block was appended and false if
 /// the dependent node is exhausted.
-////////////////////////////////////////////////////////////////////////////////
+bool ExecutionBlock::getBlock(size_t atLeast, size_t atMost) {
+  DEBUG_BEGIN_BLOCK();
+  throwIfKilled();  // check if we were aborted
 
-bool ExecutionBlock::getBlock (size_t atLeast, size_t atMost) {
-  throwIfKilled(); // check if we were aborted
-
-  std::unique_ptr<AqlItemBlock> docs(_dependencies[0]->getSome(atLeast, atMost));
+  std::unique_ptr<AqlItemBlock> docs(
+      _dependencies[0]->getSome(atLeast, atMost));
 
   if (docs == nullptr) {
     return false;
@@ -337,18 +247,17 @@ bool ExecutionBlock::getBlock (size_t atLeast, size_t atMost) {
   docs.release();
 
   return true;
+  DEBUG_END_BLOCK();
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief getSomeWithoutRegisterClearout, same as above, however, this
 /// is the actual worker which does not clear out registers at the end
 /// the idea is that somebody who wants to call the generic functionality
 /// in a derived class but wants to modify the results before the register
 /// cleanup can use this method, internal use only
-////////////////////////////////////////////////////////////////////////////////
-
-AqlItemBlock* ExecutionBlock::getSomeWithoutRegisterClearout (size_t atLeast, 
-                                                              size_t atMost) {
+AqlItemBlock* ExecutionBlock::getSomeWithoutRegisterClearout(size_t atLeast,
+                                                             size_t atMost) {
+  DEBUG_BEGIN_BLOCK();
   TRI_ASSERT(0 < atLeast && atLeast <= atMost);
   size_t skipped = 0;
 
@@ -360,16 +269,20 @@ AqlItemBlock* ExecutionBlock::getSomeWithoutRegisterClearout (size_t atLeast,
   }
 
   return result;
+  DEBUG_END_BLOCK();
 }
 
-void ExecutionBlock::clearRegisters (AqlItemBlock* result) {
+void ExecutionBlock::clearRegisters(AqlItemBlock* result) {
+  DEBUG_BEGIN_BLOCK();
   // Clear out registers not needed later on:
   if (result != nullptr) {
     result->clearRegisters(getPlanNode()->_regsToClear);
   }
+  DEBUG_END_BLOCK();
 }
 
-size_t ExecutionBlock::skipSome (size_t atLeast, size_t atMost) {
+size_t ExecutionBlock::skipSome(size_t atLeast, size_t atMost) {
+  DEBUG_BEGIN_BLOCK();
   TRI_ASSERT(0 < atLeast && atLeast <= atMost);
   size_t skipped = 0;
 
@@ -383,31 +296,35 @@ size_t ExecutionBlock::skipSome (size_t atLeast, size_t atMost) {
   }
 
   return skipped;
+  DEBUG_END_BLOCK();
 }
 
 // skip exactly <number> outputs, returns <true> if _done after
 // skipping, and <false> otherwise . . .
-bool ExecutionBlock::skip (size_t number) {
+bool ExecutionBlock::skip(size_t number, size_t& numActuallySkipped) {
+  DEBUG_BEGIN_BLOCK();
   size_t skipped = skipSome(number, number);
   size_t nr = skipped;
   while (nr != 0 && skipped < number) {
     nr = skipSome(number - skipped, number - skipped);
     skipped += nr;
   }
+  numActuallySkipped = skipped;
   if (nr == 0) {
     return true;
   }
-  return ! hasMore();
+  return !hasMore();
+  DEBUG_END_BLOCK();
 }
 
-bool ExecutionBlock::hasMore () {
+bool ExecutionBlock::hasMore() {
   if (_done) {
     return false;
   }
-  if (! _buffer.empty()) {
+  if (!_buffer.empty()) {
     return true;
   }
-  if (getBlock(DefaultBatchSize, DefaultBatchSize)) {
+  if (getBlock(DefaultBatchSize(), DefaultBatchSize())) {
     _pos = 0;
     return true;
   }
@@ -415,7 +332,7 @@ bool ExecutionBlock::hasMore () {
   return false;
 }
 
-int64_t ExecutionBlock::remaining () {
+int64_t ExecutionBlock::remaining() {
   int64_t sum = 0;
   for (auto const& it : _buffer) {
     sum += it->size();
@@ -423,12 +340,9 @@ int64_t ExecutionBlock::remaining () {
   return sum + _dependencies[0]->remaining();
 }
 
-int ExecutionBlock::getOrSkipSome (size_t atLeast,
-                                   size_t atMost,
-                                   bool skipping,
-                                   AqlItemBlock*& result,
-                                   size_t& skipped) {
-  
+int ExecutionBlock::getOrSkipSome(size_t atLeast, size_t atMost, bool skipping,
+                                  AqlItemBlock*& result, size_t& skipped) {
+  DEBUG_BEGIN_BLOCK();
   TRI_ASSERT(result == nullptr && skipped == 0);
 
   if (_done) {
@@ -449,15 +363,16 @@ int ExecutionBlock::getOrSkipSome (size_t atLeast,
     while (skipped < atLeast) {
       if (_buffer.empty()) {
         if (skipping) {
-          _dependencies[0]->skip(atLeast - skipped);
+          size_t numActuallySkipped = 0;
+          _dependencies[0]->skip(atLeast - skipped, numActuallySkipped);
           skipped = atLeast;
           freeCollector();
           return TRI_ERROR_NO_ERROR;
-        }
-        else {
-          if (! getBlock(atLeast - skipped, atMost - skipped)) {
+        } else {
+          if (!getBlock(atLeast - skipped, atMost - skipped)) {
             _done = true;
-            break; // must still put things in the result from the collector . . .
+            break;  // must still put things in the result from the collector .
+                    // . .
           }
           _pos = 0;
         }
@@ -467,23 +382,23 @@ int ExecutionBlock::getOrSkipSome (size_t atLeast,
 
       if (cur->size() - _pos > atMost - skipped) {
         // The current block is too large for atMost:
-        if (! skipping) { 
-          std::unique_ptr<AqlItemBlock> more(cur->slice(_pos, _pos + (atMost - skipped)));
+        if (!skipping) {
+          std::unique_ptr<AqlItemBlock> more(
+              cur->slice(_pos, _pos + (atMost - skipped)));
 
           TRI_IF_FAILURE("ExecutionBlock::getOrSkipSome1") {
             THROW_ARANGO_EXCEPTION(TRI_ERROR_DEBUG);
           }
 
           collector.emplace_back(more.get());
-          more.release(); // do not delete it!
+          more.release();  // do not delete it!
         }
         _pos += atMost - skipped;
         skipped = atMost;
-      }
-      else if (_pos > 0) {
+      } else if (_pos > 0) {
         // The current block fits into our result, but it is already
         // half-eaten:
-        if (! skipping) {
+        if (!skipping) {
           std::unique_ptr<AqlItemBlock> more(cur->slice(_pos, cur->size()));
 
           TRI_IF_FAILURE("ExecutionBlock::getOrSkipSome2") {
@@ -497,46 +412,41 @@ int ExecutionBlock::getOrSkipSome (size_t atLeast,
         delete cur;
         _buffer.pop_front();
         _pos = 0;
-      }
-      else {
+      } else {
         // The current block fits into our result and is fresh:
         skipped += cur->size();
-        if (! skipping) {
+        if (!skipping) {
           // if any of the following statements throw, then cur is not lost,
           // as it is still contained in _buffer
           TRI_IF_FAILURE("ExecutionBlock::getOrSkipSome3") {
             THROW_ARANGO_EXCEPTION(TRI_ERROR_DEBUG);
           }
           collector.emplace_back(cur);
-        }
-        else {
+        } else {
           delete cur;
         }
         _buffer.pop_front();
         _pos = 0;
       }
     }
-  }
-  catch (...) {
+  } catch (...) {
     freeCollector();
     throw;
   }
 
   TRI_ASSERT(result == nullptr);
 
-  if (! skipping) {
+  if (!skipping) {
     if (collector.size() == 1) {
       result = collector[0];
       collector.clear();
-    }
-    else if (! collector.empty()) {
+    } else if (!collector.empty()) {
       try {
         TRI_IF_FAILURE("ExecutionBlock::getOrSkipSomeConcatenate") {
           THROW_ARANGO_EXCEPTION(TRI_ERROR_DEBUG);
         }
         result = AqlItemBlock::concatenate(collector);
-      }
-      catch (...) {
+      } catch (...) {
         freeCollector();
         throw;
       }
@@ -545,9 +455,5 @@ int ExecutionBlock::getOrSkipSome (size_t atLeast,
 
   freeCollector();
   return TRI_ERROR_NO_ERROR;
+  DEBUG_END_BLOCK();
 }
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "^\\(/// @brief\\|/// {@inheritDoc}\\|/// @addtogroup\\|// --SECTION--\\|/// @\\}\\)"
-// End:

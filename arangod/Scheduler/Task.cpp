@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief abstract base class for tasks
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,77 +20,70 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2009-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Task.h"
-
-#include "Basics/json.h"
 #include "Scheduler/Scheduler.h"
 
-using namespace triagens::rest;
-using namespace std;
+#include <velocypack/Builder.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
+using namespace arangodb::rest;
 
 namespace {
-  std::atomic_uint_fast64_t NEXT_TASK_ID(1);
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructs a new task
-////////////////////////////////////////////////////////////////////////////////
-
-Task::Task (std::string const& id,
-            std::string const& name)
-  : _scheduler(nullptr),
-    _loop(0),
-    _taskId(NEXT_TASK_ID.fetch_add(1, memory_order_seq_cst)),
-    _id(id),
-    _name(name) {
+std::atomic_uint_fast64_t NEXT_TASK_ID(static_cast<uint64_t>(TRI_microtime() *
+                                                             100000.0));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructs a new task
 ////////////////////////////////////////////////////////////////////////////////
 
-Task::Task (std::string const& name)
-  : Task("", name) {
-}
+Task::Task(std::string const& id, std::string const& name)
+    : _scheduler(nullptr),
+      _taskId(NEXT_TASK_ID.fetch_add(1, std::memory_order_seq_cst)),
+      _loop(0),  // TODO(fc) XXX this should be an "invalid" marker!
+      _id(id),
+      _name(name) {}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief constructs a new task
+////////////////////////////////////////////////////////////////////////////////
+
+Task::Task(std::string const& name) : Task("", name) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief destroys a task
 ////////////////////////////////////////////////////////////////////////////////
 
-Task::~Task () {
+Task::~Task() {}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief get a VelocyPack representation of the task
+////////////////////////////////////////////////////////////////////////////////
+
+std::shared_ptr<VPackBuilder> Task::toVelocyPack() const {
+  try {
+    auto builder = std::make_shared<VPackBuilder>();
+    {
+      VPackObjectBuilder b(builder.get());
+      toVelocyPack(*builder);
+    }
+    return builder;
+  } catch (...) {
+    return std::make_shared<VPackBuilder>();
+  }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief get a JSON representation of the task
+/// @brief get a VelocyPack representation of the task
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_json_t* Task::toJson () const {
-  TRI_json_t* json = TRI_CreateObjectJson(TRI_UNKNOWN_MEM_ZONE);
-
-  if (json != nullptr) {
-    TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, json, "id", TRI_CreateStringCopyJson(TRI_UNKNOWN_MEM_ZONE, this->id().c_str(), this->id().size()));
-    TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, json, "name", TRI_CreateStringCopyJson(TRI_UNKNOWN_MEM_ZONE, this->name().c_str(), this->name().size()));
-
-    this->getDescription(json);
-  }
-
-  return json;
+void Task::toVelocyPack(VPackBuilder& builder) const {
+  TRI_ASSERT(builder.isOpenObject());
+  builder.add("id", VPackValue(id()));
+  builder.add("name", VPackValue(name()));
+  getDescription(builder);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -102,35 +91,17 @@ TRI_json_t* Task::toJson () const {
 /// note: this function may be overridden
 ////////////////////////////////////////////////////////////////////////////////
 
-bool Task::isUserDefined () const {
-  return false;
-}
+bool Task::isUserDefined() const { return false; }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief allow thread to run on slave event loop
 ////////////////////////////////////////////////////////////////////////////////
 
-bool Task::needsMainEventLoop () const {
-  return false;
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 protected methods
-// -----------------------------------------------------------------------------
+bool Task::needsMainEventLoop() const { return false; }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief get a task specific description in JSON format
+/// @brief get a task specific description in VelocyPack format
 /// this does nothing for basic tasks, but derived classes may override it
 ////////////////////////////////////////////////////////////////////////////////
 
-void Task::getDescription (TRI_json_t* json) const {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+void Task::getDescription(VPackBuilder&) const {}

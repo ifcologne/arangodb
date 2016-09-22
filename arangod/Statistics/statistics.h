@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief statistics basics
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,67 +19,68 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef ARANGODB_STATISTICS_STATISTICS_H
-#define ARANGODB_STATISTICS_STATISTICS_H 1
+#ifndef ARANGOD_STATISTICS_STATISTICS_H
+#define ARANGOD_STATISTICS_STATISTICS_H 1
 
 #include "Basics/Common.h"
 #include "Rest/HttpRequest.h"
 #include "Statistics/figures.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief request statistics
-////////////////////////////////////////////////////////////////////////////////
-
 struct TRI_request_statistics_t {
-  TRI_request_statistics_t ()
-    : _readStart(0.0),
-      _readEnd(0.0),
-      _queueStart(0.0),
-      _queueEnd(0.0),
-      _requestStart(0.0),
-      _requestEnd(0.0),
-      _writeStart(0.0),
-      _writeEnd(0.0),
-      _receivedBytes(0.0),
-      _sentBytes(0.0),
-      _requestType(triagens::rest::HttpRequest::HTTP_REQUEST_ILLEGAL),
-      _async(false),
-      _tooLarge(false),
-      _executeError(false),
-      _ignore(false) {
+#ifdef USE_DEV_TIMERS
+  static thread_local TRI_request_statistics_t* STATS;
+#endif
+
+  TRI_request_statistics_t()
+      : _readStart(0.0),
+        _readEnd(0.0),
+        _queueStart(0.0),
+        _queueEnd(0.0),
+        _requestStart(0.0),
+        _requestEnd(0.0),
+        _writeStart(0.0),
+        _writeEnd(0.0),
+        _receivedBytes(0.0),
+        _sentBytes(0.0),
+        _requestType(arangodb::rest::RequestType::ILLEGAL),
+        _async(false),
+        _tooLarge(false),
+        _executeError(false),
+        _ignore(false) {
+#ifdef USE_DEV_TIMERS
+    _id = nullptr;
+#endif
   }
 
-  void reset () {
-    _readStart     = 0.0;
-    _readEnd       = 0.0;
-    _queueStart    = 0.0;
-    _queueEnd      = 0.0;
-    _requestStart  = 0.0;
-    _requestEnd    = 0.0;
-    _writeStart    = 0.0;
-    _writeEnd      = 0.0;
+  void reset() {
+    _readStart = 0.0;
+    _readEnd = 0.0;
+    _queueStart = 0.0;
+    _queueEnd = 0.0;
+    _requestStart = 0.0;
+    _requestEnd = 0.0;
+    _writeStart = 0.0;
+    _writeEnd = 0.0;
     _receivedBytes = 0.0;
-    _sentBytes     = 0.0;
-    _requestType   = triagens::rest::HttpRequest::HTTP_REQUEST_ILLEGAL;
-    _async         = false;
-    _tooLarge      = false;
-    _executeError  = false;
-    _ignore        = false;
+    _sentBytes = 0.0;
+    _requestType = arangodb::rest::RequestType::ILLEGAL;
+    _async = false;
+    _tooLarge = false;
+    _executeError = false;
+    _ignore = false;
+#ifdef USE_DEV_TIMERS
+    _sections.clear();
+    _timings.clear();
+#endif
   }
 
-  double _readStart;
-  double _readEnd;
-  double _queueStart;
-  double _queueEnd;
-  double _requestStart;
+  double _readStart;     // CommTask::processRead - read first byte of message
+  double _readEnd;       // CommTask::processRead - message complete
+  double _queueStart;    // addJob to queue GeneralServer::handleRequest
+  double _queueEnd;      // exit queue DispatcherThread::handleJob
+  double _requestStart;  // GeneralServerJob::work
   double _requestEnd;
   double _writeStart;
   double _writeEnd;
@@ -91,256 +88,99 @@ struct TRI_request_statistics_t {
   double _receivedBytes;
   double _sentBytes;
 
-  triagens::rest::HttpRequest::HttpRequestType _requestType;
+  arangodb::rest::RequestType _requestType;
 
   bool _async;
   bool _tooLarge;
   bool _executeError;
   bool _ignore;
+
+#ifdef USE_DEV_TIMERS
+  void* _id;
+  std::vector<std::string> _sections;
+  std::vector<double> _timings;
+#endif
 };
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief connection statistics
-////////////////////////////////////////////////////////////////////////////////
-
 struct TRI_connection_statistics_t {
-  TRI_connection_statistics_t ()
-    : _connStart(0.0),
-      _connEnd(0.0),
-      _http(false),
-      _error(false) {
+  TRI_connection_statistics_t()
+      : _connStart(0.0), _connEnd(0.0), _http(false), _error(false) {}
+
+  void reset() {
+    _connStart = 0.0;
+    _connEnd = 0.0;
+    _http = false;
+    _error = false;
   }
 
-  void reset () {
-    _connStart = 0.0;
-    _connEnd   = 0.0;
-    _http      = false;
-    _error     = false;
-  }
-  
   double _connStart;
   double _connEnd;
 
-  bool   _http;
-  bool   _error;
+  bool _http;
+  bool _error;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief global server statistics
-////////////////////////////////////////////////////////////////////////////////
-
 struct TRI_server_statistics_t {
-  TRI_server_statistics_t ()
-    : _startTime(0.0),
-      _uptime(0.0) {
-  }
+  TRI_server_statistics_t() : _startTime(0.0), _uptime(0.0) {}
 
   double _startTime;
   double _uptime;
 };
 
-// -----------------------------------------------------------------------------
-// --SECTION--                               public request statistics functions
-// -----------------------------------------------------------------------------
+TRI_request_statistics_t* TRI_AcquireRequestStatistics(void);
+void TRI_ReleaseRequestStatistics(TRI_request_statistics_t*);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief gets a new statistics block
-////////////////////////////////////////////////////////////////////////////////
+void TRI_FillRequestStatistics(
+    arangodb::basics::StatisticsDistribution& totalTime,
+    arangodb::basics::StatisticsDistribution& requestTime,
+    arangodb::basics::StatisticsDistribution& queueTime,
+    arangodb::basics::StatisticsDistribution& ioTime,
+    arangodb::basics::StatisticsDistribution& bytesSent,
+    arangodb::basics::StatisticsDistribution& bytesReceived);
 
-TRI_request_statistics_t* TRI_AcquireRequestStatistics (void);
+TRI_connection_statistics_t* TRI_AcquireConnectionStatistics(void);
+void TRI_ReleaseConnectionStatistics(TRI_connection_statistics_t*);
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief releases a statistics block
-////////////////////////////////////////////////////////////////////////////////
+void TRI_FillConnectionStatistics(
+    arangodb::basics::StatisticsCounter& httpConnections,
+    arangodb::basics::StatisticsCounter& totalRequests,
+    std::vector<arangodb::basics::StatisticsCounter>& methodRequests,
+    arangodb::basics::StatisticsCounter& asyncRequests,
+    arangodb::basics::StatisticsDistribution& connectionTime);
 
-void TRI_ReleaseRequestStatistics (TRI_request_statistics_t*);
+TRI_server_statistics_t TRI_GetServerStatistics();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief fills the current statistics
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_FillRequestStatistics (triagens::basics::StatisticsDistribution& totalTime,
-                                triagens::basics::StatisticsDistribution& requestTime,
-                                triagens::basics::StatisticsDistribution& queueTime,
-                                triagens::basics::StatisticsDistribution& ioTime,
-                                triagens::basics::StatisticsDistribution& bytesSent,
-                                triagens::basics::StatisticsDistribution& bytesReceived);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                            public connection statistics functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief gets a new statistics block
-////////////////////////////////////////////////////////////////////////////////
-
-TRI_connection_statistics_t* TRI_AcquireConnectionStatistics (void);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief releases a statistics block
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_ReleaseConnectionStatistics (TRI_connection_statistics_t*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief fills the current statistics
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_FillConnectionStatistics (triagens::basics::StatisticsCounter& httpConnections,
-                                   triagens::basics::StatisticsCounter& totalRequests,
-                                   std::vector<triagens::basics::StatisticsCounter>& methodRequests,
-                                   triagens::basics::StatisticsCounter& asyncRequests,
-                                   triagens::basics::StatisticsDistribution& connectionTime);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                public server statistics functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief gets the server statistics
-////////////////////////////////////////////////////////////////////////////////
-
-TRI_server_statistics_t TRI_GetServerStatistics ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public variables
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief statistics enabled flags
-////////////////////////////////////////////////////////////////////////////////
-
-extern bool TRI_ENABLE_STATISTICS;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of http connections
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsCounter TRI_HttpConnectionsStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief total number of requests
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsCounter TRI_TotalRequestsStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of requests by HTTP method
-////////////////////////////////////////////////////////////////////////////////
-
-extern std::vector<triagens::basics::StatisticsCounter> TRI_MethodRequestsStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief number of async requests
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsCounter TRI_AsyncRequestsStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief connection time distribution vector
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsVector TRI_ConnectionTimeDistributionVectorStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief total time distribution
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsDistribution* TRI_ConnectionTimeDistributionStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief request time distribution vector
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsVector TRI_RequestTimeDistributionVectorStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief total time distribution
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsDistribution* TRI_TotalTimeDistributionStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief request time distribution
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsDistribution* TRI_RequestTimeDistributionStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief queue time distribution
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsDistribution* TRI_QueueTimeDistributionStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief i/o distribution
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsDistribution* TRI_IoTimeDistributionStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief bytes sent distribution vector
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsVector TRI_BytesSentDistributionVectorStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief bytes sent distribution
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsDistribution* TRI_BytesSentDistributionStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief bytes received distribution vector
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsVector TRI_BytesReceivedDistributionVectorStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief bytes received distribution
-////////////////////////////////////////////////////////////////////////////////
-
-extern triagens::basics::StatisticsDistribution* TRI_BytesReceivedDistributionStatistics;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief global server statistics
-////////////////////////////////////////////////////////////////////////////////
-
+extern arangodb::basics::StatisticsCounter TRI_HttpConnectionsStatistics;
+extern arangodb::basics::StatisticsCounter TRI_TotalRequestsStatistics;
+extern std::vector<arangodb::basics::StatisticsCounter>
+    TRI_MethodRequestsStatistics;
+extern arangodb::basics::StatisticsCounter TRI_AsyncRequestsStatistics;
+extern arangodb::basics::StatisticsVector
+    TRI_ConnectionTimeDistributionVectorStatistics;
+extern arangodb::basics::StatisticsDistribution*
+    TRI_ConnectionTimeDistributionStatistics;
+extern arangodb::basics::StatisticsVector
+    TRI_RequestTimeDistributionVectorStatistics;
+extern arangodb::basics::StatisticsDistribution*
+    TRI_TotalTimeDistributionStatistics;
+extern arangodb::basics::StatisticsDistribution*
+    TRI_RequestTimeDistributionStatistics;
+extern arangodb::basics::StatisticsDistribution*
+    TRI_QueueTimeDistributionStatistics;
+extern arangodb::basics::StatisticsDistribution*
+    TRI_IoTimeDistributionStatistics;
+extern arangodb::basics::StatisticsVector
+    TRI_BytesSentDistributionVectorStatistics;
+extern arangodb::basics::StatisticsDistribution*
+    TRI_BytesSentDistributionStatistics;
+extern arangodb::basics::StatisticsVector
+    TRI_BytesReceivedDistributionVectorStatistics;
+extern arangodb::basics::StatisticsDistribution*
+    TRI_BytesReceivedDistributionStatistics;
 extern TRI_server_statistics_t TRI_ServerStatistics;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
+inline double TRI_StatisticsTime() { return TRI_microtime(); }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief gets the current wallclock time
-////////////////////////////////////////////////////////////////////////////////
-
-double TRI_StatisticsTime (void);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                             module initialization
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief module init function
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_InitializeStatistics (void);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief shut down statistics
-////////////////////////////////////////////////////////////////////////////////
-
-void TRI_ShutdownStatistics (void);
+void TRI_InitializeStatistics();
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief simple document batch request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,102 +19,89 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2010-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestSimpleHandler.h"
 #include "Aql/Query.h"
 #include "Aql/QueryRegistry.h"
 #include "Basics/Exceptions.h"
-#include "Basics/json.h"
 #include "Basics/MutexLocker.h"
 #include "Basics/ScopeGuard.h"
-#include "V8Server/ApplicationV8.h"
+#include "Basics/StaticStrings.h"
+#include "Basics/VPackStringBufferAdapter.h"
+#include "Basics/VelocyPackHelper.h"
+#include "Utils/SingleCollectionTransaction.h"
+#include "Utils/StandaloneTransactionContext.h"
+#include "Utils/TransactionContext.h"
+#include "VocBase/LogicalCollection.h"
+#include "VocBase/Traverser.h"
 
-using namespace triagens::arango;
-using namespace triagens::rest;
+#include <velocypack/Builder.h>
+#include <velocypack/Dumper.h>
+#include <velocypack/Iterator.h>
+#include <velocypack/Slice.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb;
+using namespace arangodb::rest;
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+RestSimpleHandler::RestSimpleHandler(
+    GeneralRequest* request, GeneralResponse* response,
+    arangodb::aql::QueryRegistry* queryRegistry)
+    : RestVocbaseBaseHandler(request, response),
+      _queryRegistry(queryRegistry),
+      _queryLock(),
+      _query(nullptr),
+      _queryKilled(false) {}
 
-RestSimpleHandler::RestSimpleHandler (HttpRequest* request,
-                                      std::pair<triagens::arango::ApplicationV8*, triagens::aql::QueryRegistry*>* pair) 
-  : RestVocbaseBaseHandler(request),
-    _applicationV8(pair->first),
-    _queryRegistry(pair->second),
-    _queryLock(),
-    _query(nullptr),
-    _queryKilled(false) {
-
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-HttpHandler::status_t RestSimpleHandler::execute () {
+RestHandler::status RestSimpleHandler::execute() {
   // extract the request type
-  HttpRequest::HttpRequestType type = _request->requestType();
+  auto const type = _request->requestType();
 
-  if (type == HttpRequest::HTTP_REQUEST_PUT) {
-    std::unique_ptr<TRI_json_t> json(parseJsonBody());
+  if (type == rest::RequestType::PUT) {
+    bool parsingSuccess = true;
+    std::shared_ptr<VPackBuilder> parsedBody =
+        parseVelocyPackBody(&VPackOptions::Defaults, parsingSuccess);
 
-    if (json.get() == nullptr) {
-      return status_t(HANDLER_DONE);
+    if (!parsingSuccess) {
+      return status::DONE;
     }
 
-    if (! TRI_IsObjectJson(json.get())) {
-      generateError(HttpResponse::BAD, TRI_ERROR_TYPE_ERROR, "expecting JSON object body");
-      return status_t(HANDLER_DONE);
-    }
-    
-    char const* prefix = _request->requestPath();
+    VPackSlice body = parsedBody.get()->slice();
 
-    if (strcmp(prefix, RestVocbaseBaseHandler::SIMPLE_REMOVE_PATH.c_str()) == 0) {
-      removeByKeys(json.get());
-    }
-    else if (strcmp(prefix, RestVocbaseBaseHandler::SIMPLE_LOOKUP_PATH.c_str()) == 0) {
-      lookupByKeys(json.get());
-    }
-    else {
-      generateError(HttpResponse::BAD, TRI_ERROR_TYPE_ERROR, "unsupported value for <operation>");
+    if (!body.isObject()) {
+      generateError(rest::ResponseCode::BAD, TRI_ERROR_TYPE_ERROR,
+                    "expecting JSON object body");
+      return status::DONE;
     }
 
-    return status_t(HANDLER_DONE);
+    std::string const& prefix = _request->requestPath();
+
+    if (prefix == RestVocbaseBaseHandler::SIMPLE_REMOVE_PATH) {
+      removeByKeys(body);
+    } else if (prefix == RestVocbaseBaseHandler::SIMPLE_LOOKUP_PATH) {
+      lookupByKeys(body);
+    } else {
+      generateError(rest::ResponseCode::BAD, TRI_ERROR_TYPE_ERROR,
+                    "unsupported value for <operation>");
+    }
+
+    return status::DONE;
   }
 
-  generateError(HttpResponse::METHOD_NOT_ALLOWED, TRI_ERROR_HTTP_METHOD_NOT_ALLOWED); 
-  return status_t(HANDLER_DONE);
+  generateError(rest::ResponseCode::METHOD_NOT_ALLOWED,
+                TRI_ERROR_HTTP_METHOD_NOT_ALLOWED);
+  return status::DONE;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-bool RestSimpleHandler::cancel () {
-  return cancelQuery();
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
+bool RestSimpleHandler::cancel() { return cancelQuery(); }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief register the currently running query
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestSimpleHandler::registerQuery (triagens::aql::Query* query) {
-  MUTEX_LOCKER(_queryLock);
+void RestSimpleHandler::registerQuery(arangodb::aql::Query* query) {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
 
   TRI_ASSERT(_query == nullptr);
   _query = query;
@@ -128,8 +111,8 @@ void RestSimpleHandler::registerQuery (triagens::aql::Query* query) {
 /// @brief unregister the currently running query
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestSimpleHandler::unregisterQuery () {
-  MUTEX_LOCKER(_queryLock);
+void RestSimpleHandler::unregisterQuery() {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
 
   _query = nullptr;
 }
@@ -138,8 +121,8 @@ void RestSimpleHandler::unregisterQuery () {
 /// @brief cancel the currently running query
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestSimpleHandler::cancelQuery () {
-  MUTEX_LOCKER(_queryLock);
+bool RestSimpleHandler::cancelQuery() {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
 
   if (_query != nullptr) {
     _query->killed(true);
@@ -154,164 +137,92 @@ bool RestSimpleHandler::cancelQuery () {
 /// @brief whether or not the query was canceled
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestSimpleHandler::wasCanceled () {
-  MUTEX_LOCKER(_queryLock);
+bool RestSimpleHandler::wasCanceled() {
+  MUTEX_LOCKER(mutexLocker, _queryLock);
   return _queryKilled;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock RestRemoveByKeys
-/// @brief removes multiple documents by their keys
-///
-/// @RESTHEADER{PUT /_api/simple/remove-by-keys, Remove documents by their keys}
-///
-/// @RESTBODYPARAM{collection,string,required,string}
-/// The name of the collection to look in for the documents to remove
-///
-/// @RESTBODYPARAM{keys,array,required,string}
-/// array with the _keys of documents to remove.
-///
-/// @RESTBODYPARAM{options,object,optional,put_api_simple_remove_by_keys_opts}
-/// a json object which can contains following attributes:
-///
-/// @RESTSTRUCT{waitForSync,put_api_simple_remove_by_keys_opts,string,optional,string}
-/// if set to true, then all removal operations will
-/// instantly be synchronized to disk. If this is not specified, then the
-/// collection's default sync behavior will be applied.
-///
-/// @RESTDESCRIPTION
-/// Looks up the documents in the specified collection using the array of keys
-/// provided, and removes all documents from the collection whose keys are
-/// contained in the *keys* array. Keys for which no document can be found in
-/// the underlying collection are ignored, and no exception will be thrown for 
-/// them.
-///
-/// The body of the response contains a JSON object with information how many 
-/// documents were removed (and how many were not). The *removed* attribute will
-/// contain the number of actually removed documents. The *ignored* attribute 
-/// will contain the number of keys in the request for which no matching document
-/// could be found.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned if the operation was carried out successfully. The number of removed
-/// documents may still be 0 in this case if none of the specified document keys
-/// were found in the collection.
-///
-/// @RESTRETURNCODE{404}
-/// is returned if the collection was not found.
-/// The response body contains an error document in this case.
-///
-/// @RESTRETURNCODE{405}
-/// is returned if the operation was called with a different HTTP METHOD than PUT.
-///
-/// @EXAMPLES
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestSimpleRemove}
-///     var cn = "test";
-///   ~ db._drop(cn);
-///     db._create(cn);
-///     keys = [ ];
-///     for (var i = 0; i < 10; ++i) {
-///       db.test.insert({ _key: "test" + i });
-///       keys.push("test" + i);
-///     }
-///
-///     var url = "/_api/simple/remove-by-keys";
-///     var data = { keys: keys, collection: cn };
-///     var response = logCurlRequest('PUT', url, data);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestSimpleRemoveNotFound}
-///     var cn = "test";
-///   ~ db._drop(cn);
-///     db._create(cn);
-///     keys = [ ];
-///     for (var i = 0; i < 10; ++i) {
-///       db.test.insert({ _key: "test" + i });
-///     }
-///
-///     var url = "/_api/simple/remove-by-keys";
-///     var data = { keys: [ "foo", "bar", "baz" ], collection: cn };
-///     var response = logCurlRequest('PUT', url, data);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// @endDocuBlock
+/// @brief was docuBlock RestRemoveByKeys
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestSimpleHandler::removeByKeys (TRI_json_t const* json) {
-  try { 
+void RestSimpleHandler::removeByKeys(VPackSlice const& slice) {
+  TRI_ASSERT(slice.isObject());
+  try {
     std::string collectionName;
     {
-      auto const value = TRI_LookupObjectJson(json, "collection");
+      VPackSlice const value = slice.get("collection");
 
-      if (! TRI_IsStringJson(value)) {
-        generateError(HttpResponse::BAD, TRI_ERROR_TYPE_ERROR, "expecting string for <collection>");
+      if (!value.isString()) {
+        generateError(rest::ResponseCode::BAD, TRI_ERROR_TYPE_ERROR,
+                      "expecting string for <collection>");
         return;
       }
-    
-      collectionName = std::string(value->_value._string.data, value->_value._string.length - 1);
 
-      if (! collectionName.empty()) {
-        auto const* col = TRI_LookupCollectionByNameVocBase(_vocbase, collectionName.c_str());
+      collectionName = value.copyString();
 
-        if (col != nullptr && collectionName.compare(col->_name) != 0) {
-          // user has probably passed in a numeric collection id.
-          // translate it into a "real" collection name
-          collectionName = std::string(col->_name);
-        }
+      if (!collectionName.empty() && collectionName[0] >= '0' &&
+          collectionName[0] <= '9') {
+        // If we have a numeric name we probably have to translate it.
+        CollectionNameResolver resolver(_vocbase);
+        collectionName = resolver.getCollectionName(collectionName);
       }
     }
 
-    auto const* keys = TRI_LookupObjectJson(json, "keys");
+    VPackSlice const keys = slice.get("keys");
 
-    if (! TRI_IsArrayJson(keys)) { 
-      generateError(HttpResponse::BAD, TRI_ERROR_TYPE_ERROR, "expecting array for <keys>");
+    if (!keys.isArray()) {
+      generateError(rest::ResponseCode::BAD, TRI_ERROR_TYPE_ERROR,
+                    "expecting array for <keys>");
       return;
     }
-    
+
     bool waitForSync = false;
+    bool silent = true;
+    bool returnOld = false;
     {
-      auto const* value = TRI_LookupObjectJson(json, "options");
-      if (TRI_IsObjectJson(value)) {
-        value = TRI_LookupObjectJson(json, "waitForSync");
-        if (TRI_IsBooleanJson(value)) {
-          waitForSync = value->_value._boolean;
+      VPackSlice const value = slice.get("options");
+      if (value.isObject()) {
+        VPackSlice wfs = value.get("waitForSync");
+        if (wfs.isBool()) {
+          waitForSync = wfs.getBool();
+        }
+        wfs = value.get("silent");
+        if (wfs.isBool()) {
+          silent = wfs.getBool();
+        }
+        wfs = value.get("returnOld");
+        if (wfs.isBool()) {
+          returnOld = wfs.getBool();
         }
       }
     }
 
-    triagens::basics::Json bindVars(triagens::basics::Json::Object, 3);
-    bindVars("@collection", triagens::basics::Json(collectionName));
-    bindVars("keys", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, keys)));
+    auto bindVars = std::make_shared<VPackBuilder>();
+    bindVars->openObject();
+    bindVars->add("@collection", VPackValue(collectionName));
+    bindVars->add("keys", keys);
+    bindVars->close();
 
-    std::string aql("FOR key IN @keys REMOVE key IN @@collection OPTIONS { ignoreErrors: true, waitForSync: ");
+    std::string aql(
+        "FOR key IN @keys REMOVE key IN @@collection OPTIONS { ignoreErrors: "
+        "true, waitForSync: ");
     aql.append(waitForSync ? "true" : "false");
     aql.append(" }");
-   
-    triagens::aql::Query query(_applicationV8, 
-                               false, 
-                               _vocbase, 
-                               aql.c_str(),
-                               aql.size(),
-                               bindVars.steal(),
-                               nullptr,
-                               triagens::aql::PART_MAIN);
- 
-    registerQuery(&query); 
+    if (!silent) {
+      if (returnOld) {
+        aql.append(" RETURN OLD");
+      } else {
+        aql.append(" RETURN {_id: OLD._id, _key: OLD._key, _rev: OLD._rev}");
+      }
+    }
+
+    arangodb::aql::Query query(false, _vocbase, aql.c_str(), aql.size(),
+                               bindVars, nullptr, arangodb::aql::PART_MAIN);
+
+    registerQuery(&query);
     auto queryResult = query.execute(_queryRegistry);
-    unregisterQuery(); 
+    unregisterQuery();
 
     if (queryResult.code != TRI_ERROR_NO_ERROR) {
       if (queryResult.code == TRI_ERROR_REQUEST_CANCELED ||
@@ -322,179 +233,107 @@ void RestSimpleHandler::removeByKeys (TRI_json_t const* json) {
       THROW_ARANGO_EXCEPTION_MESSAGE(queryResult.code, queryResult.details);
     }
 
-    { 
-      _response = createResponse(HttpResponse::OK);
-      _response->setContentType("application/json; charset=utf-8");
-
+    {
       size_t ignored = 0;
       size_t removed = 0;
-
       if (queryResult.stats != nullptr) {
-        auto found = TRI_LookupObjectJson(queryResult.stats, "writesIgnored");
-        if (TRI_IsNumberJson(found)) {
-          ignored = static_cast<size_t>(found->_value._number);
-        }
-        
-        found = TRI_LookupObjectJson(queryResult.stats, "writesExecuted");
-        if (TRI_IsNumberJson(found)) {
-          removed = static_cast<size_t>(found->_value._number);
+        VPackSlice stats = queryResult.stats->slice();
+
+        if (!stats.isNone()) {
+          TRI_ASSERT(stats.isObject());
+          VPackSlice found = stats.get("writesIgnored");
+          if (found.isNumber()) {
+            ignored = found.getNumericValue<size_t>();
+          }
+
+          found = stats.get("writesExecuted");
+          if (found.isNumber()) {
+            removed = found.getNumericValue<size_t>();
+          }
         }
       }
 
-      triagens::basics::Json result(triagens::basics::Json::Object);
-      result.set("removed", triagens::basics::Json(static_cast<double>(removed)));
-      result.set("ignored", triagens::basics::Json(static_cast<double>(ignored)));
+      VPackBuilder result;
+      result.add(VPackValue(VPackValueType::Object));
+      result.add("removed", VPackValue(removed));
+      result.add("ignored", VPackValue(ignored));
+      result.add("error", VPackValue(false));
+      result.add("code", VPackValue(static_cast<int>(rest::ResponseCode::OK)));
+      if (!silent) {
+        result.add("old", queryResult.result->slice());
+      }
+      result.close();
 
-      result.set("error", triagens::basics::Json(false));
-      result.set("code", triagens::basics::Json(static_cast<double>(_response->responseCode())));
-  
-      result.dump(_response->body());
+      generateResult(rest::ResponseCode::OK, result.slice(),
+                     queryResult.context);
     }
-  }  
-  catch (triagens::basics::Exception const& ex) {
-    unregisterQuery(); 
-    generateError(HttpResponse::responseCode(ex.code()), ex.code(), ex.what());
-  }
-  catch (...) {
-    unregisterQuery(); 
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL);
+  } catch (...) {
+    unregisterQuery();
+    throw;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock RestLookupByKeys
-/// @brief fetches multiple documents by their keys
-///
-/// @RESTHEADER{PUT /_api/simple/lookup-by-keys, Find documents by their keys}
-///
-/// @RESTBODYPARAM{collection,string,required,string}
-/// The name of the collection to look in for the documents
-///
-/// @RESTBODYPARAM{keys,array,required,string}
-/// array with the _keys of documents to remove.
-///
-/// @RESTDESCRIPTION
-/// Looks up the documents in the specified collection using the array of keys
-/// provided. All documents for which a matching key was specified in the *keys*
-/// array and that exist in the collection will be returned. 
-/// Keys for which no document can be found in the underlying collection are ignored, 
-/// and no exception will be thrown for them.
-///
-/// The body of the response contains a JSON object with a *documents* attribute. The
-/// *documents* attribute is an array containing the matching documents. The order in
-/// which matching documents are present in the result array is unspecified.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned if the operation was carried out successfully. 
-///
-/// @RESTRETURNCODE{404}
-/// is returned if the collection was not found.
-/// The response body contains an error document in this case.
-///
-/// @RESTRETURNCODE{405}
-/// is returned if the operation was called with a different HTTP METHOD than PUT.
-///
-/// @EXAMPLES
-///
-/// Looking up existing documents
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestSimpleLookup}
-///     var cn = "test";
-///   ~ db._drop(cn);
-///     db._create(cn);
-///     keys = [ ];
-///     for (i = 0; i < 10; ++i) {
-///       db.test.insert({ _key: "test" + i, value: i });
-///       keys.push("test" + i);
-///     }
-///
-///     var url = "/_api/simple/lookup-by-keys";
-///     var data = { keys: keys, collection: cn };
-///     var response = logCurlRequest('PUT', url, data);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Looking up non-existing documents
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestSimpleLookupNotFound}
-///     var cn = "test";
-///   ~ db._drop(cn);
-///     db._create(cn);
-///     keys = [ ];
-///     for (i = 0; i < 10; ++i) {
-///       db.test.insert({ _key: "test" + i, value: i });
-///     }
-///
-///     var url = "/_api/simple/lookup-by-keys";
-///     var data = { keys: [ "foo", "bar", "baz" ], collection: cn };
-///     var response = logCurlRequest('PUT', url, data);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-///   ~ db._drop(cn);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// @endDocuBlock
+/// @brief was docuBlock RestLookupByKeys
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestSimpleHandler::lookupByKeys (TRI_json_t const* json) {
+void RestSimpleHandler::lookupByKeys(VPackSlice const& slice) {
+  // TODO needs to generalized
+  auto response = dynamic_cast<HttpResponse*>(_response.get());
+
+  if (response == nullptr) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+  }
+
   try {
     std::string collectionName;
-    { 
-      auto const value = TRI_LookupObjectJson(json, "collection");
-
-      if (! TRI_IsStringJson(value)) {
-        generateError(HttpResponse::BAD, TRI_ERROR_TYPE_ERROR, "expecting string for <collection>");
+    {
+      VPackSlice const value = slice.get("collection");
+      if (!value.isString()) {
+        generateError(rest::ResponseCode::BAD, TRI_ERROR_TYPE_ERROR,
+                      "expecting string for <collection>");
         return;
       }
+      collectionName = value.copyString();
 
-      collectionName = std::string(value->_value._string.data, value->_value._string.length - 1);
+      if (!collectionName.empty()) {
+        auto const* col = _vocbase->lookupCollection(collectionName);
 
-      if (! collectionName.empty()) {
-        auto const* col = TRI_LookupCollectionByNameVocBase(_vocbase, collectionName.c_str());
-
-        if (col != nullptr && collectionName.compare(col->_name) != 0) {
+        if (col != nullptr && collectionName != col->name()) {
           // user has probably passed in a numeric collection id.
           // translate it into a "real" collection name
-          collectionName = std::string(col->_name);
+          collectionName = col->name();
         }
       }
     }
 
-    auto const* keys = TRI_LookupObjectJson(json, "keys");
+    VPackSlice const keys = slice.get("keys");
 
-    if (! TRI_IsArrayJson(keys)) { 
-      generateError(HttpResponse::BAD, TRI_ERROR_TYPE_ERROR, "expecting array for <keys>");
+    if (!keys.isArray()) {
+      generateError(rest::ResponseCode::BAD, TRI_ERROR_TYPE_ERROR,
+                    "expecting array for <keys>");
       return;
     }
 
-    triagens::basics::Json bindVars(triagens::basics::Json::Object, 2);
-    bindVars("@collection", triagens::basics::Json(collectionName));
-    bindVars("keys", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, TRI_CopyJson(TRI_UNKNOWN_MEM_ZONE, keys)));
-  
-    triagens::aql::BindParameters::StripCollectionNames(TRI_LookupObjectJson(bindVars.json(), "keys"), collectionName.c_str());
+    auto bindVars = std::make_shared<VPackBuilder>();
+    bindVars->openObject();
+    bindVars->add("@collection", VPackValue(collectionName));
+    VPackBuilder strippedBuilder =
+        arangodb::aql::BindParameters::StripCollectionNames(
+            keys, collectionName.c_str());
 
-    std::string const aql("FOR doc IN @@collection FILTER doc._key IN @keys RETURN doc");
-    
-    triagens::aql::Query query(_applicationV8, 
-                               false, 
-                               _vocbase, 
-                               aql.c_str(),
-                               aql.size(),
-                               bindVars.steal(),
-                               nullptr,
-                               triagens::aql::PART_MAIN);
- 
-    registerQuery(&query); 
+    bindVars->add("keys", strippedBuilder.slice());
+    bindVars->close();
+
+    std::string const aql(
+        "FOR doc IN @@collection FILTER doc._key IN @keys RETURN doc");
+
+    arangodb::aql::Query query(false, _vocbase, aql.c_str(), aql.size(),
+                               bindVars, nullptr, arangodb::aql::PART_MAIN);
+
+    registerQuery(&query);
     auto queryResult = query.execute(_queryRegistry);
-    unregisterQuery(); 
+    unregisterQuery();
 
     if (queryResult.code != TRI_ERROR_NO_ERROR) {
       if (queryResult.code == TRI_ERROR_REQUEST_CANCELED ||
@@ -505,47 +344,105 @@ void RestSimpleHandler::lookupByKeys (TRI_json_t const* json) {
       THROW_ARANGO_EXCEPTION_MESSAGE(queryResult.code, queryResult.details);
     }
 
-    { 
-      _response = createResponse(HttpResponse::OK);
-      _response->setContentType("application/json; charset=utf-8");
+    size_t resultSize = 10;
+    VPackSlice qResult = queryResult.result->slice();
+    if (qResult.isArray()) {
+      resultSize = static_cast<size_t>(qResult.length());
+    }
 
-      size_t n = 10; 
-      if (TRI_IsArrayJson(queryResult.json)) {
-        n = TRI_LengthArrayJson(queryResult.json);
+    VPackBuffer<uint8_t> resultBuffer;
+    VPackBuilder result(resultBuffer);
+    {
+      VPackObjectBuilder guard(&result);
+      resetResponse(rest::ResponseCode::OK);
+
+      // TODO this should be generalized
+      response->setContentType(rest::ContentType::JSON);
+
+      if (qResult.isArray()) {
+        // This is for internal use of AQL Traverser only.
+        // Should not be documented
+        VPackSlice const postFilter = slice.get("filter");
+        if (postFilter.isArray()) {
+          std::vector<arangodb::traverser::TraverserExpression*> expressions;
+          arangodb::basics::ScopeGuard guard{[]() -> void {},
+                                             [&expressions]() -> void {
+                                               for (auto& e : expressions) {
+                                                 delete e;
+                                               }
+                                             }};
+
+          VPackValueLength length = postFilter.length();
+          expressions.reserve(static_cast<size_t>(length));
+
+          for (auto const& it : VPackArrayIterator(postFilter)) {
+            if (it.isObject()) {
+              auto expression =
+                  std::make_unique<traverser::TraverserExpression>(it);
+              expressions.emplace_back(expression.get());
+              expression.release();
+            }
+          }
+
+          result.add(VPackValue("documents"));
+          std::vector<std::string> filteredIds;
+
+          // just needed to build the result
+          SingleCollectionTransaction trx(
+              StandaloneTransactionContext::Create(_vocbase), collectionName,
+              TRI_TRANSACTION_READ);
+
+          result.openArray();
+          for (auto const& tmp : VPackArrayIterator(qResult)) {
+            if (!tmp.isNone()) {
+              bool add = true;
+              for (auto& e : expressions) {
+                if (!e->isEdgeAccess && !e->matchesCheck(&trx, tmp)) {
+                  add = false;
+                  std::string _id = trx.extractIdString(tmp);
+                  filteredIds.emplace_back(std::move(_id));
+                  break;
+                }
+              }
+              if (add) {
+                result.add(tmp);
+              }
+            }
+          }
+          result.close();
+
+          result.add(VPackValue("filtered"));
+          result.openArray();
+          for (auto const& it : filteredIds) {
+            result.add(VPackValue(it));
+          }
+          result.close();
+        } else {
+          result.add(VPackValue("documents"));
+          result.add(qResult);
+          queryResult.result = nullptr;
+        }
+      } else {
+        result.add(VPackValue("documents"));
+        result.add(qResult);
+        queryResult.result = nullptr;
       }
+      result.add("error", VPackValue(false));
+      result.add("code",
+                 VPackValue(static_cast<int>(_response->responseCode())));
 
-      triagens::basics::Json result(triagens::basics::Json::Object, 3);
-      result.set("documents", triagens::basics::Json(TRI_UNKNOWN_MEM_ZONE, queryResult.json, triagens::basics::Json::AUTOFREE));
-      queryResult.json = nullptr;
-      
-      result.set("error", triagens::basics::Json(false));
-      result.set("code", triagens::basics::Json(static_cast<double>(_response->responseCode())));
-
-      // reserve 48 bytes per result document by default
-      int res = _response->body().reserve(48 * n);
+      // reserve a few bytes per result document by default
+      int res = response->reservePayload(32 * resultSize);
 
       if (res != TRI_ERROR_NO_ERROR) {
         THROW_ARANGO_EXCEPTION(res);
       }
-       
-      result.dump(_response->body());
     }
-  }  
-  catch (triagens::basics::Exception const& ex) {
-    unregisterQuery(); 
-    generateError(HttpResponse::responseCode(ex.code()), ex.code(), ex.what());
-  }
-  catch (...) {
-    unregisterQuery(); 
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL);
+
+    generateResult(rest::ResponseCode::OK, std::move(resultBuffer),
+                   queryResult.context);
+  } catch (...) {
+    unregisterQuery();
+    throw;
   }
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

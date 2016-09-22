@@ -1,9 +1,9 @@
 div.gv_zoom_widget {
   height: 300px;
-  left: 64px;
+  left: 62px;
   opacity: .7;
   position: absolute;
-  top: 20px;
+  top: 0;
   width: 40px;
   z-index: 1;
 
@@ -72,7 +72,7 @@ svg.graph-viewer {
   border-radius: 3px;
   left: 54px;
   position: absolute;
-  top: 10px;
+  top: -10px;
   z-index: 0;
 
   text {
@@ -94,16 +94,22 @@ div.gv-background {
   @extend %clickable;
 }
 
+div.gv-colour-list:hover {
+  opacity: 1;
+}
+
 div.gv-colour-list {
   border-radius: 3px;
   max-height: 350px;
-  max-width: 130px;
-  overflow-x: none !important;
+  max-width: 300px;
+  min-width: 190px;
+  opacity: .1;
+  overflow-x: hidden !important;
   overflow-y: auto;
   position: absolute;
   right: 8px;
   text-align: right;
-  top: 20px;
+  top: 0;
   z-index: 1;
 
   li {
@@ -140,4 +146,20 @@ div.gv-colour-list {
   }
 }
 
+#tab-content-create-graph {
+  .addAfter,
+  .addDelete,
+  .delete {
+    margin-top: -9px;
+    position: absolute;
+    right: 13px;
+  }
 
+  .tableRow {
+    &.first {
+      border-top: 10px solid $c-white;
+    }
+  }
+
+
+}

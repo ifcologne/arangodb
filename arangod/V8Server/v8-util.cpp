@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief V8-vocbase bridge
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,28 +19,25 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "v8-vocbaseprivate.h"
 #include "Basics/conversions.h"
+#include "Basics/StaticStrings.h"
 #include "VocBase/KeyGenerator.h"
 #include "V8/v8-conv.h"
-#include "Utils/DocumentHelper.h"
 
-using namespace std;
-using namespace triagens::basics;
-using namespace triagens::arango;
+using namespace arangodb;
+using namespace arangodb::basics;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief get the vocbase pointer from the current V8 context
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_vocbase_t* GetContextVocBase (v8::Isolate* isolate) {
+TRI_vocbase_t* GetContextVocBase(v8::Isolate* isolate) {
   TRI_GET_GLOBALS();
 
-  TRI_ASSERT_EXPENSIVE(v8g->_vocbase != nullptr);
+  TRI_ASSERT(v8g->_vocbase != nullptr);
   return static_cast<TRI_vocbase_t*>(v8g->_vocbase);
 }
 
@@ -52,50 +45,39 @@ TRI_vocbase_t* GetContextVocBase (v8::Isolate* isolate) {
 /// @brief create a v8 tick id value from the internal tick id
 ////////////////////////////////////////////////////////////////////////////////
 
-v8::Handle<v8::Value> V8TickId (v8::Isolate* isolate, TRI_voc_tick_t tick) {
+v8::Handle<v8::Value> V8TickId(v8::Isolate* isolate, TRI_voc_tick_t tick) {
   char buffer[21];
-  size_t len = TRI_StringUInt64InPlace((uint64_t) tick, (char*) &buffer);
+  size_t len = TRI_StringUInt64InPlace(static_cast<uint64_t>(tick), &buffer[0]);
 
-  return TRI_V8_PAIR_STRING((char const*) buffer, (int) len);
+  return TRI_V8_PAIR_STRING(&buffer[0], static_cast<int>(len));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create a v8 revision id value from the internal revision id
 ////////////////////////////////////////////////////////////////////////////////
 
-v8::Handle<v8::Value> V8RevisionId (v8::Isolate* isolate, TRI_voc_rid_t rid) {
+v8::Handle<v8::Value> V8RevisionId(v8::Isolate* isolate, TRI_voc_rid_t rid) {
   char buffer[21];
-  size_t len = TRI_StringUInt64InPlace((uint64_t) rid, (char*) &buffer);
+  size_t len = TRI_StringUInt64InPlace(static_cast<uint64_t>(rid), &buffer[0]);
 
-  return TRI_V8_PAIR_STRING((char const*) buffer, (int) len);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create a v8 document id value from the parameters
-////////////////////////////////////////////////////////////////////////////////
-
-v8::Handle<v8::Value> V8DocumentId (v8::Isolate* isolate,
-                                    string const& collectionName,
-                                    string const& key) {
-  string const&& id = DocumentHelper::assembleDocumentId(collectionName, key);
-
-  return TRI_V8_STD_STRING(id);
+  return TRI_V8_PAIR_STRING(&buffer[0], static_cast<int>(len));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief checks if argument is a document identifier
 ////////////////////////////////////////////////////////////////////////////////
 
-static bool ParseDocumentHandle (v8::Handle<v8::Value> const arg,
-                                 string& collectionName,
-                                 std::unique_ptr<char[]>& key) {
+static bool ParseDocumentHandle(v8::Handle<v8::Value> const arg,
+                                std::string& collectionName,
+                                std::unique_ptr<char[]>& key) {
   TRI_ASSERT(collectionName.empty());
 
-  if (! arg->IsString()) {
+  if (!arg->IsString()) {
     return false;
   }
 
-  // the handle must always be an ASCII string. These is no need to normalise it first
+  // the handle must always be an ASCII string. These is no need to normalize it
+  // first
   v8::String::Utf8Value str(arg);
 
   if (*str == nullptr) {
@@ -104,8 +86,8 @@ static bool ParseDocumentHandle (v8::Handle<v8::Value> const arg,
 
   // collection name / document key
   size_t split;
-  if (TRI_ValidateDocumentIdKeyGenerator(*str, &split)) {
-    collectionName = string(*str, split);
+  if (TRI_ValidateDocumentIdKeyGenerator(*str, str.length(), &split)) {
+    collectionName = std::string(*str, split);
     auto const length = str.length() - split - 1;
     auto buffer = new char[length + 1];
     memcpy(buffer, *str + split + 1, length);
@@ -115,7 +97,7 @@ static bool ParseDocumentHandle (v8::Handle<v8::Value> const arg,
   }
 
   // document key only
-  if (TraditionalKeyGenerator::validateKey(*str)) {
+  if (TraditionalKeyGenerator::validateKey(*str, str.length())) {
     auto const length = str.length();
     auto buffer = new char[length + 1];
     memcpy(buffer, *str, length);
@@ -130,20 +112,31 @@ static bool ParseDocumentHandle (v8::Handle<v8::Value> const arg,
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief parse document or document handle from a v8 value (string | object)
+/// Note that the builder must already be open with an object and that it
+/// will remain open afterwards!
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ExtractDocumentHandle (v8::Isolate* isolate,
-                            v8::Handle<v8::Value> const val,
-                            string& collectionName,
-                            std::unique_ptr<char[]>& key,
-                            TRI_voc_rid_t& rid) {
+bool ExtractDocumentHandle(v8::Isolate* isolate,
+                           v8::Handle<v8::Value> const val,
+                           std::string& collectionName,
+                           VPackBuilder& builder,
+                           bool includeRev) {
   // reset the collection identifier and the revision
   TRI_ASSERT(collectionName.empty());
-  rid = 0;
+
+  std::unique_ptr<char[]> key;
 
   // extract the document identifier and revision from a string
   if (val->IsString()) {
-    return ParseDocumentHandle(val, collectionName, key);
+    bool res = ParseDocumentHandle(val, collectionName, key);
+    if (res) {
+      if (key.get() == nullptr) {
+        return false;
+      }
+      builder.add(StaticStrings::KeyString,
+                  VPackValue(reinterpret_cast<char*>(key.get())));
+    }
+    return res;
   }
 
   // extract the document identifier and revision from a document object
@@ -156,32 +149,46 @@ bool ExtractDocumentHandle (v8::Isolate* isolate,
     if (obj->HasRealNamedProperty(_IdKey)) {
       v8::Handle<v8::Value> didVal = obj->Get(_IdKey);
 
-      if (! ParseDocumentHandle(didVal, collectionName, key)) {
+      if (!ParseDocumentHandle(didVal, collectionName, key)) {
         return false;
       }
-    }
-    else if (obj->HasRealNamedProperty(_KeyKey)) {
+    } else if (obj->HasRealNamedProperty(_KeyKey)) {
       v8::Handle<v8::Value> didVal = obj->Get(_KeyKey);
 
-      if (! ParseDocumentHandle(didVal, collectionName, key)) {
+      if (!ParseDocumentHandle(didVal, collectionName, key)) {
         return false;
       }
-    }
-    else {
+    } else {
       return false;
     }
 
-    TRI_GET_GLOBAL_STRING(_RevKey);
-    if (! obj->HasRealNamedProperty(_RevKey)) {
+    if (key.get() == nullptr) {
+      return false;
+    }
+    // If we get here we have a valid key
+    builder.add(StaticStrings::KeyString,
+                VPackValue(reinterpret_cast<char*>(key.get())));
+
+    if (!includeRev) {
       return true;
     }
 
-    rid = TRI_ObjectToUInt64(obj->Get(_RevKey), true);
+    TRI_GET_GLOBAL_STRING(_RevKey);
+    if (!obj->HasRealNamedProperty(_RevKey)) {
+      return true;
+    }
+    v8::Handle<v8::Value> revObj = obj->Get(_RevKey);
+    if (!revObj->IsString()) {
+      return true;
+    }
+    v8::String::Utf8Value str(revObj);
+    bool isOld;
+    uint64_t rid = TRI_StringToRidWithCheck(*str, str.length(), isOld);
 
     if (rid == 0) {
       return false;
     }
-
+    builder.add(StaticStrings::RevString, VPackValue(TRI_RidToString(rid)));
     return true;
   }
 

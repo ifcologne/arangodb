@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief standalone transaction context
-///
-/// @file 
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,41 +19,45 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, triagens GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "Utils/StandaloneTransactionContext.h"
+#include "StandaloneTransactionContext.h"
 #include "Utils/CollectionNameResolver.h"
+#include "VocBase/transaction.h"
 
-using namespace triagens::arango;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief create the context
 ////////////////////////////////////////////////////////////////////////////////
 
-StandaloneTransactionContext::StandaloneTransactionContext () 
-  : TransactionContext(),
-    _resolver(nullptr) {
-  // std::cout << TRI_CurrentThreadId() << ", STANDALONETRANSACTIONCONTEXT CTOR\r\n";
+StandaloneTransactionContext::StandaloneTransactionContext(TRI_vocbase_t* vocbase)
+    : TransactionContext(vocbase) {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destroy the context
-////////////////////////////////////////////////////////////////////////////////
-        
-StandaloneTransactionContext::~StandaloneTransactionContext () {
-  // std::cout << TRI_CurrentThreadId() << ", STANDALONETRANSACTIONCONTEXT DTOR\r\n";
+//////////////////////////////////////////////////////////////////////////////
+/// @brief order a custom type handler for the collection
+//////////////////////////////////////////////////////////////////////////////
+
+std::shared_ptr<VPackCustomTypeHandler> StandaloneTransactionContext::orderCustomTypeHandler() {
+  if (_customTypeHandler == nullptr) {
+    _customTypeHandler.reset(TransactionContext::createCustomTypeHandler(_vocbase, getResolver()));
+    _options.customTypeHandler = _customTypeHandler.get();
+    _dumpOptions.customTypeHandler = _customTypeHandler.get();
+  }
+
+  TRI_ASSERT(_customTypeHandler != nullptr);
+  return _customTypeHandler;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief return the resolver
 ////////////////////////////////////////////////////////////////////////////////
 
-CollectionNameResolver const* StandaloneTransactionContext::getResolver () const { 
+CollectionNameResolver const* StandaloneTransactionContext::getResolver() {
+  if (_resolver == nullptr) {
+    createResolver();
+  }
   TRI_ASSERT(_resolver != nullptr);
   return _resolver;
 }
@@ -66,7 +66,7 @@ CollectionNameResolver const* StandaloneTransactionContext::getResolver () const
 /// @brief get parent transaction (if any)
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_transaction_t* StandaloneTransactionContext::getParentTransaction () const {
+TRI_transaction_t* StandaloneTransactionContext::getParentTransaction() const {
   return nullptr;
 }
 
@@ -74,12 +74,7 @@ TRI_transaction_t* StandaloneTransactionContext::getParentTransaction () const {
 /// @brief register the transaction in the context
 ////////////////////////////////////////////////////////////////////////////////
 
-int StandaloneTransactionContext::registerTransaction (TRI_transaction_t* trx) {
-  if (_resolver == nullptr) {
-    _resolver = new CollectionNameResolver(trx->_vocbase);
-  }
-  // std::cout << TRI_CurrentThreadId() << ", STANDALONETRANSACTIONCONTEXT REGISTER: " << trx << "\r\n";
-
+int StandaloneTransactionContext::registerTransaction(TRI_transaction_t* trx) {
   return TRI_ERROR_NO_ERROR;
 }
 
@@ -87,29 +82,21 @@ int StandaloneTransactionContext::registerTransaction (TRI_transaction_t* trx) {
 /// @brief unregister the transaction from the context
 ////////////////////////////////////////////////////////////////////////////////
 
-int StandaloneTransactionContext::unregisterTransaction () {
-  if (_resolver != nullptr) {
-    delete _resolver;
-    _resolver = nullptr;
-  }
-  // std::cout << TRI_CurrentThreadId() << ", STANDALONETRANSACTIONCONTEXT UNREGISTER\r\n";
-
-  return TRI_ERROR_NO_ERROR;
+void StandaloneTransactionContext::unregisterTransaction() {
+  // nothing special to do. cleanup will be done by the parent's destructor
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief whether or not the transaction is embeddable
 ////////////////////////////////////////////////////////////////////////////////
 
-bool StandaloneTransactionContext::isEmbeddable () const {
-  return false;
+bool StandaloneTransactionContext::isEmbeddable() const { return false; }
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief create a context, returned in a shared ptr
+////////////////////////////////////////////////////////////////////////////////
+
+std::shared_ptr<StandaloneTransactionContext> StandaloneTransactionContext::Create(TRI_vocbase_t* vocbase) {
+  return std::make_shared<StandaloneTransactionContext>(vocbase);
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

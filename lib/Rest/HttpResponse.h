@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief http response
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,446 +20,88 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Achim Brandt
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2008-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_REST_HTTP_RESPONSE_H
 #define ARANGODB_REST_HTTP_RESPONSE_H 1
 
-#include "Basics/Common.h"
+#include "Rest/GeneralResponse.h"
 
-#include "Basics/Dictionary.h"
 #include "Basics/StringBuffer.h"
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                class HttpResponse
-// -----------------------------------------------------------------------------
-
-namespace triagens {
-  namespace rest {
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief http response
-///
-/// A http request handler is called to handle a http request. It returns its
-/// answer as http response.
-////////////////////////////////////////////////////////////////////////////////
-
-    class HttpResponse {
-      private:
-        HttpResponse ();
-        HttpResponse (HttpResponse const&);
-        HttpResponse& operator= (HttpResponse const&);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                      public types
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief http response codes
-////////////////////////////////////////////////////////////////////////////////
-
-        enum HttpResponseCode {
-          CONTINUE                        = 100,
-          SWITCHING_PROTOCOLS             = 101,
-          PROCESSING                      = 102,
-
-          OK                              = 200,
-          CREATED                         = 201,
-          ACCEPTED                        = 202,
-          PARTIAL                         = 203,
-          NO_CONTENT                      = 204,
-          RESET_CONTENT                   = 205,
-          PARTIAL_CONTENT                 = 206,
-
-          MOVED_PERMANENTLY               = 301,
-          FOUND                           = 302,
-          SEE_OTHER                       = 303,
-          NOT_MODIFIED                    = 304,
-          TEMPORARY_REDIRECT              = 307,
-          PERMANENT_REDIRECT              = 308,
-
-          BAD                             = 400,
-          UNAUTHORIZED                    = 401,
-          PAYMENT_REQUIRED                = 402,
-          FORBIDDEN                       = 403,
-          NOT_FOUND                       = 404,
-          METHOD_NOT_ALLOWED              = 405,
-          NOT_ACCEPTABLE                  = 406,
-          REQUEST_TIMEOUT                 = 408,
-          CONFLICT                        = 409,
-          GONE                            = 410,
-          LENGTH_REQUIRED                 = 411,
-          PRECONDITION_FAILED             = 412,
-          REQUEST_ENTITY_TOO_LARGE        = 413,
-          REQUEST_URI_TOO_LONG            = 414,
-          UNSUPPORTED_MEDIA_TYPE          = 415,
-          REQUESTED_RANGE_NOT_SATISFIABLE = 416,
-          EXPECTATION_FAILED              = 417,
-          I_AM_A_TEAPOT                   = 418,
-          UNPROCESSABLE_ENTITY            = 422,
-          LOCKED                          = 423,
-          PRECONDITION_REQUIRED           = 428,
-          TOO_MANY_REQUESTS               = 429,
-          REQUEST_HEADER_FIELDS_TOO_LARGE = 431,
-
-          SERVER_ERROR                    = 500,
-          NOT_IMPLEMENTED                 = 501,
-          BAD_GATEWAY                     = 502,
-          SERVICE_UNAVAILABLE             = 503,
-          HTTP_VERSION_NOT_SUPPORTED      = 505,
-          BANDWIDTH_LIMIT_EXCEEDED        = 509,
-          NOT_EXTENDED                    = 510
-        };
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                             static public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief whether or not the response is a HTTP HEAD response
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isHeadResponse () const {
-          return _isHeadResponse;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief http response string
-///
-/// Converts the response code to a string suitable for delivering to a http
-/// client.
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string responseString (HttpResponseCode);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get http response code from string
-///
-/// Converts the response code string to the internal code
-////////////////////////////////////////////////////////////////////////////////
-
-        static HttpResponseCode responseCode (std::string const& str);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get http response code from integer error code
-////////////////////////////////////////////////////////////////////////////////
-        
-        static HttpResponseCode responseCode (int);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructs a new http response
-////////////////////////////////////////////////////////////////////////////////
-
-        HttpResponse (HttpResponseCode, uint32_t);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief deletes a http response
-///
-/// The destructor will free the string buffers used. After the http response
-/// is deleted, the string buffers returned by body() become invalid.
-////////////////////////////////////////////////////////////////////////////////
-
-        ~HttpResponse ();
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the response code
-////////////////////////////////////////////////////////////////////////////////
-
-        HttpResponseCode responseCode () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets the response code
-////////////////////////////////////////////////////////////////////////////////
-
-        void setResponseCode (HttpResponseCode);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the content length
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t contentLength ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets the content type
-///
-/// Sets the content type of the information of the body.
-////////////////////////////////////////////////////////////////////////////////
-
-        void setContentType (std::string const& contentType);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks if chunked encoding is set
-////////////////////////////////////////////////////////////////////////////////
-
-        bool isChunked () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns a header field
-///
-/// Returns the value of a header field with given name. If no header field
-/// with the given name was specified by the client, the empty string is
-/// returned.
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string header (std::string const& field) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns a header field
-///
-/// Returns the value of a header field with given name. If no header field
-/// with the given name was specified by the client, the empty string is
-/// returned.
-/// The header field name must already be trimmed and lower-cased
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string header (char const*, 
-                            size_t) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns a header field
-///
-/// Returns the value of a header field with given name. If no header field
-/// with the given name was specified by the client, the empty string is
-/// returned. found is set if the client specified the header field.
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string header (std::string const&, 
-                            bool& found) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns a header field
-///
-/// Returns the value of a header field with given name. If no header field
-/// with the given name was specified by the client, the empty string is
-/// returned. found is set if the client specified the header field.
-////////////////////////////////////////////////////////////////////////////////
-
-        std::string header (char const*, 
-                            size_t, 
-                            bool& found) const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns all header fields
-///
-/// Returns all header fields
-////////////////////////////////////////////////////////////////////////////////
-
-        std::map<std::string, std::string> headers () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets a header field
-///
-/// The key must be lowercased and trimmed already
-/// The key string must remain valid until the response is destroyed
-////////////////////////////////////////////////////////////////////////////////
-
-        void setHeader (char const*, 
-                        size_t, 
-                        std::string const& value);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets a header field
-///
-/// The key must be lowercased and trimmed already
-/// The key string must remain valid until the response is destroyed
-/// The value string must remain valid until the response is destroyed
-////////////////////////////////////////////////////////////////////////////////
-
-        void setHeader (char const*, 
-                        size_t, 
-                        char const*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets a header field
-///
-/// The key is automatically converted to lower case and trimmed.
-////////////////////////////////////////////////////////////////////////////////
-
-        void setHeader (std::string const& key, 
-                        std::string const& value);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets many header fields
-///
-/// The key is automatically converted to lower case.
-////////////////////////////////////////////////////////////////////////////////
-
-        void setHeaders (std::string const& headers, 
-                         bool includeLine0);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets a cookie
-///
-/// The name is automatically trimmed.
-////////////////////////////////////////////////////////////////////////////////
-
-        void setCookie (std::string const& name,
-                        std::string const& value,
-                        int lifeTimeSeconds,
-                        std::string const& path,
-                        std::string const& domain,
-                        bool secure,
-                        bool httpOnly);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief swaps data
-////////////////////////////////////////////////////////////////////////////////
-
-        HttpResponse* swap ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief writes the header
-///
-/// You should call writeHeader only after the body has been created.
-////////////////////////////////////////////////////////////////////////////////
-
-        void writeHeader (basics::StringBuffer*);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the size of the body
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t bodySize () const;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief returns the body
-///
-/// Returns a reference to the body. This reference is only valid as long as
-/// http response exists. You can add data to the body by appending
-/// information to the string buffer. Note that adding data to the body
-/// invalidates any previously returned header. You must call header
-/// again.
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::StringBuffer& body ();
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief indicates a head response
-///
-/// In case of HEAD request, no body must be defined. However, the response
-/// needs to know the size of body.
-////////////////////////////////////////////////////////////////////////////////
-
-        void headResponse (size_t);
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief deflates the response body
-///
-/// the body must already be set. deflate is then run on the existing body
-////////////////////////////////////////////////////////////////////////////////
-
-        int deflate (size_t = 16384);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief checks for special headers
-////////////////////////////////////////////////////////////////////////////////
-
-        void checkHeader (const char* key, const char* value);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               protected variables
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief response code
-////////////////////////////////////////////////////////////////////////////////
-
-        HttpResponseCode _code;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief compatibility
-////////////////////////////////////////////////////////////////////////////////
-
-        uint32_t const _apiCompatibility;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief head response flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _isHeadResponse;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief chunked flag
-////////////////////////////////////////////////////////////////////////////////
-
-        bool _isChunked;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief headers dictionary
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::Dictionary<char const*> _headers;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief cookies
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<char const*> _cookies;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief body
-////////////////////////////////////////////////////////////////////////////////
-
-        basics::StringBuffer _body;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief body size
-////////////////////////////////////////////////////////////////////////////////
-
-        size_t _bodySize;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief freeable list
-////////////////////////////////////////////////////////////////////////////////
-
-        std::vector<char const*> _freeables;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                             public static members
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief batch error count header
-////////////////////////////////////////////////////////////////////////////////
-
-        static std::string const BatchErrorHeader;
-    };
+namespace arangodb {
+class RestBatchHandler;
+
+namespace rest {
+class HttpCommTask;
+class GeneralCommTask;
+}
+
+class HttpResponse : public GeneralResponse {
+  friend class rest::HttpCommTask;
+  friend class rest::GeneralCommTask;
+  friend class RestBatchHandler;  // TODO must be removed
+
+ public:
+  static bool HIDE_PRODUCT_HEADER;
+
+ private:
+  explicit HttpResponse(ResponseCode code);
+
+ public:
+  bool isHeadResponse() const { return _isHeadResponse; }
+
+ public:
+  void setCookie(std::string const& name, std::string const& value,
+                 int lifeTimeSeconds, std::string const& path,
+                 std::string const& domain, bool secure, bool httpOnly);
+
+  // In case of HEAD request, no body must be defined. However, the response
+  // needs to know the size of body.
+  void headResponse(size_t);
+
+  // Returns a reference to the body. This reference is only valid as long as
+  // http response exists. You can add data to the body by appending
+  // information to the string buffer. Note that adding data to the body
+  // invalidates any previously returned header. You must call header
+  // again.
+  basics::StringBuffer& body() { return _body; }
+  size_t bodySize() const;
+
+  // you should call writeHeader only after the body has been created
+  void writeHeader(basics::StringBuffer*);  // override;
+
+ public:
+  void reset(ResponseCode code) override final;
+
+  void addPayloadPreHook(bool inputIsBuffer, bool& resolveExternals,
+                         bool& skipBody) override {
+    if (_contentType == ContentType::JSON) {
+      skipBody = true;
+    }
   }
+
+  bool setGenerateBody(bool generateBody) override final {
+    return _generateBody = generateBody;
+  }  // used for head-responses
+  int reservePayload(std::size_t size) override { return _body.reserve(size); }
+  void addPayloadPostHook(VPackSlice const&, VPackOptions const* options,
+                          bool resolveExternals, bool bodySkipped) override;
+
+  arangodb::Endpoint::TransportType transportType() override {
+    return arangodb::Endpoint::TransportType::HTTP;
+  }
+
+ private:
+  // the body must already be set. deflate is then run on the existing body
+  int deflate(size_t = 16384);
+
+ private:
+  bool _isHeadResponse;
+  std::vector<std::string> _cookies;
+  basics::StringBuffer _body;
+  size_t _bodySize;
+};
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

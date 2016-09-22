@@ -1,214 +1,183 @@
-/*jshint browser: true */
-/*jshint strict: false, unused: false */
-/*global Backbone, window, arangoDocument, arangoDocumentModel, $, arangoHelper */
+/* jshint browser: true */
+/* jshint strict: false, unused: false */
+/* global Backbone, window, arangoDocumentModel, $, arangoHelper */
 
-window.arangoDocument = Backbone.Collection.extend({
+window.ArangoDocument = Backbone.Collection.extend({
   url: '/_api/document/',
   model: arangoDocumentModel,
   collectionInfo: {},
-  deleteEdge: function (colid, docid) {
-    var returnval = false;
-    try {
-      $.ajax({
-        cache: false,
-        type: 'DELETE',
-        async: false,
-        contentType: "application/json",
-        url: "/_api/edge/" + colid + "/" + docid,
-        success: function () {
-          returnval = true;
-        },
-        error: function () {
-          returnval = false;
-        }
-      });
-    }
-    catch (e) {
-          returnval = false;
-    }
-    return returnval;
+
+  deleteEdge: function (colid, docid, callback) {
+    this.deleteDocument(colid, docid, callback);
   },
-  deleteDocument: function (colid, docid){
-    var returnval = false;
-    try {
-      $.ajax({
-        cache: false,
-        type: 'DELETE',
-        async: false,
-        contentType: "application/json",
-        url: "/_api/document/" + colid + "/" + docid,
-        success: function () {
-          returnval = true;
-        },
-        error: function () {
-          returnval = false;
-        }
-      });
-    }
-    catch (e) {
-          returnval = false;
-    }
-    return returnval;
+
+  deleteDocument: function (colid, docid, callback) {
+    $.ajax({
+      cache: false,
+      type: 'DELETE',
+      contentType: 'application/json',
+      url: arangoHelper.databaseUrl('/_api/document/' + encodeURIComponent(colid) + '/' + encodeURIComponent(docid)),
+      success: function () {
+        callback(false);
+      },
+      error: function () {
+        callback(true);
+      }
+    });
   },
   addDocument: function (collectionID, key) {
     var self = this;
     self.createTypeDocument(collectionID, key);
   },
-  createTypeEdge: function (collectionID, from, to, key) {
-    var result = false, newEdge;
+  createTypeEdge: function (collectionID, from, to, key, callback) {
+    var newEdge;
 
     if (key) {
       newEdge = JSON.stringify({
-        _key: key
+        _key: key,
+        _from: from,
+        _to: to
       });
-    }
-    else {
-      newEdge = JSON.stringify({});
+    } else {
+      newEdge = JSON.stringify({
+        _from: from,
+        _to: to
+      });
     }
 
     $.ajax({
       cache: false,
-      type: "POST",
-      async: false,
-      url: "/_api/edge?collection=" + collectionID + "&from=" + from + "&to=" + to,
+      type: 'POST',
+      url: arangoHelper.databaseUrl('/_api/document?collection=' + encodeURIComponent(collectionID)),
       data: newEdge,
-      contentType: "application/json",
+      contentType: 'application/json',
       processData: false,
-      success: function(data) {
-        result = data._id;
+      success: function (data) {
+        callback(false, data);
       },
-      error: function(data) {
-        result = false;
+      error: function (data) {
+        callback(true, data._id, data.responseJSON);
       }
     });
-    return result;
   },
-  createTypeDocument: function (collectionID, key) {
-    var result = false, newDocument;
+  createTypeDocument: function (collectionID, key, callback, returnNew) {
+    var newDocument;
 
     if (key) {
       newDocument = JSON.stringify({
         _key: key
       });
-    }
-    else {
+    } else {
       newDocument = JSON.stringify({});
+    }
+
+    var url = arangoHelper.databaseUrl('/_api/document?collection=' + encodeURIComponent(collectionID));
+
+    if (returnNew) {
+      url = url + '?returnNew=true';
     }
 
     $.ajax({
       cache: false,
-      type: "POST",
-      async: false,
-      url: "/_api/document?collection=" + encodeURIComponent(collectionID),
+      type: 'POST',
+      url: url,
       data: newDocument,
-      contentType: "application/json",
+      contentType: 'application/json',
       processData: false,
-      success: function(data) {
-        result = data._id;
+      success: function (data) {
+        if (returnNew) {
+          callback(false, data);
+        } else {
+          callback(false, data._id);
+        }
       },
-      error: function(data) {
-        result = false;
+      error: function (data) {
+        callback(true, data._id, data.responseJSON);
       }
     });
-    return result;
   },
-  getCollectionInfo: function (identifier) {
+  getCollectionInfo: function (identifier, callback, toRun) {
     var self = this;
 
     $.ajax({
       cache: false,
-      type: "GET",
-      url: "/_api/collection/" + identifier + "?" + arangoHelper.getRandomToken(),
-      contentType: "application/json",
+      type: 'GET',
+      url: arangoHelper.databaseUrl('/_api/collection/' + identifier + '?' + arangoHelper.getRandomToken()),
+      contentType: 'application/json',
       processData: false,
-      async: false,
-      success: function(data) {
+      success: function (data) {
         self.collectionInfo = data;
+        callback(false, data, toRun);
       },
-      error: function(data) {
+      error: function (data) {
+        callback(true, data, toRun);
       }
     });
-
-    return self.collectionInfo;
   },
-  getEdge: function (colid, docid){
-    var result = false, self = this;
+  getEdge: function (colid, docid, callback) {
+    this.getDocument(colid, docid, callback);
+  },
+  getDocument: function (colid, docid, callback) {
+    var self = this;
     this.clearDocument();
     $.ajax({
       cache: false,
-      type: "GET",
-      async: false,
-      url: "/_api/edge/" + colid +"/"+ docid,
-      contentType: "application/json",
+      type: 'GET',
+      url: arangoHelper.databaseUrl('/_api/document/' + encodeURIComponent(colid) + '/' + encodeURIComponent(docid)),
+      contentType: 'application/json',
       processData: false,
-      success: function(data) {
+      success: function (data) {
         self.add(data);
-        result = true;
+        callback(false, data, 'document');
       },
-      error: function(data) {
-        result = false;
+      error: function (data) {
+        arangoHelper.arangoError('Error', data.responseJSON.errorMessage + ' - error number: ' + data.responseJSON.errorNum);
+        self.add(true, data);
       }
     });
-    return result;
   },
-  getDocument: function (colid, docid) {
-    var result = false, self = this;
-    this.clearDocument();
-    $.ajax({
-      cache: false,
-      type: "GET",
-      async: false,
-      url: "/_api/document/" + colid +"/"+ docid,
-      contentType: "application/json",
-      processData: false,
-      success: function(data) {
-        self.add(data);
-        result = true;
-      },
-      error: function(data) {
-        result = false;
-      }
-    });
-    return result;
-  },
-  saveEdge: function (colid, docid, model) {
-    var result = false;
-    $.ajax({
-      cache: false,
-      type: "PUT",
-      async: false,
-      url: "/_api/edge/" + colid + "/" + docid,
-      data: model,
-      contentType: "application/json",
-      processData: false,
-      success: function(data) {
-        result = true;
-      },
-      error: function(data) {
-        result = false;
-      }
-    });
-    return result;
-  },
-  saveDocument: function (colid, docid, model) {
-    var result = false;
-    $.ajax({
-      cache: false,
-      type: "PUT",
-      async: false,
-      url: "/_api/document/" + colid + "/" + docid,
-      data: model,
-      contentType: "application/json",
-      processData: false,
-      success: function(data) {
-          result = true;
-      },
-      error: function(data) {
-          result = false;
-      }
-    });
-    return result;
 
+  saveEdge: function (colid, docid, from, to, model, callback) {
+    var parsed;
+    try {
+      parsed = JSON.parse(model);
+      parsed._to = to;
+      parsed._from = from;
+    } catch (e) {
+      arangoHelper.arangoError('Edge', 'Could not parsed document.');
+    }
+
+    $.ajax({
+      cache: false,
+      type: 'PUT',
+      url: arangoHelper.databaseUrl('/_api/document/' + encodeURIComponent(colid) + '/' + encodeURIComponent(docid)) + '#replaceEdge',
+      data: JSON.stringify(parsed),
+      contentType: 'application/json',
+      processData: false,
+      success: function (data) {
+        callback(false, data);
+      },
+      error: function (data) {
+        callback(true, data);
+      }
+    });
+  },
+
+  saveDocument: function (colid, docid, model, callback) {
+    $.ajax({
+      cache: false,
+      type: 'PUT',
+      url: arangoHelper.databaseUrl('/_api/document/' + encodeURIComponent(colid) + '/' + encodeURIComponent(docid)),
+      data: model,
+      contentType: 'application/json',
+      processData: false,
+      success: function (data) {
+        callback(false, data);
+      },
+      error: function (data) {
+        callback(true, data);
+      }
+    });
   },
 
   updateLocalDocument: function (data) {

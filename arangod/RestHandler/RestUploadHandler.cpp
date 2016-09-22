@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief upload request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,126 +19,114 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestUploadHandler.h"
-
 #include "Basics/FileUtils.h"
 #include "Basics/files.h"
-#include "Basics/logging.h"
+#include "Basics/StaticStrings.h"
 #include "Basics/StringUtils.h"
-#include "HttpServer/HttpServer.h"
+#include "Basics/tri-strings.h"
+#include "GeneralServer/GeneralServer.h"
+#include "Logger/Logger.h"
 #include "Rest/HttpRequest.h"
 
-using namespace std;
-using namespace triagens::basics;
-using namespace triagens::rest;
-using namespace triagens::arango;
+using namespace arangodb;
+using namespace arangodb::basics;
+using namespace arangodb::rest;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+RestUploadHandler::RestUploadHandler(GeneralRequest* request,
+                                     GeneralResponse* response)
+    : RestVocbaseBaseHandler(request, response) {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
-////////////////////////////////////////////////////////////////////////////////
+RestUploadHandler::~RestUploadHandler() {}
 
-RestUploadHandler::RestUploadHandler (HttpRequest* request)
-  : RestVocbaseBaseHandler(request) {
-}
+RestHandler::status RestUploadHandler::execute() {
+  // cast is ok because http requst is required
+  HttpRequest* request = dynamic_cast<HttpRequest*>(_request.get());
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
+  if (request == nullptr) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+  }
 
-RestUploadHandler::~RestUploadHandler () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               HttpHandler methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-HttpHandler::status_t RestUploadHandler::execute () {
   // extract the request type
-  const HttpRequest::HttpRequestType type = _request->requestType();
+  auto const type = request->requestType();
 
-  if (type != HttpRequest::HTTP_REQUEST_POST) {
-    generateError(HttpResponse::METHOD_NOT_ALLOWED, TRI_ERROR_HTTP_METHOD_NOT_ALLOWED);
+  if (type != rest::RequestType::POST) {
+    generateError(rest::ResponseCode::METHOD_NOT_ALLOWED,
+                  TRI_ERROR_HTTP_METHOD_NOT_ALLOWED);
 
-    return status_t(HttpHandler::HANDLER_DONE);
+    return status::DONE;
   }
 
   char* filename = nullptr;
   std::string errorMessage;
   long systemError;
 
-  if (TRI_GetTempName("uploads", &filename, false, systemError, errorMessage) != TRI_ERROR_NO_ERROR) {
+  if (TRI_GetTempName("uploads", &filename, false, systemError, errorMessage) !=
+      TRI_ERROR_NO_ERROR) {
     errorMessage = "could not generate temp file: " + errorMessage;
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL, errorMessage);
-    return status_t(HttpHandler::HANDLER_FAILED);
+    generateError(rest::ResponseCode::SERVER_ERROR,
+                  TRI_ERROR_INTERNAL, errorMessage);
+    return status::FAILED;
   }
 
   char* relative = TRI_GetFilename(filename);
 
-  LOG_TRACE("saving uploaded file of length %llu in file '%s', relative '%s'",
-            (unsigned long long) _request->bodySize(),
-            filename,
-            relative);
+  std::string const& bodyStr = request->body();
+  char const* body = bodyStr.c_str();
+  size_t bodySize = bodyStr.size();
 
-  char const* body = _request->body();
-  size_t bodySize  = _request->bodySize();
+  LOG(TRACE) << "saving uploaded file of length " << bodySize << " in file '"
+             << filename << "', relative '" << relative << "'";
 
   bool found;
-  char const* value = _request->value("multipart", found);
+  std::string const& value = request->value("multipart", found);
 
   if (found) {
-    bool multiPart = triagens::basics::StringUtils::boolean(value);
+    bool multiPart = arangodb::basics::StringUtils::boolean(value);
 
     if (multiPart) {
-      if (! parseMultiPart(body, bodySize)) {
+      if (!parseMultiPart(body, bodySize)) {
         TRI_Free(TRI_CORE_MEM_ZONE, relative);
         TRI_Free(TRI_CORE_MEM_ZONE, filename);
-        generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL, "invalid multipart request");
-        return status_t(HttpHandler::HANDLER_FAILED);
+        generateError(rest::ResponseCode::SERVER_ERROR,
+                      TRI_ERROR_INTERNAL, "invalid multipart request");
+        return status::FAILED;
       }
     }
   }
 
   try {
-    FileUtils::spit(string(filename), body, bodySize);
+    FileUtils::spit(std::string(filename), body, bodySize);
     TRI_Free(TRI_CORE_MEM_ZONE, filename);
-  }
-  catch (...) {
+  } catch (...) {
     TRI_Free(TRI_CORE_MEM_ZONE, relative);
     TRI_Free(TRI_CORE_MEM_ZONE, filename);
-    generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_INTERNAL, "could not save file");
-    return status_t(HttpHandler::HANDLER_FAILED);
+    generateError(rest::ResponseCode::SERVER_ERROR,
+                  TRI_ERROR_INTERNAL, "could not save file");
+    return status::FAILED;
   }
 
   char* fullName = TRI_Concatenate2File("uploads", relative);
   TRI_Free(TRI_CORE_MEM_ZONE, relative);
 
   // create the response
-  _response = createResponse(HttpResponse::CREATED);
-  _response->setContentType("application/json; charset=utf-8");
+  resetResponse(rest::ResponseCode::CREATED);
 
-  TRI_json_t json;
+  VPackBuilder b;
 
-  TRI_InitObjectJson(TRI_UNKNOWN_MEM_ZONE, &json);
-  TRI_Insert3ObjectJson(TRI_UNKNOWN_MEM_ZONE, &json, "filename", TRI_CreateStringCopyJson(TRI_UNKNOWN_MEM_ZONE, fullName, strlen(fullName)));
+  b.add(VPackValue(VPackValueType::Object));
+  b.add("filename", VPackValue(fullName));
   TRI_Free(TRI_CORE_MEM_ZONE, fullName);
+  b.close();
 
-  generateResult(HttpResponse::CREATED, &json);
-  TRI_DestroyJson(TRI_UNKNOWN_MEM_ZONE, &json);
+  VPackSlice s = b.slice();
+
+  generateResult(rest::ResponseCode::CREATED, s);
 
   // success
-  return status_t(HttpHandler::HANDLER_DONE);
+  return status::DONE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -150,10 +134,17 @@ HttpHandler::status_t RestUploadHandler::execute () {
 /// its first element
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestUploadHandler::parseMultiPart (char const*& body,
-                                        size_t& length) {
-  char const* beg = _request->body();
-  char const* end = beg + _request->bodySize();
+bool RestUploadHandler::parseMultiPart(char const*& body, size_t& length) {
+  // cast is ok because http requst is required
+  HttpRequest* request = dynamic_cast<HttpRequest*>(_request.get());
+
+  if (request == nullptr) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+  }
+
+  std::string const& bodyStr = request->body();
+  char const* beg = bodyStr.c_str();
+  char const* end = beg + bodyStr.size();
 
   while (beg < end && (*beg == '\r' || *beg == '\n' || *beg == ' ')) {
     ++beg;
@@ -184,7 +175,8 @@ bool RestUploadHandler::parseMultiPart (char const*& body,
   std::vector<std::pair<char const*, size_t>> parts;
 
   while (ptr < end) {
-    char const* p = TRI_IsContainedMemory(ptr, end - ptr, delimiter.c_str(), delimiter.size());
+    char const* p = TRI_IsContainedMemory(ptr, end - ptr, delimiter.c_str(),
+                                          delimiter.size());
     if (p == nullptr || p + delimiter.size() + 2 >= end || p - 2 <= ptr) {
       return false;
     }
@@ -196,7 +188,7 @@ bool RestUploadHandler::parseMultiPart (char const*& body,
     if (*(q - 1) == '\r') {
       --q;
     }
-       
+
     parts.push_back(std::make_pair(ptr, q - ptr));
     ptr = p + delimiter.size();
     if (*ptr == '-' && *(ptr + 1) == '-') {
@@ -248,19 +240,19 @@ bool RestUploadHandler::parseMultiPart (char const*& body,
         return false;
       }
 
-      char const* p = colon; 
+      char const* p = colon;
       while (p > ptr && *(p - 1) == ' ') {
-        --p; 
+        --p;
       }
 
       ++colon;
       while (colon < eol && *colon == ' ') {
-        ++colon;     
+        ++colon;
       }
 
       char const* q = eol;
       while (q > ptr && *(q - 1) == ' ') {
-        --q; 
+        --q;
       }
 
       ptr = eol;
@@ -285,12 +277,3 @@ bool RestUploadHandler::parseMultiPart (char const*& body,
 
   return true;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

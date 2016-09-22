@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief abstract base class for jobs
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,62 +20,32 @@
 ///
 /// @author Dr. Frank Celler
 /// @author Martin Schoenert
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2009-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Job.h"
 
 #include "Dispatcher/Dispatcher.h"
 
-using namespace triagens::rest;
-using namespace std;
+using namespace arangodb::rest;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+namespace {
+std::atomic_uint_fast64_t NEXT_JOB_ID(static_cast<uint64_t>(TRI_microtime() *
+                                                            100000.0));
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief constructs a job
 ////////////////////////////////////////////////////////////////////////////////
 
-Job::Job (string const& name)
-  : _name(name),
-    _id(0),
-    _queuePosition((size_t) -1) {
-}
+Job::Job(std::string const& name)
+    : _jobId(NEXT_JOB_ID.fetch_add(1, std::memory_order_seq_cst)),
+      _name(name),
+      _queuePosition((size_t)-1) {}
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-Job::~Job () {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                            virtual public methods
-// -----------------------------------------------------------------------------
+Job::~Job() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief returns the queue name to use
 ////////////////////////////////////////////////////////////////////////////////
 
-size_t Job::queue () const {
-  return Dispatcher::STANDARD_QUEUE;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief sets the thread which currently dealing with the job
-////////////////////////////////////////////////////////////////////////////////
-
-void Job::setDispatcherThread (DispatcherThread*) {
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+size_t Job::queue() const { return Dispatcher::STANDARD_QUEUE; }

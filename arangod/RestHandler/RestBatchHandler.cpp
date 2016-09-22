@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief batch request handler
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,385 +19,282 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2014, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestBatchHandler.h"
 
+#include "Basics/StaticStrings.h"
 #include "Basics/StringUtils.h"
-#include "Basics/logging.h"
-#include "HttpServer/HttpHandlerFactory.h"
-#include "HttpServer/HttpServer.h"
+#include "GeneralServer/GeneralServer.h"
+#include "GeneralServer/GeneralServerFeature.h"
+#include "GeneralServer/RestHandlerFactory.h"
+#include "Logger/Logger.h"
 #include "Rest/HttpRequest.h"
 
-using namespace std;
-using namespace triagens::basics;
-using namespace triagens::rest;
-using namespace triagens::arango;
+#include <iostream>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+using namespace arangodb;
+using namespace arangodb::basics;
+using namespace arangodb::rest;
+
+RestBatchHandler::RestBatchHandler(GeneralRequest* request,
+                                   GeneralResponse* response)
+    : RestVocbaseBaseHandler(request, response) {}
+
+RestBatchHandler::~RestBatchHandler() {}
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
+/// @brief was docuBlock JSF_batch_processing
 ////////////////////////////////////////////////////////////////////////////////
 
-RestBatchHandler::RestBatchHandler (HttpRequest* request)
-  : RestVocbaseBaseHandler(request) {
+RestHandler::status RestBatchHandler::execute() {
+  switch (_response->transportType()) {
+    case Endpoint::TransportType::HTTP: {
+      return executeHttp();
+    }
+    case Endpoint::TransportType::VPP: {
+      return executeVpp();
+    }
+  }
+  // should never get here
+  TRI_ASSERT(false);
+  return RestHandler::status::FAILED;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief destructor
-////////////////////////////////////////////////////////////////////////////////
-
-RestBatchHandler::~RestBatchHandler () {
+RestHandler::status RestBatchHandler::executeVpp() {
+  generateError(rest::ResponseCode::METHOD_NOT_ALLOWED, TRI_ERROR_NO_ERROR,
+                "The RestBatchHandler is not supported for this protocol!");
+  return status::DONE;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                               HttpHandler methods
-// -----------------------------------------------------------------------------
+RestHandler::status RestBatchHandler::executeHttp() {
+  HttpResponse* httpResponse = dynamic_cast<HttpResponse*>(_response.get());
 
-////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_batch_processing
-/// @brief executes a batch request
-///
-/// @RESTHEADER{POST /_api/batch,executes a batch request} /// TODOSWAGGER: contentype
-///
-/// @RESTALLBODYPARAM{body,string,required}
-/// The multipart batch request, consisting of the envelope and the individual
-/// batch parts.
-///
-/// @RESTDESCRIPTION
-/// Executes a batch request. A batch request can contain any number of
-/// other requests that can be sent to ArangoDB in isolation. The benefit of
-/// using batch requests is that batching requests requires less client/server
-/// roundtrips than when sending isolated requests.
-///
-/// All parts of a batch request are executed serially on the server. The
-/// server will return the results of all parts in a single response when all
-/// parts are finished.
-///
-/// Technically, a batch request is a multipart HTTP request, with
-/// content-type `multipart/form-data`. A batch request consists of an
-/// envelope and the individual batch part actions. Batch part actions
-/// are "regular" HTTP requests, including full header and an optional body.
-/// Multiple batch parts are separated by a boundary identifier. The
-/// boundary identifier is declared in the batch envelope. The MIME content-type
-/// for each individual batch part must be `application/x-arango-batchpart`.
-///
-/// Please note that when constructing the individual batch parts, you must
-/// use CRLF (`\r\n`) as the line terminator as in regular HTTP messages.
-///
-/// The response sent by the server will be an `HTTP 200` response, with an
-/// optional error summary header `x-arango-errors`. This header contains the
-/// number of batch part operations that failed with an HTTP error code of at
-/// least 400. This header is only present in the response if the number of
-/// errors is greater than zero.
-///
-/// The response sent by the server is a multipart response, too. It contains
-/// the individual HTTP responses for all batch parts, including the full HTTP
-/// result header (with status code and other potential headers) and an
-/// optional result body. The individual batch parts in the result are
-/// seperated using the same boundary value as specified in the request.
-///
-/// The order of batch parts in the response will be the same as in the
-/// original client request. Client can additionally use the `Content-Id`
-/// MIME header in a batch part to define an individual id for each batch part.
-/// The server will return this id is the batch part responses, too.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned if the batch was received successfully. HTTP 200 is returned
-/// even if one or multiple batch part actions failed.
-///
-/// @RESTRETURNCODE{400}
-/// is returned if the batch envelope is malformed or incorrectly formatted.
-/// This code will also be returned if the content-type of the overall batch
-/// request or the individual MIME parts is not as expected.
-///
-/// @RESTRETURNCODE{405}
-/// is returned when an invalid HTTP method is used.
-///
-/// @EXAMPLES
-///
-/// Sending a batch request with five batch parts:
-///
-/// - GET /_api/version
-///
-/// - DELETE /_api/collection/products
-///
-/// - POST /_api/collection/products
-///
-/// - GET /_api/collection/products/figures
-///
-/// - DELETE /_api/collection/products
-///
-/// The boundary (`SomeBoundaryValue`) is passed to the server in the HTTP
-/// `Content-Type` HTTP header.
-/// *Please note the reply is not displayed all accurate.*
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestBatchMultipartHeader}
-///     var parts = [
-///       "Content-Type: application/x-arango-batchpart\r\nContent-Id: myId1\r\n\r\nGET /_api/version HTTP/1.1\r\n",
-///       "Content-Type: application/x-arango-batchpart\r\nContent-Id: myId2\r\n\r\nDELETE /_api/collection/products HTTP/1.1\r\n",
-///       "Content-Type: application/x-arango-batchpart\r\nContent-Id: someId\r\n\r\nPOST /_api/collection/products HTTP/1.1\r\n\r\n{ \"name\": \"products\" }\r\n",
-///       "Content-Type: application/x-arango-batchpart\r\nContent-Id: nextId\r\n\r\nGET /_api/collection/products/figures HTTP/1.1\r\n",
-///       "Content-Type: application/x-arango-batchpart\r\nContent-Id: otherId\r\n\r\nDELETE /_api/collection/products HTTP/1.1\r\n"
-///     ];
-///     var boundary = "SomeBoundaryValue";
-///     var headers = { "Content-Type" : "multipart/form-data; boundary=" + boundary };
-///     var body = "--" + boundary + "\r\n" +
-///                parts.join("\r\n" + "--" + boundary + "\r\n") +
-///                "--" + boundary + "--\r\n";
-///
-///     var response = logCurlRequestRaw('POST', '/_api/batch', body, headers);
-///
-///     assert(response.code === 200);
-///
-///     logRawResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Sending a batch request, setting the boundary implicitly (the server will
-/// in this case try to find the boundary at the beginning of the request body).
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestBatchImplicitBoundary}
-///     var parts = [
-///       "Content-Type: application/x-arango-batchpart\r\n\r\nDELETE /_api/collection/notexisting1 HTTP/1.1\r\n",
-///       "Content-Type: application/x-arango-batchpart\r\n\r\nDELETE /_api/collection/notexisting2 HTTP/1.1\r\n"
-///     ];
-///     var boundary = "SomeBoundaryValue";
-///     var body = "--" + boundary + "\r\n" +
-///                parts.join("\r\n" + "--" + boundary + "\r\n") +
-///                "--" + boundary + "--\r\n";
-///
-///     var response = logCurlRequestRaw('POST', '/_api/batch', body);
-///
-///     assert(response.code === 200);
-///     assert(response.headers['x-arango-errors'] == 2);
-///
-///     logRawResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
-
-HttpHandler::status_t RestBatchHandler::execute () {
-  // extract the request type
-  const HttpRequest::HttpRequestType type = _request->requestType();
-
-  if (type != HttpRequest::HTTP_REQUEST_POST && type != HttpRequest::HTTP_REQUEST_PUT) {
-    generateError(HttpResponse::METHOD_NOT_ALLOWED, TRI_ERROR_HTTP_METHOD_NOT_ALLOWED);
-    return status_t(HttpHandler::HANDLER_DONE);
+  if (httpResponse == nullptr) {
+    std::cout << "please fix this for vpack" << std::endl;
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
   }
 
-  string boundary;
+  HttpRequest const* httpRequest =
+      dynamic_cast<HttpRequest const*>(_request.get());
+
+  if (httpRequest == nullptr) {
+    std::cout << "please fix this for vpack" << std::endl;
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+  }
+
+  // extract the request type
+  auto const type = _request->requestType();
+
+  if (type != rest::RequestType::POST && type != rest::RequestType::PUT) {
+    generateError(rest::ResponseCode::METHOD_NOT_ALLOWED,
+                  TRI_ERROR_HTTP_METHOD_NOT_ALLOWED);
+    return status::DONE;
+  }
+
+  std::string boundary;
 
   // invalid content-type or boundary sent
-  if (! getBoundary(&boundary)) {
-    generateError(HttpResponse::BAD, TRI_ERROR_HTTP_BAD_PARAMETER, "invalid content-type or boundary received");
-    return status_t(HttpHandler::HANDLER_FAILED);
+  if (!getBoundary(&boundary)) {
+    generateError(rest::ResponseCode::BAD, TRI_ERROR_HTTP_BAD_PARAMETER,
+                  "invalid content-type or boundary received");
+    return status::FAILED;
   }
 
-  LOG_TRACE("boundary of multipart-message is '%s'", boundary.c_str());
+  LOG(TRACE) << "boundary of multipart-message is '" << boundary << "'";
 
   size_t errors = 0;
 
   // get authorization header. we will inject this into the subparts
-  string authorization = _request->header("authorization");
+  std::string const& authorization =
+      _request->header(StaticStrings::Authorization);
 
   // create the response
-  _response = createResponse(HttpResponse::OK);
-  _response->setContentType(_request->header("content-type"));
+  resetResponse(rest::ResponseCode::OK);
+  _response->setContentType(_request->header(StaticStrings::ContentTypeHeader));
 
+  // http required here
+  std::string const& bodyStr = httpRequest->body();
   // setup some auxiliary structures to parse the multipart message
-  MultipartMessage message(boundary.c_str(),
-                           boundary.size(),
-                           _request->body(),
-                           _request->body() + _request->bodySize());
+  MultipartMessage message(boundary.c_str(), boundary.size(), bodyStr.c_str(),
+                           bodyStr.c_str() + bodyStr.size());
 
   SearchHelper helper;
   helper.message = &message;
-  helper.searchStart = (char*) message.messageStart;
+  helper.searchStart = message.messageStart;
 
   // iterate over all parts of the multipart message
   while (true) {
     // get the next part from the multipart message
-    if (! extractPart(&helper)) {
+    if (!extractPart(&helper)) {
       // error
-      generateError(HttpResponse::BAD, TRI_ERROR_HTTP_BAD_PARAMETER, "invalid multipart message received");
-      LOG_WARNING("received a corrupted multipart message");
+      generateError(rest::ResponseCode::BAD, TRI_ERROR_HTTP_BAD_PARAMETER,
+                    "invalid multipart message received");
+      LOG(WARN) << "received a corrupted multipart message";
 
-      return status_t(HttpHandler::HANDLER_FAILED);
+      return status::FAILED;
     }
 
     // split part into header & body
-    const char* partStart = helper.foundStart;
-    const char* partEnd = partStart + helper.foundLength;
-    const size_t partLength = helper.foundLength;
+    char const* partStart = helper.foundStart;
+    char const* partEnd = partStart + helper.foundLength;
+    size_t const partLength = helper.foundLength;
 
-    const char* headerStart = partStart;
-    char* bodyStart = nullptr;
+    char const* headerStart = partStart;
+    char const* bodyStart = nullptr;
     size_t headerLength = 0;
     size_t bodyLength = 0;
 
     // assume Windows linebreak \r\n\r\n as delimiter
-    char* p = strstr((char*) headerStart, "\r\n\r\n");
+    char const* p = strstr(headerStart, "\r\n\r\n");
 
     if (p != nullptr && p + 4 <= partEnd) {
       headerLength = p - partStart;
       bodyStart = p + 4;
       bodyLength = partEnd - bodyStart;
-    }
-    else {
+    } else {
       // test Unix linebreak
-      p = strstr((char*) headerStart, "\n\n");
+      p = strstr(headerStart, "\n\n");
 
       if (p != nullptr && p + 2 <= partEnd) {
         headerLength = p - partStart;
         bodyStart = p + 2;
         bodyLength = partEnd - bodyStart;
-      }
-      else {
+      } else {
         // no delimiter found, assume we have only a header
         headerLength = partLength;
       }
     }
 
     // set up request object for the part
-    LOG_TRACE("part header is: %s", string(headerStart, headerLength).c_str());
-    HttpRequest* request = new HttpRequest(_request->connectionInfo(), headerStart, headerLength, _request->compatibility(), false);
+    LOG(TRACE) << "part header is: " << std::string(headerStart, headerLength);
 
-    if (request == nullptr) {
-      generateError(HttpResponse::SERVER_ERROR, TRI_ERROR_OUT_OF_MEMORY);
-
-      return status_t(HttpHandler::HANDLER_FAILED);
-    }
+    std::unique_ptr<HttpRequest> request(new HttpRequest(
+        _request->connectionInfo(), headerStart, headerLength, false));
 
     // we do not have a client task id here
     request->setClientTaskId(0);
 
     // inject the request context from the framing (batch) request
     // the "false" means the context is not responsible for resource handling
-    request->setRequestContext(_request->getRequestContext(), false);
+    request->setRequestContext(_request->requestContext(), false);
     request->setDatabaseName(_request->databaseName());
 
     if (bodyLength > 0) {
-      LOG_TRACE("part body is '%s'", string(bodyStart, bodyLength).c_str());
+      LOG(TRACE) << "part body is '" << std::string(bodyStart, bodyLength)
+                 << "'";
       request->setBody(bodyStart, bodyLength);
     }
 
-    if (authorization.size()) {
+    if (!authorization.empty()) {
       // inject Authorization header of multipart message into part message
-      request->setHeader("authorization", 13, authorization.c_str());
+      request->setHeader(StaticStrings::Authorization.c_str(),
+                         StaticStrings::Authorization.size(),
+                         authorization.c_str(), authorization.size());
     }
 
-    HttpHandler* handler = _server->createHandler(request);
+    RestHandler* handler = nullptr;
 
-    if (! handler) {
-      delete request;
+    {
+      std::unique_ptr<HttpResponse> response(
+          new HttpResponse(rest::ResponseCode::SERVER_ERROR));
 
-      generateError(HttpResponse::BAD, TRI_ERROR_INTERNAL, "could not create handler for batch part processing");
+      handler = GeneralServerFeature::HANDLER_FACTORY->createHandler(
+          std::move(request), std::move(response));
 
-      return status_t(HttpHandler::HANDLER_FAILED);
-    }
+      if (handler == nullptr) {
+        generateError(rest::ResponseCode::BAD, TRI_ERROR_INTERNAL,
+                      "could not create handler for batch part processing");
 
-    HttpHandler::status_t status(HttpHandler::HANDLER_FAILED);
-
-    do {
-      handler->prepareExecute();
-      try {
-        status = handler->execute();
+        return status::FAILED;
       }
-      catch (triagens::basics::Exception const& ex) {
-        handler->handleError(ex);
+    }
+
+    // start to work for this handler
+    {
+      HandlerWorkStack work(handler);
+      RestHandler::status result = work.handler()->executeFull();
+
+      if (result == status::FAILED) {
+        generateError(rest::ResponseCode::BAD, TRI_ERROR_INTERNAL,
+                      "executing a handler for batch part failed");
+
+        return status::FAILED;
       }
-      catch (std::exception const& ex) {
-        triagens::basics::Exception err(TRI_ERROR_INTERNAL, ex.what(), __FILE__, __LINE__);
-        handler->handleError(err);
+
+      HttpResponse* partResponse =
+          dynamic_cast<HttpResponse*>(handler->response());
+
+      if (partResponse == nullptr) {
+        generateError(rest::ResponseCode::BAD, TRI_ERROR_INTERNAL,
+                      "could not create a response for batch part request");
+
+        return status::FAILED;
       }
-      catch (...) {
-        triagens::basics::Exception err(TRI_ERROR_INTERNAL, __FILE__, __LINE__);
-        handler->handleError(err);
+
+      rest::ResponseCode const code = partResponse->responseCode();
+
+      // count everything above 400 as error
+      if (int(code) >= 400) {
+        ++errors;
       }
-      handler->finalizeExecute();
-    }
-    while (status.status == HttpHandler::HANDLER_REQUEUE);
 
+      // append the boundary for this subpart
+      httpResponse->body().appendText(boundary + "\r\nContent-Type: ");
+      httpResponse->body().appendText(StaticStrings::BatchContentType);
 
-    if (status.status == HttpHandler::HANDLER_FAILED) {
-      // one of the handlers failed, we must exit now
-      delete handler;
-      generateError(HttpResponse::BAD, TRI_ERROR_INTERNAL, "executing a handler for batch part failed");
+      // append content-id if it is present
+      if (helper.contentId != 0) {
+        httpResponse->body().appendText(
+            "\r\nContent-Id: " +
+            std::string(helper.contentId, helper.contentIdLength));
+      }
 
-      return status_t(HttpHandler::HANDLER_FAILED);
-    }
+      httpResponse->body().appendText(TRI_CHAR_LENGTH_PAIR("\r\n\r\n"));
 
-    HttpResponse* partResponse = handler->getResponse();
+      // remove some headers we don't need
+      partResponse->setConnectionType(rest::ConnectionType::CONNECTION_NONE);
+      partResponse->setHeaderNC(StaticStrings::Server, "");
 
-    if (partResponse == nullptr) {
-      delete handler;
-      generateError(HttpResponse::BAD, TRI_ERROR_INTERNAL, "could not create a response for batch part request");
+      // append the part response header
+      partResponse->writeHeader(&httpResponse->body());
 
-      return status_t(HttpHandler::HANDLER_FAILED);
-    }
-
-    const HttpResponse::HttpResponseCode code = partResponse->responseCode();
-
-    if (code >= 400) {
-      // error
-      ++errors;
+      // append the part response body
+      httpResponse->body().appendText(partResponse->body());
+      httpResponse->body().appendText(TRI_CHAR_LENGTH_PAIR("\r\n"));
     }
 
-    // append the boundary for this subpart
-    _response->body().appendText(boundary + "\r\nContent-Type: ");
-    _response->body().appendText(triagens::rest::HttpRequest::BatchContentType);
-
-    if (helper.contentId != 0) {
-      // append content-id
-      _response->body().appendText("\r\nContent-Id: " + string(helper.contentId, helper.contentIdLength));
-    }
-
-    _response->body().appendText(TRI_CHAR_LENGTH_PAIR("\r\n\r\n"));
-
-    // remove some headers we don't need
-    partResponse->setHeader(TRI_CHAR_LENGTH_PAIR("connection"), "");
-    partResponse->setHeader(TRI_CHAR_LENGTH_PAIR("server"), "");
-
-    // append the part response header
-    partResponse->writeHeader(&_response->body());
-    // append the part response body
-    _response->body().appendText(partResponse->body());
-    _response->body().appendText(TRI_CHAR_LENGTH_PAIR("\r\n"));
-
-    delete handler;
-
-
-    if (! helper.containsMore) {
-      // we've read the last part
+    // we've read the last part
+    if (!helper.containsMore) {
       break;
     }
-  } // next part
+  }
 
   // append final boundary + "--"
-  _response->body().appendText(boundary + "--");
+  httpResponse->body().appendText(boundary + "--");
 
   if (errors > 0) {
-    _response->setHeader(HttpResponse::BatchErrorHeader, StringUtils::itoa(errors));
+    httpResponse->setHeaderNC(StaticStrings::Errors, StringUtils::itoa(errors));
   }
 
   // success
-  return status_t(HttpHandler::HANDLER_DONE);
+  return status::DONE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief extract the boundary from the body of a multipart message
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestBatchHandler::getBoundaryBody (string* result) {
-  char const* p = _request->body();
-  char const* e = p + _request->bodySize();
+bool RestBatchHandler::getBoundaryBody(std::string* result) {
+  HttpRequest const* req = dynamic_cast<HttpRequest const*>(_request.get());
+
+  if (req == nullptr) {
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+  }
+
+  std::string const& bodyStr = req->body();
+  char const* p = bodyStr.c_str();
+  char const* e = p + bodyStr.size();
 
   // skip whitespace
   while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
@@ -417,11 +310,9 @@ bool RestBatchHandler::getBoundaryBody (string* result) {
     return false;
   }
 
-  const char* q = p;
+  char const* q = p;
 
-  while (q < e &&
-         *q &&
-         *q != ' ' && *q != '\t' && *q != '\r' && *q != '\n') {
+  while (q < e && *q && *q != ' ' && *q != '\t' && *q != '\r' && *q != '\n') {
     ++q;
   }
 
@@ -430,7 +321,7 @@ bool RestBatchHandler::getBoundaryBody (string* result) {
     return false;
   }
 
-  string boundary(p, (q - p));
+  std::string boundary(p, (q - p));
 
   *result = boundary;
   return true;
@@ -440,31 +331,32 @@ bool RestBatchHandler::getBoundaryBody (string* result) {
 /// @brief extract the boundary from the HTTP header of a multipart message
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestBatchHandler::getBoundaryHeader (string* result) {
+bool RestBatchHandler::getBoundaryHeader(std::string* result) {
   // extract content type
-  string contentType = StringUtils::trim(_request->header("content-type"));
+  std::string const contentType =
+      StringUtils::trim(_request->header(StaticStrings::ContentTypeHeader));
 
   // content type is expect to contain a boundary like this:
   // "Content-Type: multipart/form-data; boundary=<boundary goes here>"
-  vector<string> parts = StringUtils::split(contentType, ';');
+  std::vector<std::string> parts = StringUtils::split(contentType, ';');
 
-  if (parts.size() != 2 || parts[0] != HttpRequest::MultiPartContentType) {
+  if (parts.size() != 2 || parts[0] != StaticStrings::MultiPartContentType) {
     // content-type is not formatted as expected
     return false;
   }
 
-  static const size_t boundaryLength = 9; // strlen("boundary=");
+  static size_t const boundaryLength = 9;  // strlen("boundary=");
 
   // trim 2nd part and lowercase it
   StringUtils::trimInPlace(parts[1]);
-  string p = parts[1].substr(0, boundaryLength);
+  std::string p = parts[1].substr(0, boundaryLength);
   StringUtils::tolowerInPlace(&p);
 
   if (p != "boundary=") {
     return false;
   }
 
-  string boundary = "--" + parts[1].substr(boundaryLength);
+  std::string boundary = "--" + parts[1].substr(boundaryLength);
 
   if (boundary.size() < 5) {
     // 3 bytes is min length for boundary (without "--")
@@ -479,7 +371,7 @@ bool RestBatchHandler::getBoundaryHeader (string* result) {
 /// @brief extract the boundary of a multipart message
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestBatchHandler::getBoundary (string* result) {
+bool RestBatchHandler::getBoundary(std::string* result) {
   TRI_ASSERT(_request);
 
   // try peeking at header first
@@ -495,7 +387,7 @@ bool RestBatchHandler::getBoundary (string* result) {
 /// @brief extract the next part from a multipart message
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RestBatchHandler::extractPart (SearchHelper* helper) {
+bool RestBatchHandler::extractPart(SearchHelper* helper) {
   TRI_ASSERT(helper->searchStart != nullptr);
 
   // init the response
@@ -505,7 +397,7 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
   helper->contentId = 0;
   helper->contentIdLength = 0;
 
-  const char* searchEnd = helper->message->messageEnd;
+  char const* searchEnd = helper->message->messageEnd;
 
   if (helper->searchStart >= searchEnd) {
     // we're at the end already
@@ -513,7 +405,7 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
   }
 
   // search for boundary
-  char* found = strstr(helper->searchStart, helper->message->boundary);
+  char const* found = strstr(helper->searchStart, helper->message->boundary);
 
   if (found == nullptr) {
     // not contained. this is an error
@@ -562,7 +454,7 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
     // try Windows linebreak first
     breakLength = 2;
 
-    char* eol = strstr(found, "\r\n");
+    char const* eol = strstr(found, "\r\n");
 
     if (eol == nullptr) {
       breakLength = 1;
@@ -571,9 +463,8 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
       if (eol == found) {
         break;
       }
-    }
-    else {
-      char* eol2 = strchr(found, '\n');
+    } else {
+      char const* eol2 = strchr(found, '\n');
 
       if (eol2 != nullptr && eol2 < eol) {
         breakLength = 1;
@@ -586,7 +477,8 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
     }
 
     // split key/value of header
-    char* colon = (char*) memchr(found, (int) ':', eol - found);
+    char const* colon =
+        static_cast<char const*>(memchr(found, (int)':', eol - found));
 
     if (nullptr == colon) {
       // invalid header, not containing ':'
@@ -594,13 +486,13 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
     }
 
     // set up the key
-    string key(found, colon - found);
+    std::string key(found, colon - found);
     StringUtils::trimInPlace(key);
 
     if (key[0] == 'c' || key[0] == 'C') {
       // got an interesting key. now process it
       StringUtils::tolowerInPlace(&key);
-    
+
       // skip the colon itself
       ++colon;
       // skip any whitespace
@@ -608,35 +500,32 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
         ++colon;
       }
 
-      if ("content-type" == key) {
+      if (key == StaticStrings::ContentTypeHeader) {
         // extract the value, too
-        string value(colon, eol - colon);
+        std::string value(colon, eol - colon);
         StringUtils::trimInPlace(value);
 
-        if (triagens::rest::HttpRequest::BatchContentType == value) {
+        if (value == StaticStrings::BatchContentType) {
           hasTypeHeader = true;
+        } else {
+          LOG(WARN) << "unexpected content-type '" << value
+                    << "' for multipart-message. expected: '"
+                    << StaticStrings::BatchContentType << "'";
         }
-        else {
-          LOG_WARNING("unexpected content-type '%s' for multipart-message. expected: '%s'",
-                      value.c_str(),
-                      triagens::rest::HttpRequest::BatchContentType.c_str());
-        }
-      }
-      else if ("content-id" == key) {
+      } else if ("content-id" == key) {
         helper->contentId = colon;
         helper->contentIdLength = eol - colon;
-      }
-      else {
+      } else {
         // ignore other headers
       }
     }
 
-    found = eol + breakLength; // plus the \n
+    found = eol + breakLength;  // plus the \n
   }
 
-  found += breakLength; // for 2nd \n
+  found += breakLength;  // for 2nd \n
 
-  if (! hasTypeHeader) {
+  if (!hasTypeHeader) {
     // no Content-Type header. this is an error
     return false;
   }
@@ -654,7 +543,7 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
 
   helper->foundLength = found - helper->foundStart;
 
-  char* p = found + helper->message->boundaryLength;
+  char const* p = found + helper->message->boundaryLength;
 
   if (p + 2 > searchEnd) {
     // end of boundary is outside the buffer
@@ -669,12 +558,3 @@ bool RestBatchHandler::extractPart (SearchHelper* helper) {
 
   return true;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

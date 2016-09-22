@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief fulltext index
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,117 +19,101 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "FulltextIndex.h"
-#include "Basics/logging.h"
+#include "Basics/StringRef.h"
 #include "Basics/Utf8Helper.h"
+#include "Basics/VelocyPackHelper.h"
 #include "FulltextIndex/fulltext-index.h"
-#include "FulltextIndex/fulltext-wordlist.h"
-#include "VocBase/document-collection.h"
+#include "Logger/Logger.h"
 #include "VocBase/transaction.h"
-#include "VocBase/VocShaper.h"
 
-using namespace triagens::arango;
+#include <velocypack/Iterator.h>
+#include <velocypack/velocypack-aliases.h>
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private functions
-// -----------------------------------------------------------------------------
+using namespace arangodb;
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief extraction context
+/// @brief walk over the attribute. Also Extract sub-attributes and elements in
+///        list.
 ////////////////////////////////////////////////////////////////////////////////
 
-struct TextExtractorContext {
-  std::vector<std::pair<char const*, size_t>>* _positions;
-  VocShaper*                                   _shaper;
-};
+static void ExtractWords(std::vector<std::string>& words,
+                         VPackSlice const value,
+                         size_t minWordLength,
+                         int level) {
+  if (value.isString()) {
+    // extract the string value for the indexed attribute
+    std::string text = value.copyString();
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief walk over an array shape and extract the string values
-////////////////////////////////////////////////////////////////////////////////
-
-static bool ArrayTextExtractor (VocShaper* shaper, 
-                                TRI_shape_t const* shape, 
-                                char const*, 
-                                char const* shapedJson, 
-                                uint64_t length, 
-                                void* data) {
-  char* text;
-  size_t textLength;
-  bool ok = TRI_StringValueShapedJson(shape, shapedJson, &text, &textLength);
-
-  if (ok) {
-    // add string value found
-    try {
-      static_cast<TextExtractorContext*>(data)->_positions->emplace_back(text, textLength);
+    // parse the document text
+    arangodb::basics::Utf8Helper::DefaultUtf8Helper.getWords(
+        words, text, minWordLength, TRI_FULLTEXT_MAX_WORD_LENGTH, true);
+    // We don't care for the result. If the result is false, words stays
+    // unchanged and is not indexed
+  } else if (value.isArray() && level == 0) {
+    for (auto const& v : VPackArrayIterator(value)) {
+      ExtractWords(words, v, minWordLength, level + 1);
     }
-    catch (...) {
+  } else if (value.isObject() && level == 0) {
+    for (auto const& v : VPackObjectIterator(value)) {
+      ExtractWords(words, v.value, minWordLength, level + 1);
     }
   }
-  return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief walk over a list shape and extract the string values
-////////////////////////////////////////////////////////////////////////////////
-
-static bool ListTextExtractor (VocShaper* shaper, 
-                               TRI_shape_t const* shape, 
-                               char const* shapedJson, 
-                               uint64_t length, 
-                               void* data) {
-  if (shape->_type == TRI_SHAPE_ARRAY) {
-    // a sub-object
-    TRI_IterateShapeDataArray(static_cast<TextExtractorContext*>(data)->_shaper, shape, shapedJson, ArrayTextExtractor, data);
-  }
-  else if (shape->_type == TRI_SHAPE_SHORT_STRING ||
-           shape->_type == TRI_SHAPE_LONG_STRING) {
-
-    char* text;
-    size_t textLength;
-    bool ok = TRI_StringValueShapedJson(shape, shapedJson, &text, &textLength);
-
-    if (ok) {
-      // add string value found
-      try {
-        static_cast<TextExtractorContext*>(data)->_positions->emplace_back(text, textLength);
-      }
-      catch (...) {
-      }
-    }
-  }
-
-  return true;
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                               class FulltextIndex
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
-
-FulltextIndex::FulltextIndex (TRI_idx_iid_t iid,
-                              TRI_document_collection_t* collection,
-                              std::string const& attribute,
-                              int minWordLength) 
-  : Index(iid, collection, std::vector<std::vector<triagens::basics::AttributeName>> { { { attribute, false } } } ),
-    _pid(0),
-    _fulltextIndex(nullptr),
-    _minWordLength(minWordLength > 0 ? minWordLength : 1) {
-  
+FulltextIndex::FulltextIndex(TRI_idx_iid_t iid,
+                             arangodb::LogicalCollection* collection,
+                             std::string const& attribute, int minWordLength)
+    : Index(iid, collection,
+            std::vector<std::vector<arangodb::basics::AttributeName>>{
+                {arangodb::basics::AttributeName(attribute, false)}},
+            false, true),
+      _fulltextIndex(nullptr),
+      _minWordLength(minWordLength > 0 ? minWordLength : 1) {
   TRI_ASSERT(iid != 0);
 
-  // look up the attribute
-  auto shaper = _collection->getShaper();  // ONLY IN INDEX, PROTECTED by RUNTIME
-  _pid = shaper->findOrCreateAttributePathByName(attribute.c_str());
+  _attr = arangodb::basics::StringUtils::split(attribute, ".");
 
-  if (_pid == 0) {
+  _fulltextIndex = TRI_CreateFtsIndex(2048, 1, 1);
+
+  if (_fulltextIndex == nullptr) {
     THROW_ARANGO_EXCEPTION(TRI_ERROR_OUT_OF_MEMORY);
+  }
+}
+
+FulltextIndex::FulltextIndex(TRI_idx_iid_t iid,
+                             arangodb::LogicalCollection* collection,
+                             VPackSlice const& info)
+    : Index(iid, collection, info),
+      _fulltextIndex(nullptr),
+      _minWordLength(TRI_FULLTEXT_MIN_WORD_LENGTH_DEFAULT) {
+  TRI_ASSERT(iid != 0);
+
+  VPackSlice const value = info.get("minLength");
+
+  if (value.isNumber()) {
+    _minWordLength = value.getNumericValue<int>();
+    if (_minWordLength <= 0) { 
+      // The min length cannot be negative.
+      _minWordLength = 1;
+    }
+  } else if (!value.isNone()) {
+    // minLength defined but no number
+    THROW_ARANGO_EXCEPTION_MESSAGE(TRI_ERROR_BAD_PARAMETER,
+                                   "<minLength> must be a number");
+  }
+  _unique = false;
+  _sparse = true;
+  if (_fields.size() != 1) {
+    // We need exactly 1 attribute
+    THROW_ARANGO_EXCEPTION(TRI_ERROR_INTERNAL);
+  }
+  auto& attribute = _fields[0];
+  _attr.reserve(attribute.size());
+  for (auto& a : attribute) {
+    _attr.emplace_back(a.name);
   }
 
   _fulltextIndex = TRI_CreateFtsIndex(2048, 1, 1);
@@ -143,196 +123,177 @@ FulltextIndex::FulltextIndex (TRI_idx_iid_t iid,
   }
 }
 
-FulltextIndex::~FulltextIndex () {
+
+
+FulltextIndex::~FulltextIndex() {
   if (_fulltextIndex != nullptr) {
-    LOG_TRACE("destroying fulltext index");
+    LOG(TRACE) << "destroying fulltext index";
     TRI_FreeFtsIndex(_fulltextIndex);
   }
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-        
-size_t FulltextIndex::memory () const {
+size_t FulltextIndex::memory() const {
   return TRI_MemoryFulltextIndex(_fulltextIndex);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief return a JSON representation of the index
+/// @brief return a VelocyPack representation of the index
 ////////////////////////////////////////////////////////////////////////////////
 
-triagens::basics::Json FulltextIndex::toJson (TRI_memory_zone_t* zone,
-                                              bool withFigures) const {
-  auto json = Index::toJson(zone, withFigures);
-
-  // hard-coded
-  json("unique", triagens::basics::Json(false))
-      ("sparse", triagens::basics::Json(true));
-
-  json("minLength", triagens::basics::Json(zone, static_cast<double>(_minWordLength)));
-
-  return json;
+void FulltextIndex::toVelocyPack(VPackBuilder& builder,
+                                 bool withFigures) const {
+  Index::toVelocyPack(builder, withFigures);
+  builder.add("unique", VPackValue(false));
+  builder.add("sparse", VPackValue(true));
+  builder.add("minLength", VPackValue(_minWordLength));
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return a JSON representation of the index figures
-////////////////////////////////////////////////////////////////////////////////
-        
-triagens::basics::Json FulltextIndex::toJsonFigures (TRI_memory_zone_t* zone) const {
-  triagens::basics::Json json(triagens::basics::Json::Object);
-  json("memory", triagens::basics::Json(static_cast<double>(memory())));
+/// @brief Test if this index matches the definition
+bool FulltextIndex::matchesDefinition(VPackSlice const& info) const {
+  TRI_ASSERT(info.isObject());
+#ifdef ARANGODB_ENABLE_MAINTAINER_MODE
+  VPackSlice typeSlice = info.get("type");
+  TRI_ASSERT(typeSlice.isString());
+  StringRef typeStr(typeSlice);
+  TRI_ASSERT(typeStr == typeName());
+#endif
+  auto value = info.get("id");
+  if (!value.isNone()) {
+    // We already have an id.
+    if(!value.isString()) {
+      // Invalid ID
+      return false;
+    }
+    // Short circuit. If id is correct the index is identical.
+    StringRef idRef(value);
+    return idRef == std::to_string(_iid);
+  }
 
-  return json;
+  value = info.get("minLength");
+  if (value.isNumber()) {
+    int cmp = value.getNumericValue<int>();
+    if (cmp <= 0) {
+      if (_minWordLength != 1) {
+        return false;
+      }
+    } else {
+      if (_minWordLength != cmp) {
+        return false;
+      }
+    }
+  } else if (!value.isNone()) {
+    // Illegal minLength
+    return false;
+  }
+
+
+  value = info.get("fields");
+  if (!value.isArray()) {
+    return false;
+  }
+
+  size_t const n = static_cast<size_t>(value.length());
+  if (n != _fields.size()) {
+    return false;
+  }
+  if (_unique != arangodb::basics::VelocyPackHelper::getBooleanValue(
+                     info, "unique", false)) {
+    return false;
+  }
+  if (_sparse != arangodb::basics::VelocyPackHelper::getBooleanValue(
+                     info, "sparse", true)) {
+    return false;
+  }
+
+  // This check takes ordering of attributes into account.
+  std::vector<arangodb::basics::AttributeName> translate;
+  for (size_t i = 0; i < n; ++i) {
+    translate.clear();
+    VPackSlice f = value.at(i);
+    if (!f.isString()) {
+      // Invalid field definition!
+      return false;
+    }
+    arangodb::StringRef in(f);
+    TRI_ParseAttributeString(in, translate, true);
+    if (!arangodb::basics::AttributeName::isIdentical(_fields[i], translate,
+                                                      false)) {
+      return false;
+    }
+  }
+  return true;
 }
 
-int FulltextIndex::insert (TRI_doc_mptr_t const* doc, 
-                           bool isRollback) {
 
+int FulltextIndex::insert(arangodb::Transaction*, TRI_doc_mptr_t const* doc,
+                          bool isRollback) {
   int res = TRI_ERROR_NO_ERROR;
 
-  TRI_fulltext_wordlist_t* words = wordlist(doc);
-
-  if (words == nullptr) {
+  std::vector<std::string> words = wordlist(doc);
+   
+  if (words.empty()) {
     // TODO: distinguish the cases "empty wordlist" and "out of memory"
-    // LOG_WARNING("could not build wordlist");
+    // LOG(WARN) << "could not build wordlist";
     return res;
   }
 
-  if (words->_numWords > 0) {
-    // TODO: use status codes
-    if (! TRI_InsertWordsFulltextIndex(_fulltextIndex, (TRI_fulltext_doc_t) ((uintptr_t) doc), words)) {
-      LOG_ERROR("adding document to fulltext index failed");
-      res = TRI_ERROR_INTERNAL;
-    }
+  // TODO: use status codes
+  if (!TRI_InsertWordsFulltextIndex(
+          _fulltextIndex, (TRI_fulltext_doc_t)((uintptr_t)doc), words)) {
+    LOG(ERR) << "adding document to fulltext index failed";
+    res = TRI_ERROR_INTERNAL;
   }
-
-  TRI_FreeWordlistFulltextIndex(words);
-
   return res;
 }
-         
-int FulltextIndex::remove (TRI_doc_mptr_t const* doc, 
-                           bool) {
-  TRI_DeleteDocumentFulltextIndex(_fulltextIndex, (TRI_fulltext_doc_t) ((uintptr_t) doc));
+
+int FulltextIndex::remove(arangodb::Transaction*, TRI_doc_mptr_t const* doc,
+                          bool) {
+  TRI_DeleteDocumentFulltextIndex(_fulltextIndex,
+                                  (TRI_fulltext_doc_t)((uintptr_t)doc));
 
   return TRI_ERROR_NO_ERROR;
 }
 
-int FulltextIndex::cleanup () {
-  LOG_TRACE("fulltext cleanup called");
+int FulltextIndex::unload() {
+  TRI_TruncateFulltextIndex(_fulltextIndex);
+  return TRI_ERROR_NO_ERROR;
+}
+
+int FulltextIndex::cleanup() {
+  LOG(TRACE) << "fulltext cleanup called";
 
   int res = TRI_ERROR_NO_ERROR;
 
   // check whether we should do a cleanup at all
-  if (! TRI_CompactFulltextIndex(_fulltextIndex)) {
+  if (!TRI_CompactFulltextIndex(_fulltextIndex)) {
     res = TRI_ERROR_INTERNAL;
   }
 
   return res;
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   private methods
-// -----------------------------------------------------------------------------
-
 ////////////////////////////////////////////////////////////////////////////////
 /// @brief callback function called by the fulltext index to determine the
 /// words to index for a specific document
 ////////////////////////////////////////////////////////////////////////////////
 
-TRI_fulltext_wordlist_t* FulltextIndex::wordlist (TRI_doc_mptr_t const* document) {
-  TRI_shaped_json_t shaped;
-  TRI_shaped_json_t shapedJson;
-  TRI_shape_t const* shape;
+std::vector<std::string> FulltextIndex::wordlist(
+    TRI_doc_mptr_t const* document) {
+  std::vector<std::string> words;
+  try {
+    VPackSlice const slice(document->vpack());
+    VPackSlice const value = slice.get(_attr);
 
-  // extract the shape
-  auto shaper = _collection->getShaper();
-
-  TRI_EXTRACT_SHAPED_JSON_MARKER(shaped, document->getDataPtr());  // ONLY IN INDEX, PROTECTED by RUNTIME
-  bool ok = shaper->extractShapedJson(&shaped, 0, _pid, &shapedJson, &shape);  // ONLY IN INDEX, PROTECTED by RUNTIME
-
-  if (! ok || shape == nullptr) {
-    return nullptr;
-  }
-  
-  TRI_vector_string_t* words;
-
-  // extract the string value for the indexed attribute
-  if (shape->_type == TRI_SHAPE_SHORT_STRING || shape->_type == TRI_SHAPE_LONG_STRING) {
-    char* text;
-    size_t textLength;
-    ok = TRI_StringValueShapedJson(shape, shapedJson._data.data, &text, &textLength);
-
-    if (! ok) {
-      return nullptr;
+    if (!value.isString() && !value.isArray() && !value.isObject()) {
+      // Invalid Input
+      return words;
     }
 
-    // parse the document text
-    words = TRI_get_words(text, textLength, (size_t) _minWordLength, (size_t) TRI_FULLTEXT_MAX_WORD_LENGTH, true);
+    ExtractWords(words, value, _minWordLength, 0);
+  } catch (...) {
+    // Backwards compatibility
+    // The pre-vpack impl. did just ignore all errors and returned nulltpr
+    return words;
   }
-  else if (shape->_type == TRI_SHAPE_ARRAY) {
-    std::vector<std::pair<char const*, size_t>> values;
-    TextExtractorContext context{ &values, shaper };
-    TRI_IterateShapeDataArray(shaper, shape, shapedJson._data.data, ArrayTextExtractor, &context);
-  
-    words = nullptr; 
-    for (auto const& it : values) {
-      if (! TRI_get_words(words, it.first, it.second, (size_t) _minWordLength, (size_t) TRI_FULLTEXT_MAX_WORD_LENGTH, true)) {
-        if (words != nullptr) {
-          TRI_FreeVectorString(TRI_UNKNOWN_MEM_ZONE, words);
-        }
-        return nullptr;
-      }
-    }
-  }
-  else if (shape->_type == TRI_SHAPE_LIST ||
-           shape->_type == TRI_SHAPE_HOMOGENEOUS_LIST ||
-           shape->_type == TRI_SHAPE_HOMOGENEOUS_SIZED_LIST) {
-    std::vector<std::pair<char const*, size_t>> values;
-    TextExtractorContext context{ &values, shaper };
-    TRI_IterateShapeDataList(shaper, shape, shapedJson._data.data, ListTextExtractor, &context);
-  
-    words = nullptr; 
-    for (auto const& it : values) {
-      if (! TRI_get_words(words, it.first, it.second, (size_t) _minWordLength, (size_t) TRI_FULLTEXT_MAX_WORD_LENGTH, true)) {
-        if (words != nullptr) {
-          TRI_FreeVectorString(TRI_UNKNOWN_MEM_ZONE, words);
-        }
-        return nullptr;
-      }
-    }
-  }
-  else {
-    words = nullptr;
-  }
-
-  if (words == nullptr) {
-    return nullptr;
-  }
-
-  TRI_fulltext_wordlist_t* wordlist = TRI_CreateWordlistFulltextIndex(words->_buffer, words->_length);
-
-  if (wordlist == nullptr) {
-    TRI_FreeVectorString(TRI_UNKNOWN_MEM_ZONE, words);
-    return nullptr;
-  }
-
-  // this really is a hack, but it works well:
-  // make the word list vector think it's empty and free it
-  // this does not free the word list, that we have already over the result
-  words->_length = 0;
-  words->_buffer = nullptr;
-  TRI_FreeVectorString(TRI_UNKNOWN_MEM_ZONE, words);
-
-  return wordlist;
+  return words;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief Aql, item block manager
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,48 +19,23 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2012-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "AqlItemBlockManager.h"
 #include "Aql/AqlItemBlock.h"
 
-using namespace triagens::aql;
+using namespace arangodb::aql;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                        constructors / destructors
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief create the manager
-////////////////////////////////////////////////////////////////////////////////
+AqlItemBlockManager::AqlItemBlockManager() : _last(nullptr) {}
 
-AqlItemBlockManager::AqlItemBlockManager ()
-  : _last(nullptr) {
-
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief destroy the manager
-////////////////////////////////////////////////////////////////////////////////
+AqlItemBlockManager::~AqlItemBlockManager() { delete _last; }
 
-AqlItemBlockManager::~AqlItemBlockManager () {
-  delete _last;
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
 /// @brief request a block with the specified size
-////////////////////////////////////////////////////////////////////////////////
-
-AqlItemBlock* AqlItemBlockManager::requestBlock (size_t nrItems, 
-                                                 RegisterId nrRegs) {
-  if (_last != nullptr &&
-      _last->size() == nrItems &&
+AqlItemBlock* AqlItemBlockManager::requestBlock(size_t nrItems,
+                                                RegisterId nrRegs) {
+  if (_last != nullptr && _last->size() == nrItems &&
       _last->getNrRegs() == nrRegs) {
     auto block = _last;
     // don't hand out the same block next time
@@ -77,11 +48,8 @@ AqlItemBlock* AqlItemBlockManager::requestBlock (size_t nrItems,
   return new AqlItemBlock(nrItems, nrRegs);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 /// @brief return a block to the manager
-////////////////////////////////////////////////////////////////////////////////
-
-void AqlItemBlockManager::returnBlock (AqlItemBlock*& block) {
+void AqlItemBlockManager::returnBlock(AqlItemBlock*& block) {
   TRI_ASSERT(block != nullptr);
   block->destroy();
 
@@ -89,12 +57,3 @@ void AqlItemBlockManager::returnBlock (AqlItemBlock*& block) {
   _last = block;
   block = nullptr;
 }
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

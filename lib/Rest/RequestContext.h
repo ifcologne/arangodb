@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief request context
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,101 +19,34 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ARANGODB_REST_REQUEST_CONTEXT_H
 #define ARANGODB_REST_REQUEST_CONTEXT_H 1
 
 #include "Basics/Common.h"
-#include "Rest/RequestUser.h"
+
 #include "Rest/HttpRequest.h"
 #include "Rest/HttpResponse.h"
 
-namespace triagens {
-  namespace rest {
+namespace arangodb {
+class GeneralRequest;
 
-    class HttpRequest;
+class RequestContext {
+  RequestContext(const RequestContext&) = delete;
+  RequestContext& operator=(const RequestContext&) = delete;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                              class RequestContext
-// -----------------------------------------------------------------------------
+ public:
+  RequestContext(GeneralRequest* request) : _request(request) {}
+  virtual ~RequestContext() {}
 
-    class RequestContext {
+ public:
+  virtual rest::ResponseCode authenticate() = 0;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+ protected:
+  GeneralRequest* _request;
+};
 
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief create the request context
-////////////////////////////////////////////////////////////////////////////////
-
-        RequestContext (HttpRequest* request) :
-          _request(request) {
-        }
-
-        virtual ~RequestContext () {
-        }
-
-    private:
-
-        RequestContext (const RequestContext&);
-        RequestContext& operator= (const RequestContext&);
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-      public:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief get request user
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual RequestUser* getRequestUser () {
-          return nullptr;
-        }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief return authentication realm
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual char const* getRealm () const = 0;
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief authenticate user
-////////////////////////////////////////////////////////////////////////////////
-
-        virtual HttpResponse::HttpResponseCode authenticate () = 0;
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                 private variables
-// -----------------------------------------------------------------------------
-
-      protected:
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief the request of the context
-////////////////////////////////////////////////////////////////////////////////
-
-        HttpRequest* _request;
-
-    };
-
-  }
 }
 
 #endif
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:

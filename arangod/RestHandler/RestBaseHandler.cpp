@@ -1,11 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief default handler for error handling and json in-/output
-///
-/// @file
-///
 /// DISCLAIMER
 ///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
+/// Copyright 2014-2016 ArangoDB GmbH, Cologne, Germany
 /// Copyright 2004-2014 triAGENS GmbH, Cologne, Germany
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,76 +19,129 @@
 /// Copyright holder is ArangoDB GmbH, Cologne, Germany
 ///
 /// @author Dr. Frank Celler
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2011-2013, triAGENS GmbH, Cologne, Germany
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "RestBaseHandler.h"
 
-#include "Basics/logging.h"
-#include "Basics/tri-strings.h"
+#include <velocypack/Builder.h>
+#include <velocypack/Dumper.h>
+#include <velocypack/Options.h>
+#include <velocypack/velocypack-aliases.h>
+
+#include "Basics/StaticStrings.h"
 #include "Basics/StringUtils.h"
+#include "Meta/conversion.h"
 #include "Rest/HttpRequest.h"
 #include "Rest/HttpResponse.h"
+#include "Utils/TransactionContext.h"
 
-using namespace std;
-using namespace triagens::basics;
-using namespace triagens::rest;
-using namespace triagens::admin;
+using namespace arangodb;
+using namespace arangodb::basics;
+using namespace arangodb::rest;
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                      constructors and destructors
-// -----------------------------------------------------------------------------
+RestBaseHandler::RestBaseHandler(GeneralRequest* request,
+                                 GeneralResponse* response)
+    : RestHandler(request, response) {}
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief constructor
+/// @brief parses the body as VelocyPack
 ////////////////////////////////////////////////////////////////////////////////
 
-RestBaseHandler::RestBaseHandler (HttpRequest* request)
-  : HttpHandler(request) {
+std::shared_ptr<VPackBuilder> RestBaseHandler::parseVelocyPackBody(
+    VPackOptions const* options, bool& success) {
+  try {
+    success = true;
+    return _request->toVelocyPackBuilderPtr(options);
+  } catch (VPackException const& e) {
+    std::string errmsg("VPackError error: ");
+    errmsg.append(e.what());
+    generateError(rest::ResponseCode::BAD, TRI_ERROR_HTTP_CORRUPTED_JSON,
+                  errmsg);
+  }
+  success = false;
+  return std::make_shared<VPackBuilder>();
 }
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                   Handler methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// {@inheritDoc}
-////////////////////////////////////////////////////////////////////////////////
-
-void RestBaseHandler::handleError (Exception const& ex) {
-  generateError(HttpResponse::responseCode(ex.code()),
-                ex.code(),
-                ex.what());
-}
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                    public methods
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates a result from JSON
-////////////////////////////////////////////////////////////////////////////////
-
-void RestBaseHandler::generateResult (TRI_json_t const* json) {
-  generateResult(HttpResponse::OK, json);
+void RestBaseHandler::handleError(Exception const& ex) {
+  generateError(GeneralResponse::responseCode(ex.code()), ex.code(), ex.what());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief generates a result from JSON
+/// @brief generates a result from VelocyPack
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestBaseHandler::generateResult (HttpResponse::HttpResponseCode code,
-                                      TRI_json_t const* json) {
-  _response = createResponse(code);
-  _response->setContentType("application/json; charset=utf-8");
+template<typename Payload>
+void RestBaseHandler::generateResult(rest::ResponseCode code,
+                                     Payload&& payload) {
+  resetResponse(code);
+  VPackOptions options(VPackOptions::Defaults);
+  options.escapeUnicode = true;
+  writeResult(std::forward<Payload>(payload), options);
+}
 
-  int res = TRI_StringifyJson(_response->body().stringBuffer(), json);
+template<typename Payload>
+void RestBaseHandler::generateResult(rest::ResponseCode code,
+                                     Payload&& payload,
+                                     VPackOptions const* options) {
+  resetResponse(code);
+  VPackOptions tmpoptions(*options);
+  tmpoptions.escapeUnicode = true;
+  writeResult(std::forward<Payload>(payload), tmpoptions);
+}
+////////////////////////////////////////////////////////////////////////////////
+/// @brief generates a result from VelocyPack
+////////////////////////////////////////////////////////////////////////////////
 
-  if (res != TRI_ERROR_NO_ERROR) {
-    generateError(HttpResponse::SERVER_ERROR,
-                  TRI_ERROR_INTERNAL,
-                  "cannot generate output");
+template<typename Payload>
+void RestBaseHandler::generateResult(
+    rest::ResponseCode code, Payload&& payload,
+    std::shared_ptr<TransactionContext> context) {
+  resetResponse(code);
+  writeResult(std::forward<Payload>(payload), *(context->getVPackOptionsForDump()));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief generates an error
+////////////////////////////////////////////////////////////////////////////////
+
+void RestBaseHandler::generateError(rest::ResponseCode code, int errorCode) {
+  char const* message = TRI_errno_string(errorCode);
+
+  if (message != nullptr) {
+    generateError(code, errorCode, std::string(message));
+  } else {
+    generateError(code, errorCode, std::string("unknown error"));
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// @brief generates an error
+////////////////////////////////////////////////////////////////////////////////
+
+void RestBaseHandler::generateError(rest::ResponseCode code, int errorCode,
+                                    std::string const& message) {
+  resetResponse(code);
+
+  VPackBuffer<uint8_t> buffer;
+  VPackBuilder builder(buffer);
+  try {
+    builder.add(VPackValue(VPackValueType::Object));
+    builder.add("error", VPackValue(true));
+    if (message.empty()) {
+      // prevent empty error messages
+      builder.add("errorMessage", VPackValue(TRI_errno_string(errorCode)));
+    } else {
+      builder.add("errorMessage", VPackValue(message));
+    }
+    builder.add("code", VPackValue(static_cast<int>(code)));
+    builder.add("errorNum", VPackValue(errorCode));
+    builder.close();
+
+    VPackOptions options(VPackOptions::Defaults);
+    options.escapeUnicode = true;
+    writeResult(std::move(buffer), options);
+  } catch (...) {
+    // Building the error response failed
   }
 }
 
@@ -100,65 +149,48 @@ void RestBaseHandler::generateResult (HttpResponse::HttpResponseCode code,
 /// @brief generates a cancel message
 ////////////////////////////////////////////////////////////////////////////////
 
-void RestBaseHandler::generateCanceled () {
-  TRI_json_t* json = TRI_CreateObjectJson(TRI_CORE_MEM_ZONE);
-  char* msg = TRI_DuplicateString("request canceled");
-
-  TRI_Insert3ObjectJson(TRI_CORE_MEM_ZONE, json,
-                       "error", TRI_CreateBooleanJson(TRI_CORE_MEM_ZONE, true));
-
-  TRI_Insert3ObjectJson(TRI_CORE_MEM_ZONE, json,
-                       "code", TRI_CreateNumberJson(TRI_CORE_MEM_ZONE, (int32_t) HttpResponse::REQUEST_TIMEOUT));
-
-  TRI_Insert3ObjectJson(TRI_CORE_MEM_ZONE, json,
-                       "errorNum", TRI_CreateNumberJson(TRI_CORE_MEM_ZONE, (int32_t) TRI_ERROR_REQUEST_CANCELED));
-
-  TRI_Insert3ObjectJson(TRI_CORE_MEM_ZONE, json,
-                       "errorMessage", TRI_CreateStringJson(TRI_CORE_MEM_ZONE, msg, strlen(msg)));
-
-  generateResult(HttpResponse::REQUEST_TIMEOUT, json);
-
-  TRI_FreeJson(TRI_CORE_MEM_ZONE, json);
+void RestBaseHandler::generateCanceled() {
+  return generateError(rest::ResponseCode::GONE, TRI_ERROR_REQUEST_CANCELED);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates an error
-////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+/// @brief writes volocypack or json to response
+//////////////////////////////////////////////////////////////////////////////
 
-void RestBaseHandler::generateError (HttpResponse::HttpResponseCode code,
-                                     int errorCode) {
-  char const* message = TRI_errno_string(errorCode);
-
-  if (message) {
-    generateError(code, errorCode, string(message));
-  }
-  else {
-    generateError(code, errorCode, string("unknown error"));
+template<typename Payload>
+void RestBaseHandler::writeResult(Payload&& payload,
+                                  VPackOptions const& options) {
+  try {
+    TRI_ASSERT(options.escapeUnicode);
+    if (_request != nullptr) {
+      _response->setContentType(_request->contentTypeResponse());
+    }
+    _response->setPayload(std::forward<Payload>(payload), true, options);
+  } catch (basics::Exception const& ex) {
+    generateError(GeneralResponse::responseCode(ex.code()), ex.code(), ex.what());
+  } catch (std::exception const& ex) {
+    generateError(rest::ResponseCode::SERVER_ERROR, TRI_ERROR_INTERNAL,
+                  ex.what());
+  } catch (...) {
+    generateError(rest::ResponseCode::SERVER_ERROR, TRI_ERROR_INTERNAL,
+                  "cannot generate output");
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief generates an error
-////////////////////////////////////////////////////////////////////////////////
+//TODO -- rather move code to header (slower linking) or remove templates
+template void RestBaseHandler::generateResult<VPackBuffer<uint8_t>>(rest::ResponseCode, VPackBuffer<uint8_t>&&);
+template void RestBaseHandler::generateResult<VPackSlice>(rest::ResponseCode, VPackSlice&&);
+template void RestBaseHandler::generateResult<VPackSlice&>(rest::ResponseCode, VPackSlice&);
 
-void RestBaseHandler::generateError (HttpResponse::HttpResponseCode code, int errorCode, string const& message) {
-  _response = createResponse(code);
-  _response->setContentType("application/json; charset=utf-8");
+template void RestBaseHandler::generateResult<VPackBuffer<uint8_t>>(rest::ResponseCode, VPackBuffer<uint8_t>&&, VPackOptions const*);
+template void RestBaseHandler::generateResult<VPackSlice>(rest::ResponseCode, VPackSlice&&, VPackOptions const*);
+template void RestBaseHandler::generateResult<VPackSlice&>(rest::ResponseCode, VPackSlice&, VPackOptions const*);
 
-  _response->body().appendText("{\"error\":true,\"errorMessage\":\"");
-  _response->body().appendText(StringUtils::escapeUnicode(message));
-  _response->body().appendText("\",\"code\":");
-  _response->body().appendInteger(code);
-  _response->body().appendText(",\"errorNum\":");
-  _response->body().appendInteger(errorCode);
-  _response->body().appendText("}");
-}
+template void RestBaseHandler::generateResult<VPackBuffer<uint8_t>>(rest::ResponseCode, VPackBuffer<uint8_t>&&, std::shared_ptr<arangodb::TransactionContext>);
+template void RestBaseHandler::generateResult<VPackSlice>(rest::ResponseCode, VPackSlice&&, std::shared_ptr<arangodb::TransactionContext>);
+template void RestBaseHandler::generateResult<VPackSlice&>(rest::ResponseCode, VPackSlice&, std::shared_ptr<arangodb::TransactionContext>);
 
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
+template void RestBaseHandler::writeResult<VPackBuffer<uint8_t>>(VPackBuffer<uint8_t>&& payload, VPackOptions const&);
+template void RestBaseHandler::writeResult<VPackSlice>(VPackSlice&& payload, VPackOptions const&);
+template void RestBaseHandler::writeResult<VPackSlice&>(VPackSlice& payload, VPackOptions const&);
+template void RestBaseHandler::writeResult<VPackSlice const&>(VPackSlice const& payload, VPackOptions const&);

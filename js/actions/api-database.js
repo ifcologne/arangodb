@@ -1,152 +1,39 @@
-/*jshint strict: false */
-/*global ArangoAgency */
+/* jshint strict: false */
+/* global ArangoAgency */
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief database management
-///
-/// @file
-///
-/// DISCLAIMER
-///
-/// Copyright 2014 ArangoDB GmbH, Cologne, Germany
-///
-/// Licensed under the Apache License, Version 2.0 (the "License");
-/// you may not use this file except in compliance with the License.
-/// You may obtain a copy of the License at
-///
-///     http://www.apache.org/licenses/LICENSE-2.0
-///
-/// Unless required by applicable law or agreed to in writing, software
-/// distributed under the License is distributed on an "AS IS" BASIS,
-/// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-/// See the License for the specific language governing permissions and
-/// limitations under the License.
-///
-/// Copyright holder is ArangoDB GmbH, Cologne, Germany
-///
-/// @author Jan Steemann
-/// @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
-/// @author Copyright 2013, triAGENS GmbH, Cologne, Germany
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief database management
+// /
+// / @file
+// /
+// / DISCLAIMER
+// /
+// / Copyright 2014 ArangoDB GmbH, Cologne, Germany
+// /
+// / Licensed under the Apache License, Version 2.0 (the "License")
+// / you may not use this file except in compliance with the License.
+// / You may obtain a copy of the License at
+// /
+// /     http://www.apache.org/licenses/LICENSE-2.0
+// /
+// / Unless required by applicable law or agreed to in writing, software
+// / distributed under the License is distributed on an "AS IS" BASIS,
+// / WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// / See the License for the specific language governing permissions and
+// / limitations under the License.
+// /
+// / Copyright holder is ArangoDB GmbH, Cologne, Germany
+// /
+// / @author Jan Steemann
+// / @author Copyright 2014, ArangoDB GmbH, Cologne, Germany
+// / @author Copyright 2013, triAGENS GmbH, Cologne, Germany
+// //////////////////////////////////////////////////////////////////////////////
 
-var arangodb = require("org/arangodb");
-var actions = require("org/arangodb/actions");
-var cluster = require("org/arangodb/cluster");
+var arangodb = require('@arangodb');
+var actions = require('@arangodb/actions');
+var cluster = require('@arangodb/cluster');
 
-var API = "_api/database";
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                  public functions
-// -----------------------------------------------------------------------------
-
-////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_get_api_database_list
-/// @brief retrieves a list of all existing databases
-///
-/// @RESTHEADER{GET /_api/database, List of databases}
-///
-/// @RESTDESCRIPTION
-/// Retrieves the list of all existing databases
-///
-/// **Note**: retrieving the list of databases is only possible from within the *_system* database.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned if the list of database was compiled successfully.
-///
-/// @RESTRETURNCODE{400}
-/// is returned if the request is invalid.
-///
-/// @RESTRETURNCODE{403}
-/// is returned if the request was not executed in the *_system* database.
-///
-/// @EXAMPLES
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestDatabaseGet}
-///     var url = "/_api/database";
-///     var response = logCurlRequest('GET', url);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_get_api_database_user
-/// @brief retrieves a list of all databases the current user can access
-///
-/// @RESTHEADER{GET /_api/database/user, List of accessible databases }
-///
-/// @RESTDESCRIPTION
-/// Retrieves the list of all databases the current user can access without
-/// specifying a different username or password.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned if the list of database was compiled successfully.
-///
-/// @RESTRETURNCODE{400}
-/// is returned if the request is invalid.
-///
-/// @EXAMPLES
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestDatabaseGetUser}
-///     var url = "/_api/database/user";
-///     var response = logCurlRequest('GET', url);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_get_api_database_current
-/// @brief retrieves information about the current database
-///
-/// @RESTHEADER{GET /_api/database/current, Information of the database}
-///
-/// @RESTDESCRIPTION
-/// Retrieves information about the current database
-///
-/// The response is a JSON object with the following attributes:
-///
-/// - *name*: the name of the current database
-///
-/// - *id*: the id of the current database
-///
-/// - *path*: the filesystem path of the current database
-///
-/// - *isSystem*: whether or not the current database is the *_system* database
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned if the information was retrieved successfully.
-///
-/// @RESTRETURNCODE{400}
-/// is returned if the request is invalid.
-///
-/// @RESTRETURNCODE{404}
-/// is returned if the database could not be found.
-///
-/// @EXAMPLES
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestDatabaseGetInfo}
-///     var url = "/_api/database/current";
-///     var response = logCurlRequest('GET', url);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
+var API = '_api/database';
 
 function get_api_database (req, res) {
   if (req.suffix.length > 1) {
@@ -154,168 +41,54 @@ function get_api_database (req, res) {
     return;
   }
 
+  var dbname = arangodb.db._name();
+  var isSystem = arangodb.db._isSystem();
+  var path = arangodb.db._path();
+  var id = arangodb.db._id();
+
+  arangodb.db._useDatabase('_system');
+
   var result;
   if (req.suffix.length === 0) {
     // list of all databases
-    result = arangodb.db._listDatabases();
-  }
-  else {
+    result = arangodb.db._databases();
+  } else {
     if (req.suffix[0] === 'user') {
       // fetch all databases for the current user
       // note: req.user may be null if authentication is turned off
-      result = arangodb.db._listDatabases(req.user);
-    }
-    else if (req.suffix[0] === 'current') {
+      if (req.user === null) {
+        result = arangodb.db._databases();
+      } else {
+        result = arangodb.db._databases(req.user);
+      }
+    } else if (req.suffix[0] === 'current') {
       if (cluster.isCoordinator()) {
         // fetch database information from Agency
-        var values = ArangoAgency.get("Plan/Databases/" + encodeURIComponent(req.database), false);
-        var dbEntry = values["Plan/Databases/" + encodeURIComponent(req.database)];
+        var values = ArangoAgency.get('Plan/Databases/' + encodeURIComponent(req.database), false);
+        var dbEntry = values.arango.Plan.Databases[encodeURIComponent(req.database)];
         result = {
           name: dbEntry.name,
           id: dbEntry.id,
-          path: "none",
+          path: 'none',
           isSystem: (dbEntry.name.substr(0, 1) === '_')
         };
-      }
-      else {
+      } else {
         // information about the current database
         result = {
-          name: arangodb.db._name(),
-          id: arangodb.db._id(),
-          path: arangodb.db._path(),
-          isSystem: arangodb.db._isSystem()
+          name: dbname,
+          id: id,
+          path: path,
+          isSystem: isSystem
         };
       }
-    }
-    else {
+    } else {
       actions.resultBad(req, res, arangodb.ERROR_HTTP_BAD_PARAMETER);
       return;
     }
   }
 
-  actions.resultOk(req, res, actions.HTTP_OK, { result : result });
+  actions.resultOk(req, res, actions.HTTP_OK, { result: result });
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_get_api_database_new
-/// @brief creates a new database
-///
-/// @RESTHEADER{POST /_api/database, Create database}
-///
-/// @RESTBODYPARAM{name,string,required,string}
-/// Has to contain a valid database name.
-///
-/// @RESTBODYPARAM{username,string,optional,string}
-/// The user name as a string.
-/// If *users* is not specified or does not contain any users, a default user
-/// *root* will be created with an empty string password. This ensures that the
-/// new database will be accessible after it is created.
-///
-/// @RESTBODYPARAM{passwd,string,optional,string}
-/// The user password as a string. If not specified, it will default to an empty string.
-///
-/// @RESTBODYPARAM{active,boolean,optional,}
-/// A Flag indicating whether the user account should be activated or not.
-/// The default value is *true*.
-///
-/// @RESTBODYPARAM{extra,object,optional,}
-/// A JSON object with extra user information. The data contained in *extra*
-///  will be stored for the user but not be interpreted further by ArangoDB.
-///
-/// @RESTBODYPARAM{users,array,optional,JSF_get_api_database_new_USERS}
-/// Has to be a list of user objects to initially create for the new database.
-/// Each user object can contain the following attributes:
-///
-/// @RESTSTRUCT{username,JSF_get_api_database_new_USERS,string,required,string}
-/// Loginname of the user to be created
-///
-/// @RESTSTRUCT{passwd,JSF_get_api_database_new_USERS,string,required,string}
-/// Password for the user
-///
-/// @RESTSTRUCT{active,JSF_get_api_database_new_USERS,boolean,required,}
-/// if *False* the user won't be able to log into the database.
-///
-/// @RESTDESCRIPTION
-/// Creates a new database
-///
-/// The response is a JSON object with the attribute *result* set to *true*.
-///
-/// **Note**: creating a new database is only possible from within the *_system* database.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{201}
-/// is returned if the database was created successfully.
-///
-/// @RESTRETURNCODE{400}
-/// is returned if the request parameters are invalid or if a database with the
-/// specified name already exists.
-///
-/// @RESTRETURNCODE{403}
-/// is returned if the request was not executed in the *_system* database.
-///
-/// @RESTRETURNCODE{409}
-/// is returned if a database with the specified name already exists.
-///
-/// @EXAMPLES
-///
-/// Creating a database named *example*.
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestDatabaseCreate}
-///     var url = "/_api/database";
-///     var name = "example";
-///     try {
-///       db._dropDatabase(name);
-///     }
-///     catch (err) {
-///     }
-///
-///     var data = {
-///       name: name
-///     };
-///     var response = logCurlRequest('POST', url, data);
-///
-///     db._dropDatabase(name);
-///     assert(response.code === 201);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-///
-/// Creating a database named *mydb* with two users.
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestDatabaseCreateUsers}
-///     var url = "/_api/database";
-///     var name = "mydb";
-///     try {
-///       db._dropDatabase(name);
-///     }
-///     catch (err) {
-///     }
-///
-///     var data = {
-///       name: name,
-///       users: [
-///         {
-///           username : "admin",
-///           passwd : "secret",
-///           active: true
-///         },
-///         {
-///           username : "tester",
-///           passwd : "test001",
-///           active: false
-///         }
-///       ]
-///     };
-///     var response = logCurlRequest('POST', url, data);
-///
-///     db._dropDatabase(name);
-///     assert(response.code === 201);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
 
 function post_api_database (req, res) {
   if (req.suffix.length !== 0) {
@@ -344,9 +117,8 @@ function post_api_database (req, res) {
   var users = json.users;
 
   if (users === undefined || users === null) {
-    users = [ ];
-  }
-  else if (! Array.isArray(users)) {
+    users = [];
+  } else if (!Array.isArray(users)) {
     actions.resultBad(req, res, arangodb.ERROR_HTTP_BAD_PARAMETER);
     return;
   }
@@ -355,80 +127,35 @@ function post_api_database (req, res) {
   for (i = 0; i < users.length; ++i) {
     var user = users[i];
     if (typeof user !== 'object' ||
-        ! user.hasOwnProperty('username') ||
-        typeof(user.username) !== 'string') {
+      !user.hasOwnProperty('username') ||
+      typeof (user.username) !== 'string') {
       // bad username
       actions.resultBad(req, res, arangodb.ERROR_HTTP_BAD_PARAMETER);
       return;
     }
 
-    if (! user.hasOwnProperty('passwd')) {
+    if (!user.hasOwnProperty('passwd')) {
       // default to empty string
       users[i].passwd = '';
-    }
-    else if (typeof(user.passwd) !== 'string') {
+    } else if (typeof (user.passwd) !== 'string') {
       // bad password type
       actions.resultBad(req, res, arangodb.ERROR_HTTP_BAD_PARAMETER);
       return;
     }
 
-    if (! user.hasOwnProperty('active')) {
+    if (!user.hasOwnProperty('active')) {
       users[i].active = true;
     }
   }
 
-  var result = arangodb.db._createDatabase(json.name || "", options, users);
+  var result = arangodb.db._createDatabase(json.name || '', options, users);
 
-  var returnCode = (req.compatibility <= 10400 ? actions.HTTP_OK : actions.HTTP_CREATED);
-  actions.resultOk(req, res, returnCode, { result : result });
+  actions.resultOk(req, res, actions.HTTP_CREATED, { result: result });
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @startDocuBlock JSF_get_api_database_delete
-/// @brief drop an existing database
-///
-/// @RESTHEADER{DELETE /_api/database/{database-name}, Drop database}
-///
-/// @RESTURLPARAMETERS
-///
-/// @RESTURLPARAM{database-name,string,required}
-/// The name of the database
-///
-/// @RESTDESCRIPTION
-/// Drops the database along with all data stored in it.
-///
-/// **Note**: dropping a database is only possible from within the *_system* database.
-/// The *_system* database itself cannot be dropped.
-///
-/// @RESTRETURNCODES
-///
-/// @RESTRETURNCODE{200}
-/// is returned if the database was dropped successfully.
-///
-/// @RESTRETURNCODE{400}
-/// is returned if the request is malformed.
-///
-/// @RESTRETURNCODE{403}
-/// is returned if the request was not executed in the *_system* database.
-///
-/// @RESTRETURNCODE{404}
-/// is returned if the database could not be found.
-///
-/// @EXAMPLES
-///
-/// @EXAMPLE_ARANGOSH_RUN{RestDatabaseDrop}
-///     var url = "/_api/database";
-///     var name = "example";
-///
-///     db._createDatabase(name);
-///     var response = logCurlRequest('DELETE', url + '/' + name);
-///
-///     assert(response.code === 200);
-///
-///     logJsonResponse(response);
-/// @END_EXAMPLE_ARANGOSH_RUN
-/// @endDocuBlock
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief was docuBlock JSF_get_api_database_delete
+// //////////////////////////////////////////////////////////////////////////////
 
 function delete_api_database (req, res) {
   if (req.suffix.length !== 1) {
@@ -438,42 +165,30 @@ function delete_api_database (req, res) {
 
   var result = arangodb.db._dropDatabase(req.suffix[0]);
 
-  actions.resultOk(req, res, actions.HTTP_OK, { result : result });
+  actions.resultOk(req, res, actions.HTTP_OK, { result: result });
 }
 
-////////////////////////////////////////////////////////////////////////////////
-/// @brief handles a database request
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+// / @brief handles a database request
+// //////////////////////////////////////////////////////////////////////////////
 
 actions.defineHttp({
-  url : API,
+  url: API,
+  allowUseDatabase: true,
 
-  callback : function (req, res) {
+  callback: function (req, res) {
     try {
       if (req.requestType === actions.GET) {
         get_api_database(req, res);
-      }
-      else if (req.requestType === actions.POST) {
+      } else if (req.requestType === actions.POST) {
         post_api_database(req, res);
-      }
-      else if (req.requestType === actions.DELETE) {
+      } else if (req.requestType === actions.DELETE) {
         delete_api_database(req, res);
-      }
-      else {
+      } else {
         actions.resultUnsupported(req, res);
       }
-    }
-    catch (err) {
+    } catch (err) {
       actions.resultException(req, res, err, undefined, false);
     }
   }
 });
-
-// -----------------------------------------------------------------------------
-// --SECTION--                                                       END-OF-FILE
-// -----------------------------------------------------------------------------
-
-// Local Variables:
-// mode: outline-minor
-// outline-regexp: "/// @brief\\|/// {@inheritDoc}\\|/// @page\\|// --SECTION--\\|/// @\\}"
-// End:
